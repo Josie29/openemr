@@ -1,5 +1,22 @@
 # OpenEMR Development Guide
 
+## Project Context — AgentForge Clinical Co-Pilot
+
+This fork is being extended with an AI Clinical Co-Pilot per `./PRD.md` (Gauntlet AI
+case study — read it before making any architectural or scope decision). Deliverables
+required by the PRD: `./AUDIT.md`, `./USERS.md`, `./ARCHITECTURE.md`.
+
+### Our docs live in `/context/`, not `/docs/`
+
+`/docs/` belongs to upstream OpenEMR (release process, migration notes, etc.) —
+leave it alone. All of *our* AgentForge working docs go in `/context/`: decision
+evidence, analysis, scratch specs, and anything supporting the PRD deliverables
+that isn't itself a deliverable. This keeps our additions cleanly separated from
+the forked repo's own documentation. The root-level PRD deliverables
+(`AUDIT.md`, `USERS.md`, `ARCHITECTURE.md`) stay at repo root where the PRD
+expects them; `/context/` holds the reasoning behind them (e.g.
+`context/persona-analysis.md` backs `USERS.md`).
+
 ## Project Structure
 
 ```
@@ -12,6 +29,7 @@
 /public/           - Static assets
 /docker/           - Docker configurations
 /modules/          - Custom and third-party modules
+/context/          - AgentForge working docs (ours; see Project Context above)
 ```
 
 ## Technology Stack

@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenEMR Patient Data Exposure Map</title>
+<style>
+  :root {
+    color-scheme: light dark;
+
+    /* spacing scale (0.25rem base) */
+    --sp-1: 0.25rem;  --sp-2: 0.5rem;  --sp-3: 0.75rem; --sp-4: 1rem;
+    --sp-5: 1.5rem;   --sp-6: 2rem;    --sp-8: 3rem;
+
+    --radius: 0.625rem;
+    --maxw: 76rem;
+
+    /* light theme tokens */
+    --bg:        #f6f7f9;
+    --surface:   #ffffff;
+    --surface-2: #eef1f5;
+    --border:    #d9dee6;
+    --ink:       #1a2230;
+    --ink-soft:  #566076;
+    --ink-faint: #8b94a6;
+    --accent:    #3457d5;
+
+    --crit:      #c0293a;   --crit-bg:  #fbe9eb;   --crit-line: #e4a3ab;
+    --high:      #b06a00;   --high-bg:  #fbf0dd;   --high-line: #e6c288;
+    --mod:       #2f6d8f;   --mod-bg:   #e5f0f6;   --mod-line:  #a9cbdc;
+    --guard:     #2f7d4f;   --guard-bg: #e6f3ec;   --guard-line:#9fcbb0;
+    --shadow:    0 1px 2px rgba(20,30,50,.06), 0 4px 14px rgba(20,30,50,.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #0e1218;
+      --surface:   #161c26;
+      --surface-2: #1e2632;
+      --border:    #2b3543;
+      --ink:       #e7ecf3;
+      --ink-soft:  #a3adbf;
+      --ink-faint: #6b7688;
+      --accent:    #7d97f4;
+
+      --crit:      #f0808f;   --crit-bg:  #2e1519;   --crit-line: #5c2730;
+      --high:      #e7b25a;   --high-bg:  #2c2210;   --high-line: #574010;
+      --mod:       #7fc0e0;   --mod-bg:   #10222c;   --mod-line:  #234a5c;
+      --guard:     #7fd0a1;   --guard-bg: #10251a;   --guard-line:#204a33;
+      --shadow:    0 1px 2px rgba(0,0,0,.3), 0 6px 18px rgba(0,0,0,.35);
+    }
+  }
+  /* explicit theme toggle overrides (viewer stamps data-theme on root) */
+  :root[data-theme="light"] { --bg:#f6f7f9; --surface:#fff; --surface-2:#eef1f5; --border:#d9dee6; --ink:#1a2230; --ink-soft:#566076; --ink-faint:#8b94a6; --accent:#3457d5; --crit:#c0293a; --crit-bg:#fbe9eb; --crit-line:#e4a3ab; --high:#b06a00; --high-bg:#fbf0dd; --high-line:#e6c288; --mod:#2f6d8f; --mod-bg:#e5f0f6; --mod-line:#a9cbdc; --guard:#2f7d4f; --guard-bg:#e6f3ec; --guard-line:#9fcbb0; }
+  :root[data-theme="dark"]  { --bg:#0e1218; --surface:#161c26; --surface-2:#1e2632; --border:#2b3543; --ink:#e7ecf3; --ink-soft:#a3adbf; --ink-faint:#6b7688; --accent:#7d97f4; --crit:#f0808f; --crit-bg:#2e1519; --crit-line:#5c2730; --high:#e7b25a; --high-bg:#2c2210; --high-line:#574010; --mod:#7fc0e0; --mod-bg:#10222c; --mod-line:#234a5c; --guard:#7fd0a1; --guard-bg:#10251a; --guard-line:#204a33; }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+    font-size: 1rem;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: var(--sp-5) var(--sp-4) var(--sp-8); }
+
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
+  .mono { background: var(--surface-2); padding: 0.05em 0.35em; border-radius: 0.3rem; color: var(--ink); }
+
+  header.page { margin-bottom: var(--sp-6); }
+  .eyebrow { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
+  h1 { font-size: clamp(1.6rem, 4vw, 2.3rem); line-height: 1.15; margin: var(--sp-2) 0 var(--sp-3); letter-spacing: -0.01em; }
+  .lede { color: var(--ink-soft); font-size: 1.05rem; max-width: 54rem; margin: 0; }
+  .meta-line { margin-top: var(--sp-4); font-size: 0.82rem; color: var(--ink-faint); display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+
+  section { margin-top: var(--sp-8); }
+  h2 { font-size: 1.35rem; letter-spacing: -0.01em; margin: 0 0 var(--sp-2); display: flex; align-items: baseline; gap: var(--sp-3); }
+  h2 .num { font-size: 0.8rem; color: var(--ink-faint); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .section-note { color: var(--ink-soft); margin: 0 0 var(--sp-5); max-width: 56rem; font-size: 0.95rem; }
+
+  /* stat tiles */
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-3); }
+  @media (min-width: 40rem) { .stats { grid-template-columns: repeat(5, 1fr); } }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-4); box-shadow: var(--shadow); }
+  .tile .big { font-size: 1.9rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .tile .lbl { margin-top: var(--sp-2); font-size: 0.78rem; color: var(--ink-soft); }
+
+  /* tier columns */
+  .tiers { display: grid; grid-template-columns: 1fr; gap: var(--sp-4); }
+  @media (min-width: 52rem) { .tiers { grid-template-columns: repeat(3, 1fr); } }
+  .tier { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); background: var(--surface); display: flex; flex-direction: column; }
+  .tier-head { padding: var(--sp-4); border-bottom: 1px solid var(--border); }
+  .tier-head .tag { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .tier-head h3 { margin: var(--sp-1) 0 0; font-size: 1.05rem; }
+  .tier-head p { margin: var(--sp-2) 0 0; font-size: 0.82rem; color: var(--ink-soft); }
+  .tier.crit  { border-top: 3px solid var(--crit); }
+  .tier.high  { border-top: 3px solid var(--high); }
+  .tier.mod   { border-top: 3px solid var(--mod); }
+  .tier.crit .tag  { color: var(--crit); }
+  .tier.high .tag  { color: var(--high); }
+  .tier.mod  .tag  { color: var(--mod); }
+  .tier ul { list-style: none; margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+  .tier li { font-size: 0.86rem; }
+  .tier li b { display: block; font-weight: 640; }
+  .tier li span { color: var(--ink-soft); }
+
+  /* domain grid */
+  .domains { display: grid; grid-template-columns: 1fr; gap: var(--sp-3); }
+  @media (min-width: 40rem) { .domains { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 62rem) { .domains { grid-template-columns: repeat(3, 1fr); } }
+  .domain { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-4); box-shadow: var(--shadow); }
+  .domain h4 { margin: 0 0 var(--sp-1); font-size: 0.98rem; display: flex; align-items: center; gap: var(--sp-2); }
+  .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; flex: none; }
+  .domain .tables { margin: var(--sp-2) 0 0; font-size: 0.8rem; color: var(--ink-soft); }
+  .domain .tables .mono { font-size: 0.76rem; }
+  .domain .phi { margin-top: var(--sp-3); font-size: 0.8rem; color: var(--ink); }
+  .domain .phi b { color: var(--crit); font-weight: 640; }
+
+  /* egress surfaces table */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; min-width: 44rem; background: var(--surface); font-size: 0.86rem; }
+  th, td { text-align: left; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 0.15em 0.5em; border-radius: 0.4rem; letter-spacing: 0.03em; white-space: nowrap; }
+  .pill.crit { background: var(--crit-bg); color: var(--crit); border: 1px solid var(--crit-line); }
+  .pill.high { background: var(--high-bg); color: var(--high); border: 1px solid var(--high-line); }
+  .pill.mod  { background: var(--mod-bg);  color: var(--mod);  border: 1px solid var(--mod-line); }
+
+  /* guardrail callout */
+  .callout { background: var(--guard-bg); border: 1px solid var(--guard-line); border-left: 4px solid var(--guard); border-radius: var(--radius); padding: var(--sp-5); }
+  .callout h3 { margin: 0 0 var(--sp-2); color: var(--guard); font-size: 1.05rem; }
+  .callout p { margin: 0 0 var(--sp-3); font-size: 0.9rem; }
+  .callout ul { margin: 0; padding-left: var(--sp-5); font-size: 0.86rem; color: var(--ink-soft); }
+  .callout li { margin-bottom: var(--sp-1); }
+
+  /* cross-check */
+  .xcheck { display: grid; grid-template-columns: 1fr; gap: var(--sp-3); }
+  @media (min-width: 52rem) { .xcheck { grid-template-columns: repeat(3, 1fr); } }
+  .xcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-4); box-shadow: var(--shadow); }
+  .xcard h4 { margin: 0 0 var(--sp-2); font-size: 0.9rem; display: flex; align-items: center; gap: var(--sp-2); }
+  .xcard h4 .ic { font-size: 1rem; }
+  .xcard ul { margin: 0; padding-left: var(--sp-4); font-size: 0.82rem; color: var(--ink-soft); }
+  .xcard li { margin-bottom: var(--sp-2); }
+  .xcard.agree { border-top: 3px solid var(--guard); }
+  .xcard.add   { border-top: 3px solid var(--accent); }
+  .xcard.audit { border-top: 3px solid var(--high); }
+
+  footer { margin-top: var(--sp-8); padding-top: var(--sp-4); border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--ink-faint); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <div class="eyebrow">AgentForge Clinical Co-Pilot &middot; Data Landscape</div>
+    <h1>OpenEMR Patient Data Exposure Map</h1>
+    <p class="lede">Every category of patient data (PHI) this platform stores and the surfaces through which it can leave the system &mdash; the ingestion and egress landscape an AI Clinical Co-Pilot must reason about before it touches a single record.</p>
+    <div class="meta-line">
+      <span>Re-derived fresh, 2026-07-07 &middot; 5 parallel code/schema sweeps</span>
+      <span>Source: <span class="mono">sql/database.sql</span>, <span class="mono">src/Services/</span>, <span class="mono">src/FHIR/</span>, <span class="mono">apis/routes/</span></span>
+      <span>Structured findings only &mdash; not the live DB contents</span>
+    </div>
+  </header>
+
+  <!-- STATS -->
+  <section aria-label="Summary statistics">
+    <div class="stats">
+      <div class="tile"><div class="big">282</div><div class="lbl">tables in the schema</div></div>
+      <div class="tile"><div class="big">~90&ndash;100</div><div class="lbl">carry patient PHI (a <span class="mono">pid</span> link)</div></div>
+      <div class="tile"><div class="big">27</div><div class="lbl">FHIR resource types expose PHI</div></div>
+      <div class="tile"><div class="big">~20</div><div class="lbl">standard REST endpoint categories</div></div>
+      <div class="tile"><div class="big">3</div><div class="lbl">whole-population egress paths</div></div>
+    </div>
+  </section>
+
+  <!-- SENSITIVITY TIERS -->
+  <section>
+    <h2><span class="num">01</span> Data by sensitivity tier</h2>
+    <p class="section-note">The same record set, ranked by the regulatory and breach risk it carries if it reaches an AI context window. Credentials should <em>never</em> enter one; the Critical clinical categories carry special legal protection (42 CFR Part 2, state super-confidentiality) beyond baseline HIPAA.</p>
+    <div class="tiers">
+
+      <div class="tier crit">
+        <div class="tier-head">
+          <span class="tag">Critical</span>
+          <h3>Identifiers, protected health status &amp; credentials</h3>
+          <p>Highest regulatory / breach exposure. Some must be excluded from AI ingestion entirely.</p>
+        </div>
+        <ul>
+          <li><b>Government identifiers</b><span>SSN (<span class="mono">patient_data.ss</span>), driver's license, DOB, full + birth/dead name, guardian block &mdash; all plaintext <span class="mono">varchar</span>.</span></li>
+          <li><b>Part 2 / special-protection health</b><span>HIV status (<span class="mono">form_ros.hiv</span>), substance use &amp; mental-health history (<span class="mono">history_data</span>), therapy-group enrollment (<span class="mono">therapy_groups*</span>), controlled-substance Rx (<span class="mono">erx_narcotics</span>).</span></li>
+          <li><b>Reproductive / sexual health &amp; SOGI</b><span>Contraception dates, gyn/breast/prostate exam history, <span class="mono">sexual_orientation</span>, <span class="mono">gender_identity</span>.</span></li>
+          <li><b>Auth credentials</b><span>Portal password hashes (<span class="mono">patient_access_onsite.portal_pwd</span>), staff <span class="mono">users_secure.password*</span>, MFA registrations. Never belongs in an AI prompt.</span></li>
+        </ul>
+      </div>
+
+      <div class="tier high">
+        <div class="tier-head">
+          <span class="tag">High</span>
+          <h3>Financial &amp; insurance PII</h3>
+          <p>Identity-theft and payment exposure; subscriber data drags in a second person's identifiers.</p>
+        </div>
+        <ul>
+          <li><b>Insurance / coverage</b><span><span class="mono">insurance_data</span>: policy &amp; group numbers, subscriber SSN + DOB, full subscriber name/address/employer, copay.</span></li>
+          <li><b>Billing &amp; payments</b><span><span class="mono">billing</span>, <span class="mono">payments</span>, patient balances, <span class="mono">in_collection</span> flags, billing notes.</span></li>
+          <li><b>Payment-processor secrets</b><span><span class="mono">payment_gateway_details</span> login/transaction keys. Note: no raw card / bank number is stored &mdash; card data lives with the external gateway.</span></li>
+        </ul>
+      </div>
+
+      <div class="tier mod">
+        <div class="tier-head">
+          <span class="tag">Moderate</span>
+          <h3>Unstructured free-text</h3>
+          <p>Lowest baseline sensitivity but the highest <em>ingestion</em> risk &mdash; can silently contain any Critical item in narrative form.</p>
+        </div>
+        <ul>
+          <li><b>Clinical narrative</b><span>SOAP/ROS notes, <span class="mono">form_encounter.reason</span>, <span class="mono">lists.comments</span> &amp; diagnosis titles.</span></li>
+          <li><b>Messages &amp; notes</b><span><span class="mono">pnotes.body</span> (patient / portal messages), amendments, dictation.</span></li>
+          <li><b>History &amp; documents</b><span><span class="mono">history_data</span> family/lifestyle longtext, <span class="mono">documents.document_data</span> + scanned files, generic <span class="mono">lbf_data</span> / <span class="mono">usertext*</span> buckets.</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- DOMAINS -->
+  <section>
+    <h2><span class="num">02</span> The data by clinical domain</h2>
+    <p class="section-note">Where the data actually lives &mdash; ~90&ndash;100 PHI-bearing tables grouped into the domains the service layer (<span class="mono">src/Services/</span>) models. Each domain has a matching FHIR projection under <span class="mono">src/Services/FHIR/</span>.</p>
+    <div class="domains">
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--crit)"></span>Identity &amp; demographics</h4>
+        <div class="tables"><span class="mono">patient_data</span>, <span class="mono">person</span>, <span class="mono">patient_name_history</span>, <span class="mono">employer_data</span></div>
+        <div class="phi">Name, <b>SSN</b>, <b>DOB</b>, address, phone, email, race/ethnicity, religion, income, occupation, guardian.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--crit)"></span>Contacts &amp; related persons</h4>
+        <div class="tables"><span class="mono">contact</span>, <span class="mono">contact_address</span>, <span class="mono">contact_telecom</span>, <span class="mono">phone_numbers</span>, <span class="mono">misc_address_book</span></div>
+        <div class="phi">Next-of-kin, guardians, addresses &amp; telecoms for the patient <em>and</em> their relations.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--high)"></span>Insurance &amp; billing</h4>
+        <div class="tables"><span class="mono">insurance_data</span>, <span class="mono">insurance_numbers</span>, <span class="mono">billing</span>, <span class="mono">claims</span>, <span class="mono">payments</span>, <span class="mono">ar_activity</span></div>
+        <div class="phi">Policy/group #, <b>subscriber SSN</b>, coverage, charges, balances, payment ledger.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--mod)"></span>Encounters &amp; notes</h4>
+        <div class="tables"><span class="mono">form_encounter</span>, <span class="mono">forms</span>, <span class="mono">form_soap</span>, <span class="mono">form_clinical_notes</span></div>
+        <div class="phi">Visit dates, provider, facility, reason, and free-text SOAP / clinical narrative.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--crit)"></span>Problems &amp; conditions</h4>
+        <div class="tables"><span class="mono">lists</span>, <span class="mono">issue_encounter</span>, <span class="mono">issue_types</span></div>
+        <div class="phi">Diagnoses, allergies, medications &amp; <b>sensitive issues (HIV, behavioral health)</b> as list records.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--crit)"></span>Medications &amp; allergies</h4>
+        <div class="tables"><span class="mono">prescriptions</span>, <span class="mono">drugs</span>, <span class="mono">drug_sales</span>, <span class="mono">erx_narcotics</span></div>
+        <div class="phi">Drug, dose, refills, prescriber, indication &mdash; incl. <b>controlled substances</b> &amp; dispensing.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--mod)"></span>Labs, procedures &amp; vitals</h4>
+        <div class="tables"><span class="mono">procedure_order</span>, <span class="mono">procedure_result</span>, <span class="mono">form_vitals</span>, <span class="mono">form_observation</span></div>
+        <div class="phi">Lab results, orders, specimens, surgical history, BP/weight/BMI and observations.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--mod)"></span>Immunizations &amp; devices</h4>
+        <div class="tables"><span class="mono">immunizations</span>, <span class="mono">immunization_observation</span>, <span class="mono">device</span></div>
+        <div class="phi">Vaccination history, refusal reasons, implantable-device UDIs.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--crit)"></span>Social history &amp; SDOH</h4>
+        <div class="tables"><span class="mono">history_data</span>, <span class="mono">form_history_sdoh</span>, <span class="mono">therapy_groups*</span></div>
+        <div class="phi"><b>Tobacco/alcohol/drug use, mental-illness family history, SOGI, housing/food risk</b>, therapy enrollment.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--mod)"></span>Documents &amp; media</h4>
+        <div class="tables"><span class="mono">documents</span>, <span class="mono">categories_to_documents</span>, <span class="mono">onsite_documents</span></div>
+        <div class="phi">Scanned records, IDs, photos, CCDAs &mdash; arbitrary uploaded PHI, encryption optional per-row.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--mod)"></span>Appointments &amp; tracking</h4>
+        <div class="tables"><span class="mono">openemr_postcalendar_events</span>, <span class="mono">patient_tracker</span>, <span class="mono">dated_reminders</span></div>
+        <div class="phi">Appointment reason/status/time, in-clinic flow, chart location, reminders.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--crit)"></span>Messaging &amp; portal</h4>
+        <div class="tables"><span class="mono">pnotes</span>, <span class="mono">onsite_messages</span>, <span class="mono">patient_access_onsite</span></div>
+        <div class="phi">Secure messages (encryptable) and <b>patient portal login + password hash</b>.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--mod)"></span>Questionnaires &amp; screening</h4>
+        <div class="tables"><span class="mono">questionnaire_response</span>, <span class="mono">pro_assessments</span>, <span class="mono">form_functional_cognitive_status</span></div>
+        <div class="phi">Screening answers (incl. behavioral-health / PHQ), functional &amp; cognitive assessments.</div>
+      </div>
+
+      <div class="domain">
+        <h4><span class="dot" style="background:var(--high)"></span>Audit &amp; access logs</h4>
+        <div class="tables"><span class="mono">log</span>, <span class="mono">audit_master</span>, <span class="mono">extended_log</span>, <span class="mono">api_log</span></div>
+        <div class="phi">Every PHI read/write &mdash; comment/query payloads can <em>embed</em> PHI &amp; IP addresses.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- EGRESS -->
+  <section>
+    <h2><span class="num">03</span> Exposure surfaces &mdash; how PHI leaves</h2>
+    <p class="section-note">Every path by which data exits the database. The three whole-population paths are the highest-value egress: a single authorized call can enumerate the entire patient roster and their records.</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Surface</th><th>Base path</th><th>What it exposes</th><th>Auth gate</th><th>Reach</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>FHIR R4 API</b></td>
+            <td><span class="mono">/apis/default/fhir</span></td>
+            <td>27 resource types: Patient, Encounter, Observation, Condition, MedicationRequest, AllergyIntolerance, Immunization, Coverage, DocumentReference, Binary&hellip;</td>
+            <td>OAuth2 SMART scopes <span class="mono">patient/ user/ system/</span> + legacy ACL</td>
+            <td><span class="pill high">Scoped</span></td>
+          </tr>
+          <tr>
+            <td><b>FHIR Bulk <span class="mono">$export</span></b></td>
+            <td><span class="mono">/fhir/$export</span>, <span class="mono">/Patient/$export</span>, <span class="mono">/Group/:id/$export</span></td>
+            <td>NDJSON dump of the <b>entire patient population</b> across all compartment resources in one async job.</td>
+            <td>Admin ACL + <span class="mono">system/*.$export</span> scope</td>
+            <td><span class="pill crit">All patients</span></td>
+          </tr>
+          <tr>
+            <td><b>Standard REST API</b></td>
+            <td><span class="mono">/apis/default/api</span></td>
+            <td>~20 categories: patient, encounter, vitals, allergy, problem, medication, prescription, insurance, document, message&hellip;</td>
+            <td>OAuth2 <span class="mono">api:oemr</span> + <span class="mono">user/</span> scopes + ACL. User-role only (no patient context).</td>
+            <td><span class="pill high">Scoped</span></td>
+          </tr>
+          <tr>
+            <td><b>REST <span class="mono">getAll</span> lists</b></td>
+            <td><span class="mono">GET /api/patient</span>, <span class="mono">/allergy</span>, <span class="mono">/prescription</span>&hellip;</td>
+            <td>Cross-patient list endpoints &mdash; <b>enumerate all patients</b> and clinical records; no per-patient scoping.</td>
+            <td>Single <span class="mono">api:oemr</span> + resource-read scope</td>
+            <td><span class="pill crit">All patients</span></td>
+          </tr>
+          <tr>
+            <td><b>Document / Binary</b></td>
+            <td><span class="mono">/api/patient/:pid/document</span>, <span class="mono">/fhir/Binary/:id</span></td>
+            <td>Raw file download &mdash; scanned records, PDFs, CCDA, images: <b>free-text PHI beyond structured fields</b>.</td>
+            <td><span class="mono">user/document.crs</span> + ACL <span class="mono">patients,docs</span></td>
+            <td><span class="pill high">Per doc</span></td>
+          </tr>
+          <tr>
+            <td><b>Existing outbound flows</b></td>
+            <td>modules &amp; background services</td>
+            <td>EHI export, phiMail Direct, WENO eRx, FaxSMS, telehealth &mdash; each an existing BAA surface (per prior audit).</td>
+            <td>Per-module config</td>
+            <td><span class="pill mod">Varies</span></td>
+          </tr>
+          <tr>
+            <td><b>Portal</b></td>
+            <td><span class="mono">/portal</span></td>
+            <td>Patient-facing view of their own record + secure messaging; issues/stores portal credentials.</td>
+            <td>Portal auth (<span class="mono">patient_access_onsite</span>)</td>
+            <td><span class="pill mod">Self only</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- GUARDRAIL -->
+  <section>
+    <h2><span class="num">04</span> The built-in guardrail an AI must honor</h2>
+    <p class="section-note">OpenEMR already ships one data-sensitivity access control. Any AI retrieval layer that queries tables directly &mdash; rather than going through the service layer &mdash; will silently bypass it.</p>
+    <div class="callout">
+      <h3>Encounter-level sensitivity ACL</h3>
+      <p><span class="mono">form_encounter.sensitivity</span> tags an encounter <span class="mono">normal</span> or <span class="mono">high</span>. The <span class="mono">sensitivities</span> ACO section (created at install) walls <span class="mono">high</span> encounters off from users who lack that grant. <span class="mono">EncounterService</span> enforces it via <span class="mono">AclMain::aclCheckCore('sensitivities', &hellip;)</span> &mdash; an AI pipeline reading <span class="mono">form_encounter</span> directly leaks encounters the current user is legally walled off from.</p>
+      <ul>
+        <li>Consent flags on <span class="mono">patient_data</span> (<span class="mono">hipaa_*</span>, <span class="mono">allow_health_info_ex</span>, <span class="mono">allow_patient_portal</span>) express patient disclosure constraints the co-pilot should treat as hard limits.</li>
+        <li>Per-row encryption flags exist (<span class="mono">documents.encrypted</span>, <span class="mono">pnotes.is_msg_encrypted</span>) but default off &mdash; encryption is <em>not</em> a reliable filter for "is this sensitive".</li>
+        <li>Prior audit's IDOR finding compounds this: authorization is role-scoped, not patient-scoped &mdash; any authenticated user with a capability can already fetch any patient by <span class="mono">pid</span>.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- CROSS-CHECK -->
+  <section>
+    <h2><span class="num">05</span> Cross-check against the prior <span class="mono" style="font-size:0.8em">AUDIT.md</span></h2>
+    <p class="section-note">This map was re-derived independently, then compared. The prior audit is a five-dimension <em>system</em> audit (security, compliance, performance, data quality, architecture) &mdash; it touches PHI but never enumerates the full data inventory. The two are complementary, and they agree where they overlap.</p>
+    <div class="xcheck">
+      <div class="xcard agree">
+        <h4><span class="ic">&#10003;</span> Confirmed &mdash; both agree</h4>
+        <ul>
+          <li>Core PHI tables (<span class="mono">patient_data</span>, <span class="mono">lists</span>, <span class="mono">insurance_data</span>, <span class="mono">documents</span>) are the sensitive spine.</li>
+          <li>SSN stored plaintext; column encryption is opt-in / off by default.</li>
+          <li>FHIR + REST + Bulk <span class="mono">$export</span> are real outbound PHI surfaces &amp; BAA triggers.</li>
+          <li>Cross-patient reach: audit's IDOR = our <span class="mono">getAll</span> / <span class="mono">$export</span> whole-population paths.</li>
+        </ul>
+      </div>
+      <div class="xcard add">
+        <h4><span class="ic">&#43;</span> New in this map</h4>
+        <ul>
+          <li>Full inventory: <b>~90&ndash;100</b> PHI tables of 282 (audit named only the hot ones).</li>
+          <li>The <span class="mono">form_encounter.sensitivity</span> ACO guardrail &mdash; not called out in the audit.</li>
+          <li>Explicit Part 2 / super-confidential map: HIV, <span class="mono">therapy_groups</span>, <span class="mono">erx_narcotics</span>, SOGI, reproductive health.</li>
+          <li>Free-text ingestion risk surface (<span class="mono">pnotes.body</span>, <span class="mono">history_data</span>, <span class="mono">document_data</span>) enumerated for AI scrubbing.</li>
+        </ul>
+      </div>
+      <div class="xcard audit">
+        <h4><span class="ic">&#9888;</span> In the audit, not a data-map concern</h4>
+        <ul>
+          <li>Live-DB reality: 25 synthetic patients, contact fields 0% populated, medication coding mismatch.</li>
+          <li>No patient de-duplication &mdash; ingestion can silently fork a person into duplicate records.</li>
+          <li>Audit-on-read logging: every PHI <span class="mono">SELECT</span> writes 2 rows &mdash; an AI read-heavy pipeline amplifies this.</li>
+          <li>Committed secrets, XSS/autoescape, session-cookie posture &mdash; security findings orthogonal to the inventory.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Generated for the AgentForge Clinical Co-Pilot data-landscape review. Backing evidence: five parallel source/schema sweeps over <span class="mono">sql/database.sql</span>, <span class="mono">src/Services/</span>, <span class="mono">src/FHIR/</span>, <span class="mono">src/RestControllers/</span>, and <span class="mono">apis/routes/</span>. Sensitivity tiers reflect regulatory exposure (HIPAA + 42 CFR Part 2), not OpenEMR's internal flags. Cross-checked against <span class="mono">AUDIT.md</span>. This document maps the data <em>surface</em>; it does not itself contain PHI.</p>
+  </footer>
+
+</div>
+</body>
+</html>

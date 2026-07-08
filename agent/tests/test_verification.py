@@ -11,7 +11,7 @@ def _log_with_patient() -> FetchLog:
         "Patient",
         "1",
         PatientDemographics(
-            patient_id="1",
+            resource_id="1",
             full_name="Marisol A Reyes",
             birth_date=date(1958, 3, 12),
             gender="female",

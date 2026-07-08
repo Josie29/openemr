@@ -2,7 +2,15 @@ from typing import Protocol
 
 import httpx
 
-from copilot.fhir.models import PatientDemographics
+from copilot.fhir.models import (
+    Allergy,
+    Encounter,
+    Medication,
+    PatientDemographics,
+    Problem,
+    bundle_resources,
+    dedup_medications,
+)
 
 
 class FhirError(RuntimeError):
@@ -19,21 +27,47 @@ class FhirClient(Protocol):
 
     Two implementations share this protocol: a fixture-backed one for tests/dev and an
     httpx-backed one for live OpenEMR. The agent depends on the protocol, never a concrete
-    class, so the SMART-token source can change (env var → module-minted) without touching
-    agent logic (implementation-prompt-01 §1.2).
+    class, so the SMART-token source can change (env var → module-minted per request) without
+    touching agent logic.
     """
 
     async def get_patient(self, patient_id: str) -> PatientDemographics:
         """Read one ``Patient`` resource and return its typed demographics.
 
-        Args:
-            patient_id: The FHIR ``Patient`` logical id.
-
-        Returns:
-            The parsed ``PatientDemographics``.
-
         Raises:
             FhirError: If the read fails, times out, or the resource is unusable.
+        """
+        ...
+
+    async def get_problems(self, patient_id: str) -> list[Problem]:
+        """Read the patient's ``Condition`` (problem-list) resources.
+
+        Raises:
+            FhirError: If the read fails or times out.
+        """
+        ...
+
+    async def get_medications(self, patient_id: str) -> list[Medication]:
+        """Read the patient's ``MedicationRequest`` resources, deduplicated.
+
+        Raises:
+            FhirError: If the read fails or times out.
+        """
+        ...
+
+    async def get_allergies(self, patient_id: str) -> list[Allergy]:
+        """Read the patient's ``AllergyIntolerance`` resources.
+
+        Raises:
+            FhirError: If the read fails or times out.
+        """
+        ...
+
+    async def get_encounters(self, patient_id: str) -> list[Encounter]:
+        """Read the patient's ``Encounter`` resources (metadata only, no note bodies).
+
+        Raises:
+            FhirError: If the read fails or times out.
         """
         ...
 
@@ -51,25 +85,52 @@ class HttpFhirClient:
 
     Holds no database credentials — every read rides the FHIR/OAuth2 path (ARCHITECTURE.md
     §2, §4). Bounded timeouts and retries so a slow upstream degrades transparently rather
-    than hanging the request.
+    than hanging the request. The token is per-instance: the route builds one client per
+    request from the inbound ``Authorization`` header, so a client is bound to exactly the
+    patient its token is scoped to. A tokenless instance is allowed for the ``/ready`` metadata
+    probe, which hits the unauthenticated capability statement.
     """
 
     def __init__(
         self,
         base_url: str,
-        bearer_token: str,
+        bearer_token: str | None = None,
         *,
-        timeout_seconds: float,
-        max_retries: int,
+        timeout_seconds: float = 10.0,
+        max_retries: int = 2,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        headers = {"Accept": "application/fhir+json"}
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
         transport = httpx.AsyncHTTPTransport(retries=max_retries)
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            headers={"Authorization": f"Bearer {bearer_token}", "Accept": "application/fhir+json"},
+            headers=headers,
             timeout=timeout_seconds,
             transport=transport,
         )
+
+    async def _search(self, resource_type: str, patient_id: str) -> list[dict[str, object]]:
+        """Run a ``GET /<resource_type>?patient=<id>`` search and return the matching resources.
+
+        Args:
+            resource_type: The FHIR resource type to search, e.g. ``"Condition"``.
+            patient_id: The patient logical id to scope the search to.
+
+        Returns:
+            The resources from the returned searchset ``Bundle``.
+
+        Raises:
+            FhirError: If the search request fails.
+        """
+        try:
+            response = await self._client.get(f"/{resource_type}", params={"patient": patient_id})
+            response.raise_for_status()
+            bundle = response.json()
+        except httpx.HTTPError as exc:
+            raise FhirError(f"failed to search {resource_type} for patient {patient_id}") from exc
+        return bundle_resources(bundle, resource_type)
 
     async def get_patient(self, patient_id: str) -> PatientDemographics:
         try:
@@ -80,9 +141,25 @@ class HttpFhirClient:
             raise FhirError(f"failed to read Patient/{patient_id}") from exc
         return PatientDemographics.from_fhir(resource)
 
+    async def get_problems(self, patient_id: str) -> list[Problem]:
+        return [Problem.from_fhir(r) for r in await self._search("Condition", patient_id)]
+
+    async def get_medications(self, patient_id: str) -> list[Medication]:
+        parsed = [
+            Medication.from_fhir(r) for r in await self._search("MedicationRequest", patient_id)
+        ]
+        return dedup_medications(parsed)
+
+    async def get_allergies(self, patient_id: str) -> list[Allergy]:
+        return [Allergy.from_fhir(r) for r in await self._search("AllergyIntolerance", patient_id)]
+
+    async def get_encounters(self, patient_id: str) -> list[Encounter]:
+        return [Encounter.from_fhir(r) for r in await self._search("Encounter", patient_id)]
+
     async def ping(self) -> None:
         try:
-            # Metadata is unauthenticated and cheap — a reachability probe, not a data read.
+            # Metadata (the FHIR capability statement) is unauthenticated and cheap — a
+            # reachability probe, not a data read, so it works on a tokenless instance.
             response = await self._client.get("/metadata")
             response.raise_for_status()
         except httpx.HTTPError as exc:

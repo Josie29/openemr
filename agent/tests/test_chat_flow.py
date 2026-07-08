@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+import httpx
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -42,13 +43,16 @@ def _scripted_model(final: ChatResponse) -> FunctionModel:
     return FunctionModel(respond)
 
 
-def _post_chat(settings: Settings, model: FunctionModel) -> Callable[[], object]:
+def _post_chat(settings: Settings, model: FunctionModel) -> Callable[[], httpx.Response]:
     app = create_app(settings)
     client = TestClient(app)
 
-    def call() -> object:
+    def call() -> httpx.Response:
         with app.state.agent.override(model=model):
-            return client.post("/chat", json={"patient_id": "1", "message": "Who is this patient?"})
+            # Starlette's TestClient returns its vendored httpx Response (not importable here).
+            return client.post(  # type: ignore[return-value]
+                "/chat", json={"patient_id": "1", "message": "Who is this patient?"}
+            )
 
     return call
 

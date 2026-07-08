@@ -58,11 +58,14 @@ probes fail out of the box because no credentials are set.
 > (locally) or as Railway service variables (prod) — `.env.example` lists them with empty
 > values to copy. Do not paste real keys into the README or `.env.example`.
 
+Credentials use their **native SDK names** (copy them straight from each vendor); the
+`COPILOT_`-prefixed forms are also accepted.
+
 | Variable | Makes green | Where to get it |
 |---|---|---|
-| `COPILOT_ANTHROPIC_API_KEY` | LLM probe (`GET api.anthropic.com/v1/models` — metadata, not a completion) | Claude Console |
-| `COPILOT_LANGFUSE_PUBLIC_KEY` + `COPILOT_LANGFUSE_SECRET_KEY` | Langfuse probe (`GET {host}/api/public/health`) — **both** required, or tracing stays disabled and the probe reports "not configured" | Langfuse project → Settings → API Keys (free Hobby tier is enough) |
-| `COPILOT_LANGFUSE_HOST` | *(optional)* defaults to Langfuse Cloud; override only for self-hosted | your Langfuse instance URL |
+| `ANTHROPIC_API_KEY` | LLM probe (`GET api.anthropic.com/v1/models` — metadata, not a completion) | Claude Console |
+| `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` | Langfuse probe (`GET {host}/api/public/health`) — **both** required, or tracing stays disabled | Langfuse → Settings → API Keys (free Hobby tier is enough) |
+| `LANGFUSE_BASE_URL` | *(optional)* defaults to EU Cloud; **must match your project region** — US is `https://us.cloud.langfuse.com` | your Langfuse instance URL |
 
 With those set in `.env`:
 

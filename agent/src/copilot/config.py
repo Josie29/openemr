@@ -1,7 +1,7 @@
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,11 +36,19 @@ class Settings(BaseSettings):
     arrives via Railway env vars. See ``.env.example`` for the full list.
     """
 
-    model_config = SettingsConfigDict(env_prefix="COPILOT_", env_file=".env", extra="ignore")
+    # populate_by_name lets aliased fields still be set by their field name (e.g. tests
+    # passing anthropic_api_key=None), not only by the env alias.
+    model_config = SettingsConfigDict(
+        env_prefix="COPILOT_", env_file=".env", extra="ignore", populate_by_name=True
+    )
 
     # Agent
     model_tier: ModelTier = ModelTier.SONNET
-    anthropic_api_key: str | None = None
+    # Accept the SDK's native ANTHROPIC_API_KEY as well as the COPILOT_-prefixed form.
+    anthropic_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "COPILOT_ANTHROPIC_API_KEY"),
+    )
 
     # FHIR data access (SMART patient/*.read; no DB credentials — ARCHITECTURE.md §4)
     fhir_client_mode: FhirClientMode = FhirClientMode.FIXTURE
@@ -54,10 +62,23 @@ class Settings(BaseSettings):
     fhir_timeout_seconds: float = 10.0
     fhir_max_retries: int = 2
 
-    # Observability (Langfuse — ARCHITECTURE.md §10)
-    langfuse_public_key: str | None = None
-    langfuse_secret_key: str | None = None
-    langfuse_host: str = "https://cloud.langfuse.com"
+    # Observability (Langfuse — ARCHITECTURE.md §10).
+    # Accept the SDK's native LANGFUSE_* names (what the Langfuse UI hands you) as well as our
+    # COPILOT_-prefixed form, so keys copied straight from Langfuse work without renaming.
+    langfuse_public_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LANGFUSE_PUBLIC_KEY", "COPILOT_LANGFUSE_PUBLIC_KEY"),
+    )
+    langfuse_secret_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LANGFUSE_SECRET_KEY", "COPILOT_LANGFUSE_SECRET_KEY"),
+    )
+    langfuse_host: str = Field(
+        default="https://cloud.langfuse.com",
+        validation_alias=AliasChoices(
+            "LANGFUSE_HOST", "LANGFUSE_BASE_URL", "COPILOT_LANGFUSE_HOST"
+        ),
+    )
 
     @property
     def langfuse_enabled(self) -> bool:

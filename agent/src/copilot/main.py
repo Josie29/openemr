@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -15,7 +15,7 @@ from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.health import check_readiness
-from copilot.observability import build_tracer
+from copilot.observability import configure_observability, observe_turn, shutdown_observability
 from copilot.schemas import ChatRequest, ChatResponse
 from copilot.verification import FetchLog
 
@@ -83,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
+        shutdown_observability(app.state.observability_enabled)
         client = app.state.fhir
         if isinstance(client, HttpFhirClient):
             await client.aclose()
@@ -91,6 +92,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(CorrelationIdMiddleware)
 
     app.state.settings = settings
+    # Enable Langfuse + Pydantic AI OTel instrumentation before any agent runs.
+    app.state.observability_enabled = configure_observability(settings)
     app.state.fhir = _build_fhir_client(settings)
     app.state.agent = build_agent(_build_model(settings))
 
@@ -108,46 +111,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/chat")
     async def chat(request: Request, payload: ChatRequest) -> JSONResponse:
-        """Answer one agent turn, grounded and traced (ARCHITECTURE.md §6.2)."""
+        """Answer one agent turn, grounded and traced (ARCHITECTURE.md §6.2).
+
+        The agent run is wrapped in a Langfuse trace context; the instrumentation captures the
+        model, tokens, cost, and tool spans automatically, and the verification outcome is
+        recorded as a score. Tracing failures never affect the response.
+        """
         correlation_id = current_correlation_id()
-        settings = request.app.state.settings
-        tracer = build_tracer(settings, correlation_id, payload.patient_id, payload.message)
+        enabled = request.app.state.observability_enabled
         deps = CopilotDeps(
             fhir=request.app.state.fhir,
             patient_id=payload.patient_id,
             correlation_id=correlation_id,
             fetched=FetchLog(),
         )
-        try:
-            result = await request.app.state.agent.run(payload.message, deps=deps)
-        except UnexpectedModelBehavior:
-            # The gate exhausted its retries without an attributable answer — degrade to a
-            # refusal rather than ship an unverified claim (ARCHITECTURE.md §7).
-            logger.info("verification gate refused", extra={"correlation_id": correlation_id})
-            tracer.record_verification(passed=False, retries=-1)
-            tracer.finish(status="refused")
-            return JSONResponse(status_code=200, content=_UNAVAILABLE_ANSWER.model_dump())
-        except FhirError:
-            # A data read failed — report the gap, never fabricate around it (§8).
-            logger.warning("FHIR read failed", extra={"cid": correlation_id}, exc_info=True)
-            tracer.finish(status="error")
-            return JSONResponse(
-                status_code=502,
-                content={
+
+        status_code = 200
+        with observe_turn(enabled, correlation_id, payload.patient_id, payload.message) as turn:
+            try:
+                result = await request.app.state.agent.run(payload.message, deps=deps)
+                turn.verified(passed=True)
+                content = result.output.model_dump()
+                turn.output(content)
+            except UnexpectedModelBehavior:
+                # The gate exhausted its retries without an attributable answer — degrade to a
+                # refusal rather than ship an unverified claim (ARCHITECTURE.md §7).
+                logger.info("verification gate refused", extra={"cid": correlation_id})
+                turn.verified(passed=False)
+                content = _UNAVAILABLE_ANSWER.model_dump()
+            except ModelHTTPError as exc:
+                # LLM provider rejected the call (billing, rate limit, outage). Always logged;
+                # the specific reason is surfaced too, which aids debugging in this demo system.
+                # (A production PHI deployment would genericize this — see ARCHITECTURE.md §8.)
+                logger.warning("LLM request failed", extra={"cid": correlation_id}, exc_info=True)
+                status_code = 502
+                content = {"error": str(exc), "correlation_id": correlation_id}
+            except FhirError:
+                # A data read failed — report the gap, never fabricate around it (§8).
+                logger.warning("FHIR read failed", extra={"cid": correlation_id}, exc_info=True)
+                status_code = 502
+                content = {
                     "error": "patient data is temporarily unavailable",
                     "correlation_id": correlation_id,
-                },
-            )
+                }
 
-        usage = result.usage
-        tracer.record_usage(
-            request.app.state.settings.model_tier,
-            getattr(usage, "input_tokens", 0) or 0,
-            getattr(usage, "output_tokens", 0) or 0,
-        )
-        tracer.record_verification(passed=True, retries=0)
-        tracer.finish(status="ok")
-        return JSONResponse(status_code=200, content=result.output.model_dump())
+        return JSONResponse(status_code=status_code, content=content)
 
     return app
 

@@ -60,8 +60,8 @@ def test_grounded_answer_reaches_the_physician(settings: Settings) -> None:
         summary="Marisol Reyes, 68F.",
         claims=[
             Claim(
-                text="Patient is female, born 1958-03-12.",
-                source=SourceRef(resource_type="Patient", resource_id="1", field="birthDate"),
+                text="Patient was born 1958-03-12.",
+                source=SourceRef(resource_type="Patient", resource_id="1", field="birth_date"),
             )
         ],
     )
@@ -70,7 +70,8 @@ def test_grounded_answer_reaches_the_physician(settings: Settings) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["claims"], "a grounded answer must carry its claims"
-    assert all(c["source"]["resource_type"] == "Patient" for c in body["claims"])
+    # The gate stamps the real record value into the citation (code-populated, not model-set).
+    assert body["claims"][0]["source"]["value"] == "1958-03-12"
 
 
 def test_ungrounded_answer_is_refused_not_returned(settings: Settings) -> None:

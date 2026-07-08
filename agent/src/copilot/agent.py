@@ -6,7 +6,7 @@ from pydantic_ai.models import Model
 from copilot.fhir.client import FhirClient
 from copilot.fhir.models import PatientDemographics
 from copilot.schemas import ChatResponse
-from copilot.verification import FetchLog, unattributed_claims
+from copilot.verification import FetchLog, resolve_claims
 
 SYSTEM_PROMPT = """You are a Clinical Co-Pilot embedded in an electronic health record. You
 help a physician orient on the patient currently open, using ONLY the tools provided to read
@@ -15,9 +15,10 @@ that patient's record.
 Rules you must follow without exception:
 - Answer only from data returned by the tools. Never state a fact you did not read from a tool
   this turn. If the record does not contain something, say so plainly rather than inferring.
-- Every factual statement you make must be a Claim carrying a SourceRef that cites the exact
-  FHIR resource (resource_type and resource_id) you read it from. If you cannot cite a fetched
-  resource for a statement, do not make the statement.
+- Every factual statement you make must be a Claim carrying a SourceRef that cites the resource
+  (resource_type and resource_id) and the exact `field` name from that tool's returned data
+  (e.g. full_name, gender, birth_date). If you cannot cite a fetched field for a statement, do
+  not make the statement. Leave SourceRef.value empty — the system fills it from the record.
 - Keep the summary short and scannable — a physician has seconds. Do not pad a sparse record.
 """
 
@@ -74,40 +75,42 @@ def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
             FhirError: If the FHIR read fails; the caller degrades gracefully.
         """
         demographics = await ctx.deps.fhir.get_patient(ctx.deps.patient_id)
-        ctx.deps.fetched.record("Patient", demographics.patient_id)
+        ctx.deps.fetched.record("Patient", demographics.patient_id, demographics)
         return demographics
 
     @agent.output_validator
     async def enforce_grounding(ctx: RunContext[CopilotDeps], output: ChatResponse) -> ChatResponse:
-        """Reject any response containing a claim not grounded in a fetched resource.
+        """Reject any claim not grounded in a fetched field, and stamp the real value into the rest.
 
-        This is the deterministic half of ARCHITECTURE.md §7 — the only verification the
-        walking skeleton enforces. Faithfulness (the Haiku entailment judge) and domain
-        constraints are deferred to prompt ``-02``.
+        This is the deterministic half of ARCHITECTURE.md §7 — the only verification the walking
+        skeleton enforces. Each claim's citation is resolved against the actual fetched resource;
+        grounded claims get the record's true value stamped in (code-populated, so it is
+        trustworthy), and any claim that cannot be resolved forces a retry. Faithfulness (the
+        Haiku entailment judge) and domain constraints are deferred to prompt ``-02``.
 
         Args:
             ctx: The run context (holds the fetch registry).
             output: The agent's candidate structured answer.
 
         Returns:
-            The validated output, unchanged, when every claim is grounded.
+            The response with the real record value stamped into every claim's citation.
 
         Raises:
-            ModelRetry: When one or more claims cite a resource no tool returned this turn,
-                forcing the model to correct itself.
+            ModelRetry: When a claim cites a resource/field that was not read this turn or has no
+                value, forcing the model to correct itself.
         """
-        offenders = unattributed_claims(output, ctx.deps.fetched)
+        grounded, offenders = resolve_claims(output, ctx.deps.fetched)
         if offenders:
             detail = "; ".join(
-                f"claim {c.text!r} cites {c.source.resource_type}/{c.source.resource_id} "
-                "which was not read this turn"
+                f"claim {c.text!r} cites {c.source.resource_type}/{c.source.resource_id}"
+                f".{c.source.field} which has no value in the data read this turn"
                 for c in offenders
             )
             raise ModelRetry(
-                "Every claim must cite a FHIR resource you actually read via a tool this turn. "
-                f"These do not: {detail}. Remove or re-ground them, or state the information is "
-                "not available."
+                "Every claim must cite a field you actually read via a tool this turn. These do "
+                f"not: {detail}. Re-ground them to a real field, or state the information is not "
+                "available."
             )
-        return output
+        return grounded
 
     return agent

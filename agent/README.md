@@ -90,3 +90,51 @@ Same project/region as OpenEMR (internal networking). Build from this `agent/` d
 the `Dockerfile`; set the `COPILOT_*` variables as Railway service variables. For live FHIR set
 `COPILOT_FHIR_CLIENT_MODE=http` plus `COPILOT_FHIR_BASE_URL` and `COPILOT_FHIR_BEARER_TOKEN`
 (the SMART token; minted by the PHP module once `-03` lands).
+
+## Roadmap: observability-driven development loop (planned)
+
+**Goal:** close the loop between the traces this service already emits and the coding agent
+that develops it — a self-correcting, trace-driven iteration cycle where Claude Code *reads the
+agent's own Langfuse traces, diagnoses failures, fixes the code, re-runs, and repeats until a
+defined green signal is reached*, rather than a human ferrying stack traces back and forth.
+
+The architecture already provides the seam. Every turn carries a **correlation ID** (§10) that
+ties an HTTP response → its Langfuse trace → and (soon) its eval case, so a failure is always
+reproducible. The loop wires two more pieces on top:
+
+- **Feedback channel — the Langfuse MCP server.** Add Langfuse as an MCP server so Claude Code
+  can query the agent's traces directly (errors, tool failures, the `verification_grounding`
+  score, latency, token cost) instead of being told about them:
+
+  ```bash
+  # US project shown; base64-encode "public_key:secret_key"
+  claude mcp add --transport http langfuse \
+    https://us.cloud.langfuse.com/api/public/mcp \
+    --header "Authorization: Basic <base64(pk:sk)>"
+  ```
+
+- **Driver — Claude Code `/loop`.** Run the observe → diagnose → fix → re-run cycle on a
+  recurring or self-paced loop until the exit signal is met.
+
+**The cycle:** run the agent (or the eval suite) → pull the failing traces via the Langfuse MCP
+tool → root-cause from the trace (Langfuse's error-analysis discipline: cluster failures into a
+taxonomy before fixing, don't patch symptom-by-symptom) → apply the fix → re-run → re-check the
+traces. Repeat until working fully.
+
+**Guardrails (what keeps an autonomous loop honest, not just busy):**
+
+- **Anchor to a measurable exit signal**, never "looks done" — e.g. eval pass-rate ≥ target,
+  `verification_grounding` pass-rate ≥ target, zero tool failures, p95 latency within the <15s
+  budget. The loop stops when the signal is green, not when it runs out of ideas.
+- **Regression protection:** every iteration must keep the deterministic test suite *and* the
+  eval suite green. A fix that greens one trace and reds another is a net loss — the suites are
+  the ratchet.
+- **Turn each new failure into an eval case first, then fix it** — so the loop builds a
+  regression net as it goes and can't silently reintroduce a bug it already saw.
+- **Bounded and gated:** cap iterations / token budget, and keep a human checkpoint for changes
+  that touch contracts, the authorization gate, or anything security-relevant — an autonomous
+  loop should harden the agent, not quietly rewrite its trust boundary.
+
+**Status:** planned — pending the Langfuse MCP wiring and an eval suite (`-02`) to anchor the
+exit signal. The observability half (traces, scores, correlation IDs) is already in place, so
+the loop has real signal to consume the moment it's turned on.

@@ -1,43 +1,76 @@
+from datetime import date
+
+from copilot.fhir.models import PatientDemographics
 from copilot.schemas import ChatResponse, Claim, SourceRef
-from copilot.verification import FetchLog, unattributed_claims
+from copilot.verification import FetchLog, resolve_claims
 
 
-def _claim(text: str, resource_type: str, resource_id: str) -> Claim:
-    return Claim(text=text, source=SourceRef(resource_type=resource_type, resource_id=resource_id))
+def _log_with_patient() -> FetchLog:
+    log = FetchLog()
+    log.record(
+        "Patient",
+        "1",
+        PatientDemographics(
+            patient_id="1",
+            full_name="Marisol A Reyes",
+            birth_date=date(1958, 3, 12),
+            gender="female",
+        ),
+    )
+    return log
 
 
-def test_grounded_claim_passes() -> None:
-    # Guards: a claim citing a resource a tool actually returned this turn must be accepted —
-    # otherwise the gate would reject every truthful answer and the agent could never respond.
-    fetched = FetchLog()
-    fetched.record("Patient", "1")
-    response = ChatResponse(summary="...", claims=[_claim("DOB is 1958-03-12", "Patient", "1")])
-
-    assert unattributed_claims(response, fetched) == []
-
-
-def test_claim_citing_unfetched_resource_is_flagged() -> None:
-    # Guards the core hallucination defense: a claim citing a resource that was never fetched
-    # (a fabricated fact dressed up with a plausible citation) must be caught, so it can be
-    # turned into a ModelRetry rather than reaching the physician.
-    fetched = FetchLog()
-    fetched.record("Patient", "1")
-    response = ChatResponse(
-        summary="...",
-        claims=[
-            _claim("DOB is 1958-03-12", "Patient", "1"),
-            _claim("A1c was 9.2 last week", "Observation", "999"),  # never fetched
-        ],
+def _claim(
+    text: str, field: str | None, *, resource_type: str = "Patient", resource_id: str = "1"
+) -> Claim:
+    return Claim(
+        text=text,
+        source=SourceRef(resource_type=resource_type, resource_id=resource_id, field=field),
     )
 
-    offenders = unattributed_claims(response, fetched)
 
-    assert [c.source.resource_id for c in offenders] == ["999"]
+def test_grounded_claim_gets_the_real_record_value_stamped() -> None:
+    # Guards the trust feature: a claim citing a real field must pass AND have the actual record
+    # value stamped in by code (not the model), so a reader can compare the claim against the
+    # exact value it came from. If this breaks, citations show no verifiable value.
+    grounded, offenders = resolve_claims(
+        ChatResponse(summary="...", claims=[_claim("Born March 1958", "birth_date")]),
+        _log_with_patient(),
+    )
+
+    assert offenders == []
+    assert grounded.claims[0].source.value == "1958-03-12"
 
 
-def test_empty_registry_flags_every_claim() -> None:
-    # Guards the case where the model answers without calling any tool: with nothing fetched,
-    # no claim can be grounded, so all must be flagged (the agent must fetch before it asserts).
-    response = ChatResponse(summary="...", claims=[_claim("anything", "Patient", "1")])
+def test_claim_citing_a_nonexistent_field_is_rejected() -> None:
+    # Guards the tightened field-level grounding: a claim citing a field that isn't in the
+    # fetched data (a fabricated datum dressed up with a plausible citation) must be caught,
+    # so it becomes a ModelRetry rather than reaching the physician.
+    _, offenders = resolve_claims(
+        ChatResponse(summary="...", claims=[_claim("A1c was 9.2% last week", "a1c")]),
+        _log_with_patient(),
+    )
 
-    assert len(unattributed_claims(response, FetchLog())) == 1
+    assert len(offenders) == 1
+
+
+def test_claim_citing_an_unfetched_resource_is_rejected() -> None:
+    # Guards resource-level grounding: a claim citing a resource no tool returned this turn.
+    unfetched = _claim("...", "code", resource_type="Observation", resource_id="999")
+    _, offenders = resolve_claims(
+        ChatResponse(summary="...", claims=[unfetched]),
+        _log_with_patient(),
+    )
+
+    assert len(offenders) == 1
+
+
+def test_claim_without_a_field_is_rejected() -> None:
+    # Guards that a claim must cite a specific field, not just a resource — a value can only be
+    # resolved (and thus grounded) against a named field.
+    _, offenders = resolve_claims(
+        ChatResponse(summary="...", claims=[_claim("something", None)]),
+        _log_with_patient(),
+    )
+
+    assert len(offenders) == 1

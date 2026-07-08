@@ -47,10 +47,12 @@ def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirC
     """
     if settings.fhir_client_mode is FhirClientMode.FIXTURE:
         return FixtureFhirClient.from_seed()
-    if not settings.fhir_base_url:
-        raise ValueError("HTTP FHIR mode needs COPILOT_FHIR_BASE_URL")
+    # HTTP mode. A missing base URL is a misconfiguration, but we do not raise at startup —
+    # crash-looping the deploy hides the cause. Construct a client anyway (empty base URL) so the
+    # process starts and the misconfig surfaces as a red /ready FHIR probe; /chat separately 500s
+    # with a clear message (see the route). This keeps observability, not opacity, as the failure.
     return HttpFhirClient(
-        settings.fhir_base_url,
+        settings.fhir_base_url or "",
         settings.fhir_bearer_token,  # optional dev fallback; None is fine for the /metadata ping
         timeout_seconds=settings.fhir_timeout_seconds,
         max_retries=settings.fhir_max_retries,

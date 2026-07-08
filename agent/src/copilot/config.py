@@ -50,8 +50,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ANTHROPIC_API_KEY", "COPILOT_ANTHROPIC_API_KEY"),
     )
 
-    # FHIR data access (SMART patient/*.read; no DB credentials — ARCHITECTURE.md §4)
-    fhir_client_mode: FhirClientMode = FhirClientMode.FIXTURE
+    # FHIR data access (SMART patient/*.read; no DB credentials — ARCHITECTURE.md §4).
+    # Defaults to HTTP so the deployed service is secure by default (a tokenless /chat is
+    # refused, not silently served from fixtures). Local dev opts into fixture via .env.example.
+    fhir_client_mode: FhirClientMode = FhirClientMode.HTTP
     fhir_base_url: str | None = Field(
         default=None, description="OpenEMR FHIR R4 base, e.g. https://host/apis/default/fhir"
     )

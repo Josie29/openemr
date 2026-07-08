@@ -15,7 +15,18 @@ that isn't itself a deliverable. This keeps our additions cleanly separated from
 the forked repo's own documentation. The root-level PRD deliverables
 (`AUDIT.md`, `USERS.md`, `ARCHITECTURE.md`) stay at repo root where the PRD
 expects them; `/context/` holds the reasoning behind them (e.g.
-`context/persona-analysis.md` backs `USERS.md`).
+`context/decisions/persona-analysis.md` backs `USERS.md`).
+
+`/context/` is split by purpose, not by PRD stage number — when adding a new file,
+place it by asking which of these it is:
+
+- `context/decisions/` — justifies a choice made in a PRD deliverable (why this
+  architecture, this persona, this data-exposure finding). Cited by name from
+  `ARCHITECTURE.md`/`USERS.md`/`AUDIT.md`.
+- `context/execution/` — a prompt handed to a fresh session to execute a specific
+  increment, plus the findings/write-up that came back from running it.
+- `context/planning/` — cross-cutting project ops that isn't deliverable evidence
+  (cost tracking, team workflow/tooling decisions).
 
 ## Project Structure
 

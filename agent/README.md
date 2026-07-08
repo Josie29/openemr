@@ -1,7 +1,7 @@
 # AgentForge Clinical Co-Pilot — agent service
 
 The standalone Python agent service from `ARCHITECTURE.md` (Option D). This is the **walking
-skeleton** (implementation prompt `context/implementation-prompt-01-walking-skeleton.md`): one
+skeleton** (implementation prompt `context/execution/implementation-prompt-01-walking-skeleton.md`): one
 end-to-end turn — `POST /chat` → correlation ID → one FHIR tool → Claude → verification gate →
 grounded structured answer → Langfuse trace — plus real `/health` and `/ready` probes.
 

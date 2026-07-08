@@ -221,7 +221,7 @@ model, rather than being re-implemented (and drifting) inside the agent.
 
 The PRD warns that "every agent capability must trace to a specific user problem." So the
 single-vs-multi decision was derived bottom-up from the use cases
-([`context/agent-workflow.md`](context/agent-workflow.md)), not assumed. **Multi-agent**
+([`context/decisions/agent-workflow.md`](context/decisions/agent-workflow.md)), not assumed. **Multi-agent**
 means two or more LLM-driven agents with *distinct roles* handing off control — not multiple
 tool calls, not a cheap validation model, not parallel fetches.
 
@@ -423,7 +423,7 @@ users. The design's answers:
 
 Stated so the choice reads as deliberate, not foregone. Full reasoning in `/context/`.
 
-**Deployment topology** ([`context/deployment-strategy.md`](context/deployment-strategy.md)):
+**Deployment topology** ([`context/decisions/deployment-strategy.md`](context/decisions/deployment-strategy.md)):
 
 | Option | Why rejected |
 |---|---|
@@ -432,7 +432,7 @@ Stated so the choice reads as deliberate, not foregone. Full reasoning in `/cont
 | **C — Standalone + custom API boundary** | Right security instinct, but requires designing/versioning/testing new endpoints before the agent reads anything — real scope, slower iteration. |
 | **D — Module shim + FHIR-only *(selected)*** | Composes A's native UX + session reuse, B's isolation, C's single authorization point — on the FHIR+SMART surface OpenEMR already ships. |
 
-**Agent framework** ([`context/agent-tech-stack.md`](context/agent-tech-stack.md)):
+**Agent framework** ([`context/decisions/agent-tech-stack.md`](context/decisions/agent-tech-stack.md)):
 LangGraph (runner-up — heavier than a verify-then-answer loop needs; revisit if a tripwire
 fires); OpenAI Agents SDK (OpenAI-first, less typed); Google ADK (its edges — Vertex deploy,
 Gemini, multi-agent — are off-table on Railway+Claude despite prior team experience); Claude
@@ -508,11 +508,11 @@ of scope until a use case justifies it.
 This document is the source of truth. The reasoning behind each decision — including the
 options not taken — is recorded in `/context/`:
 
-- [`context/deployment-strategy.md`](context/deployment-strategy.md) — the A/B/C/D
+- [`context/decisions/deployment-strategy.md`](context/decisions/deployment-strategy.md) — the A/B/C/D
   topology comparison and the FHIR-only-vs-SQL-fallback decision.
-- [`context/agent-tech-stack.md`](context/agent-tech-stack.md) — framework, LLM, and
+- [`context/decisions/agent-tech-stack.md`](context/decisions/agent-tech-stack.md) — framework, LLM, and
   observability decisions with the full contender tables.
-- [`context/agent-workflow.md`](context/agent-workflow.md) — the per-use-case tool/data/
+- [`context/decisions/agent-workflow.md`](context/decisions/agent-workflow.md) — the per-use-case tool/data/
   orchestration derivation and the single-vs-multi-agent verdict.
-- [`context/persona-analysis.md`](context/persona-analysis.md) — the eight-persona
+- [`context/decisions/persona-analysis.md`](context/decisions/persona-analysis.md) — the eight-persona
   comparison behind the target user.

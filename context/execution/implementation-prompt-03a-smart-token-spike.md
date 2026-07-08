@@ -35,7 +35,7 @@ it's cheap to change.
    (registration, authorize, token endpoints; scope syntax; how patient context is granted).
 3. `API_README.md` — the REST/OAuth2 surface, client registration, and any enablement steps
    (API on/off globals, client approval/trust, allowed grant types).
-4. `context/agent-workflow.md` — the five FHIR reads the agent ultimately needs (this spike
+4. `context/decisions/agent-workflow.md` — the five FHIR reads the agent ultimately needs (this spike
    only exercises `Patient`, but confirm the scopes you'd need for the full set).
 5. The audit's note (`AUDIT.md`, and `ARCHITECTURE.md` §2) that the FHIR/OAuth2 path is the
    *strong* half of OpenEMR — `league/oauth2-server`, fail-closed default-deny, token-embedded
@@ -63,7 +63,7 @@ Against the **running OpenEMR dev stack** (`docker/development-easy`, or a workt
 4. **The negative case is proven:** attempting to read a *different* patient's resource with
    the same token is **denied** (or scoped out). This is the actual security claim — without it
    the "IDOR unreachable" argument in §5 is unverified. Capture the response.
-5. **Findings are written up** in `context/smart-token-spike-findings.md`: the working flow
+5. **Findings are written up** in `context/execution/smart-token-spike-findings.md`: the working flow
    step by step, every enablement/config prerequisite, what OpenEMR does vs. what §5 assumed,
    and any correction §5 or `-03b` needs. Include the reproducible commands.
 
@@ -99,9 +99,9 @@ These would change the architecture, so raise them rather than working around th
 
 ## 5. Output
 
-- `context/smart-token-spike-findings.md` — the write-up (§2.5).
+- `context/execution/smart-token-spike-findings.md` — the write-up (§2.5).
 - A captured `Patient` FHIR JSON for the seed patient, saved where `-01`'s fixture client can
-  consume it (coordinate the path with `context/implementation-prompt-01-walking-skeleton.md`
+  consume it (coordinate the path with `context/execution/implementation-prompt-01-walking-skeleton.md`
   §1.2 — `agent/tests/fixtures/`).
 - A short recommendation: does `ARCHITECTURE.md` §5 stand as written, or need a correction
   before `-03b`? One paragraph, decision-grade.

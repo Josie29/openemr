@@ -3,7 +3,7 @@
 **Deliverable:** PRD Stage 4. This document is the source of truth `ARCHITECTURE.md`
 traces back to — every agent capability built in Stage 5 must point to a use case here
 (referenced by ID). The persona was chosen from a documented comparison of eight
-candidates in [`context/persona-analysis.md`](context/persona-analysis.md).
+candidates in [`context/decisions/persona-analysis.md`](context/decisions/persona-analysis.md).
 
 ---
 

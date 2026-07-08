@@ -7,8 +7,38 @@ grounded structured answer → Langfuse trace — plus real `/health` and `/read
 
 It is deliberately narrow. Only `get_patient` (FHIR `Patient`) is wired; the verification gate
 enforces **grounding only** (every claim cites a fetched resource). The other four FHIR tools,
-faithfulness/domain verification, SSE streaming, tiered routing, and the PHP module are
-follow-up increments (`-02`, `-03`). See the prompt's Non-goals.
+faithfulness/domain verification, SSE streaming, tiering, and the PHP module are follow-up
+increments (`-02`, `-03`). See the prompt's Non-goals.
+
+## How a turn flows
+
+The one canonical view of the current agent workflow — kept in sync with the code as it grows.
+When it needs several views (per-use-case sequences, deployment), we'll promote them to
+`agent/docs/`; the system-level topology stays in the root `ARCHITECTURE.md`.
+
+```mermaid
+flowchart TD
+    client([Client / chat panel]) -->|POST /chat| cid[correlation-ID middleware]
+    cid --> obs[observe_turn:<br/>open chat-turn span]
+    obs --> agent{{Pydantic AI agent · Claude}}
+
+    agent -->|tool call| tool[get_patient]
+    tool --> fhir[FhirClient<br/>fixture · or SMART httpx, no DB creds]
+    fhir -->|Patient R4| parse[parse → PatientDemographics]
+    parse --> flog[(FetchLog<br/>typed resource)]
+    parse --> agent
+
+    agent -->|candidate ChatResponse| gate{output_validator:<br/>grounding gate}
+    flog -. resolve field → value .-> gate
+    gate -->|claim not grounded| retry[ModelRetry] --> agent
+    gate -->|all grounded| stamp[stamp source.value<br/>from the record]
+    stamp --> resp[[ChatResponse:<br/>claims + verified values]]
+    resp -->|200 JSON| client
+
+    obs -. tokens · cost · verification score .-> lf[(Langfuse trace)]
+```
+
+`/health` and `/ready` are orthogonal probes, not part of the turn (see below).
 
 ## Layout
 
@@ -18,9 +48,9 @@ src/copilot/
   config.py        pydantic-settings; all config/secrets from env (COPILOT_ prefix)
   schemas.py       ChatRequest / ChatResponse / Claim / SourceRef contracts
   agent.py         Pydantic AI agent: get_patient tool + output_validator gate
-  verification.py  FetchLog registry + grounding check (ARCHITECTURE.md §7)
+  verification.py  FetchLog + field-level grounding & value stamping (ARCHITECTURE.md §7)
   correlation.py   X-Correlation-ID middleware
-  observability.py Langfuse tracer (tokens, cost, verification outcome) + NullTracer
+  observability.py Langfuse + Pydantic AI instrumentation; chat-turn span + verification score
   health.py        /health + /ready dependency probes
   fhir/            FhirClient protocol, httpx impl, fixture impl, PatientDemographics
 tests/             deterministic tests (fixtures + FunctionModel; no live LLM/FHIR)

@@ -1,9 +1,26 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from copilot.schemas import ChatResponse, Claim, SourceRef
 
 _MISSING = object()
+
+
+class FhirRecordable(Protocol):
+    """A fetched resource that knows its own FHIR identity.
+
+    Every typed FHIR model exposes ``resource_type``/``resource_id``, which is all
+    :meth:`FetchLog.record_all` needs to log it. Structural typing keeps ``verification`` free of
+    a dependency on the concrete model classes. Declared as read-only properties so the frozen
+    Pydantic models (whose fields are read-only) satisfy it.
+    """
+
+    @property
+    def resource_type(self) -> str: ...
+
+    @property
+    def resource_id(self) -> str: ...
 
 
 @dataclass
@@ -27,6 +44,19 @@ class FetchLog:
             resource: The parsed, typed resource object (e.g. ``PatientDemographics``).
         """
         self._objects[(resource_type, resource_id)] = resource
+
+    def record_all(self, resources: FhirRecordable | Sequence[FhirRecordable]) -> None:
+        """Record one resource or a list of them, keyed by each resource's own identity.
+
+        Centralizes the "a tool records exactly what it returns" invariant so no tool has to
+        spell out the ``(resource_type, resource_id)`` key or loop by hand.
+
+        Args:
+            resources: A single fetched resource, or a sequence of them.
+        """
+        items = resources if isinstance(resources, Sequence) else [resources]
+        for resource in items:
+            self.record(resource.resource_type, resource.resource_id, resource)
 
     def resolve(self, ref: SourceRef) -> str | None:
         """Resolve a citation to the real value in the fetched resource.

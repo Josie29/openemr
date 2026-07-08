@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from pydantic_ai import Agent, ModelRetry, RunContext
@@ -6,7 +7,7 @@ from pydantic_ai.models import Model
 from copilot.fhir.client import FhirClient
 from copilot.fhir.models import Allergy, Encounter, Medication, PatientDemographics, Problem
 from copilot.schemas import ChatResponse
-from copilot.verification import FetchLog, resolve_claims
+from copilot.verification import FetchLog, FhirRecordable, resolve_claims
 
 SYSTEM_PROMPT = """You are a Clinical Co-Pilot embedded in an electronic health record. You help a
 physician orient on the patient currently open, using ONLY the tools provided to read that
@@ -56,6 +57,25 @@ class CopilotDeps:
     fetched: FetchLog
 
 
+def _track[T: FhirRecordable | Sequence[FhirRecordable]](
+    ctx: RunContext[CopilotDeps], result: T
+) -> T:
+    """Record everything a tool fetched, then return it unchanged.
+
+    Wrapping every fetch in ``_track`` makes "record what you read" one visual unit at each tool's
+    return — a tool cannot fetch data without also grounding it in the FetchLog.
+
+    Args:
+        ctx: The run context (holds the fetch registry).
+        result: The resource, or list of resources, the tool fetched.
+
+    Returns:
+        ``result`` unchanged.
+    """
+    ctx.deps.fetched.record_all(result)
+    return result
+
+
 def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
     """Construct the single Clinical Co-Pilot agent (ARCHITECTURE.md §6 — one agent).
 
@@ -80,41 +100,27 @@ def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
     @agent.tool
     async def get_patient(ctx: RunContext[CopilotDeps]) -> PatientDemographics:
         """Read the open patient's demographics (name, birth date, sex) from FHIR."""
-        demographics = await ctx.deps.fhir.get_patient(ctx.deps.patient_id)
-        ctx.deps.fetched.record(demographics.resource_type, demographics.resource_id, demographics)
-        return demographics
+        return _track(ctx, await ctx.deps.fhir.get_patient(ctx.deps.patient_id))
 
     @agent.tool
     async def get_problems(ctx: RunContext[CopilotDeps]) -> list[Problem]:
         """Read the open patient's problem list (active and inactive Conditions)."""
-        problems = await ctx.deps.fhir.get_problems(ctx.deps.patient_id)
-        for problem in problems:
-            ctx.deps.fetched.record(problem.resource_type, problem.resource_id, problem)
-        return problems
+        return _track(ctx, await ctx.deps.fhir.get_problems(ctx.deps.patient_id))
 
     @agent.tool
     async def get_medications(ctx: RunContext[CopilotDeps]) -> list[Medication]:
         """Read the open patient's current medications (deduplicated MedicationRequests)."""
-        medications = await ctx.deps.fhir.get_medications(ctx.deps.patient_id)
-        for medication in medications:
-            ctx.deps.fetched.record(medication.resource_type, medication.resource_id, medication)
-        return medications
+        return _track(ctx, await ctx.deps.fhir.get_medications(ctx.deps.patient_id))
 
     @agent.tool
     async def get_allergies(ctx: RunContext[CopilotDeps]) -> list[Allergy]:
         """Read the open patient's allergies (AllergyIntolerance resources)."""
-        allergies = await ctx.deps.fhir.get_allergies(ctx.deps.patient_id)
-        for allergy in allergies:
-            ctx.deps.fetched.record(allergy.resource_type, allergy.resource_id, allergy)
-        return allergies
+        return _track(ctx, await ctx.deps.fhir.get_allergies(ctx.deps.patient_id))
 
     @agent.tool
     async def get_encounters(ctx: RunContext[CopilotDeps]) -> list[Encounter]:
         """Read the open patient's recent encounters (metadata only — no note bodies)."""
-        encounters = await ctx.deps.fhir.get_encounters(ctx.deps.patient_id)
-        for encounter in encounters:
-            ctx.deps.fetched.record(encounter.resource_type, encounter.resource_id, encounter)
-        return encounters
+        return _track(ctx, await ctx.deps.fhir.get_encounters(ctx.deps.patient_id))
 
     @agent.output_validator
     async def enforce_grounding(ctx: RunContext[CopilotDeps], output: ChatResponse) -> ChatResponse:

@@ -12,7 +12,7 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from copilot.agent import CopilotDeps, build_agent
 from copilot.config import FhirClientMode, Settings, get_settings
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
-from copilot.fhir.client import FhirError, HttpFhirClient
+from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.health import check_readiness
 from copilot.observability import configure_observability, observe_turn, shutdown_observability
@@ -99,6 +99,52 @@ def _build_model(settings: Settings) -> Model:
     return AnthropicModel(model_id, provider=provider)
 
 
+def _resolve_request_fhir(
+    request: Request, settings: Settings, correlation_id: str
+) -> tuple[FhirClient, HttpFhirClient | None] | JSONResponse:
+    """Resolve the FHIR client for one ``/chat`` turn from the request's auth context.
+
+    In HTTP mode the client is scoped to the inbound patient token, so the agent can physically
+    read only the one open patient (ARCHITECTURE.md §5). In fixture mode the shared app client
+    serves reads (no token exists).
+
+    Args:
+        request: The inbound request (carries the ``Authorization`` header and app state).
+        settings: Service settings (mode, FHIR endpoint, timeouts).
+        correlation_id: This turn's correlation id, for logging.
+
+    Returns:
+        On success, a ``(client, per_request_client)`` pair — ``per_request_client`` is the
+        closable client the caller must ``aclose`` (HTTP mode) or ``None`` (fixture mode). On a
+        bad request, a ``JSONResponse`` (401 no token, 500 misconfigured) to return directly.
+    """
+    if settings.fhir_client_mode is FhirClientMode.FIXTURE:
+        return request.app.state.fhir, None
+    token = _bearer_token(request) or settings.fhir_bearer_token
+    if not token:
+        logger.info("rejected /chat with no patient token", extra={"cid": correlation_id})
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": "missing patient-scoped FHIR token",
+                "correlation_id": correlation_id,
+            },
+        )
+    if not settings.fhir_base_url:
+        logger.error("HTTP mode without a FHIR base URL", extra={"cid": correlation_id})
+        return JSONResponse(
+            status_code=500,
+            content={"error": "agent misconfigured", "correlation_id": correlation_id},
+        )
+    client = HttpFhirClient(
+        settings.fhir_base_url,
+        token,
+        timeout_seconds=settings.fhir_timeout_seconds,
+        max_retries=settings.fhir_max_retries,
+    )
+    return client, client
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build and wire the Clinical Co-Pilot agent service.
 
@@ -151,36 +197,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         enabled = request.app.state.observability_enabled
         settings: Settings = request.app.state.settings
 
-        # Build the FHIR client for this turn. In HTTP mode it is scoped to the inbound
-        # patient token, so the agent can physically read only the one open patient (ARCHITECTURE.md
-        # §5). In fixture mode the shared app client serves reads (no token exists).
-        per_request_client: HttpFhirClient | None = None
-        if settings.fhir_client_mode is FhirClientMode.FIXTURE:
-            fhir = request.app.state.fhir
-        else:
-            token = _bearer_token(request) or settings.fhir_bearer_token
-            if not token:
-                logger.info("rejected /chat with no patient token", extra={"cid": correlation_id})
-                return JSONResponse(
-                    status_code=401,
-                    content={
-                        "error": "missing patient-scoped FHIR token",
-                        "correlation_id": correlation_id,
-                    },
-                )
-            if not settings.fhir_base_url:
-                logger.error("HTTP mode without a FHIR base URL", extra={"cid": correlation_id})
-                return JSONResponse(
-                    status_code=500,
-                    content={"error": "agent misconfigured", "correlation_id": correlation_id},
-                )
-            per_request_client = HttpFhirClient(
-                settings.fhir_base_url,
-                token,
-                timeout_seconds=settings.fhir_timeout_seconds,
-                max_retries=settings.fhir_max_retries,
-            )
-            fhir = per_request_client
+        resolved = _resolve_request_fhir(request, settings, correlation_id)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        fhir, per_request_client = resolved
 
         deps = CopilotDeps(
             fhir=fhir,

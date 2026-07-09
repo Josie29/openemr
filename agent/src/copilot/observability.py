@@ -37,6 +37,9 @@ def configure_observability(settings: Settings) -> bool:
     os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key or "")
     os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key or "")
     os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_host)
+    # Segregates local dev / eval / prod traces within one Langfuse project (the trace
+    # `environment` field). The SDK reads this env var when the client initializes below.
+    os.environ.setdefault("LANGFUSE_TRACING_ENVIRONMENT", settings.tracing_environment)
 
     try:
         client = get_client()

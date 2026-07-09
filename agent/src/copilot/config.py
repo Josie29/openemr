@@ -111,6 +111,15 @@ class Settings(BaseSettings):
             "LANGFUSE_HOST", "LANGFUSE_BASE_URL", "COPILOT_LANGFUSE_HOST"
         ),
     )
+    # Stamped on every Langfuse trace (its `environment` field) so local dev, evals, and Railway
+    # prod stay filterable within one project. Defaults to development; Railway sets production.
+    # Langfuse requires lowercase [a-z0-9-_] and forbids a leading 'langfuse'.
+    tracing_environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices(
+            "LANGFUSE_TRACING_ENVIRONMENT", "COPILOT_TRACING_ENVIRONMENT"
+        ),
+    )
 
     @property
     def langfuse_enabled(self) -> bool:

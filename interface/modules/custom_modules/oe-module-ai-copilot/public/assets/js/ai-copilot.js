@@ -131,6 +131,7 @@
         }
         els.patient.textContent = currentPatientName();
         resetTranscript();
+        setHasConversation(false); // unknown until the thread loads; loadThread flips it on when it exists
         loadThread(pid); // Phase 3 stub: restores this patient's saved conversation
     }
 
@@ -154,6 +155,23 @@
         }
         var anchor = banner.querySelector('.form-group .mt-2') || banner.querySelector('.mt-2') || banner;
         anchor.appendChild(toggleBtn);
+    }
+
+    /**
+     * Toggle the Launcher's has-conversation hint dot (spec §4.2): a saved thread exists for the
+     * active patient. Called by the Phase 3 load path; until persistence lands there is nothing to
+     * detect, so the dot stays hidden.
+     *
+     * @param {boolean} has Whether a saved conversation exists for the active patient.
+     */
+    function setHasConversation(has) {
+        if (!els.hint) {
+            return;
+        }
+        els.hint.hidden = !has;
+        if (has && labels.hasConversation) {
+            els.hint.title = labels.hasConversation;
+        }
     }
 
     // ---- open / close / resize -------------------------------------------
@@ -305,6 +323,45 @@
     }
 
     /**
+     * Show the in-flight indicator between the question and the answer (spec §5.3.1): an animated
+     * typing indicator plus an optional grounded caption. Returned so the caller can swap it for the
+     * answer (or an error) when the turn resolves. This node is the seam a future streaming increment
+     * fills token-by-token.
+     *
+     * @returns {HTMLElement} The pending-turn node, already appended to the transcript.
+     */
+    function appendPending() {
+        var pending = document.createElement('div');
+        pending.className = 'ai-copilot__pending';
+        // This is the only in-turn progress affordance, so let it announce: role="status" gives it an
+        // implicit aria-live="polite" region for screen readers.
+        pending.setAttribute('role', 'status');
+
+        var dots = document.createElement('div');
+        dots.className = 'ai-copilot__dots';
+        for (var i = 0; i < 3; i++) {
+            dots.appendChild(document.createElement('span'));
+        }
+        pending.appendChild(dots);
+
+        if (labels.thinking) {
+            var caption = document.createElement('p');
+            caption.className = 'ai-copilot__thinking';
+            caption.textContent = labels.thinking;
+            pending.appendChild(caption);
+        }
+
+        appendNode(pending);
+        return pending;
+    }
+
+    function removePending(pending) {
+        if (pending && pending.parentNode) {
+            pending.parentNode.removeChild(pending);
+        }
+    }
+
+    /**
      * Render one grounded answer: prose summary, then every claim with its structured citation.
      *
      * @param {{summary: string, claims: Array<{text: string, source: Object}>}} answer
@@ -431,12 +488,12 @@
         if (launchInFlight) {
             return launchInFlight;
         }
-        setStatus(labels.connecting, false);
+        // No progress message here: the in-flight pending bubble (appendPending) is the single
+        // "working" affordance, and it is already on screen before this runs.
         launchInFlight = runLaunch()
             .then(function (fresh) {
                 token = fresh;
                 launchInFlight = null;
-                setStatus('', false);
                 return fresh;
             })
             .catch(function (err) {
@@ -475,6 +532,7 @@
         appendQuestion(message);
         setBusy(true);
         setStatus('', false);
+        var pending = appendPending(); // in-flight indicator; swapped for the answer or an error below
         var pidForTurn = activePid;
 
         sendTurn(message)
@@ -487,10 +545,12 @@
                 });
             })
             .then(function (answer) {
+                removePending(pending);
                 appendAnswer(answer);
                 persistTurn(pidForTurn, message, answer); // Phase 3 stub
             })
             .catch(function (err) {
+                removePending(pending);
                 if (LAUNCH_FAILURES.indexOf(err.message) !== -1) {
                     setStatus(labels.authFailed, true);
                     appendError(labels.authFailed);
@@ -519,6 +579,7 @@
     function clearThread() {
         // Phase 3: DELETE the thread for (session user, pid). For now, just reset the view.
         resetTranscript();
+        setHasConversation(false); // no saved thread remains for this patient
     }
 
     // ---- wiring ----------------------------------------------------------
@@ -561,10 +622,11 @@
         }
 
         labels = {
-            connecting: els.sidebar.dataset.labelConnecting,
             authFailed: els.sidebar.dataset.labelAuthFailed,
             unavailable: els.sidebar.dataset.labelUnavailable,
-            clearConfirm: els.sidebar.dataset.labelClearConfirm
+            clearConfirm: els.sidebar.dataset.labelClearConfirm,
+            thinking: els.sidebar.dataset.labelThinking,
+            hasConversation: els.sidebar.dataset.labelHasConversation
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');
@@ -576,6 +638,7 @@
         els.form = document.getElementById('ai-copilot-form');
         els.clear = document.getElementById('ai-copilot-clear');
         els.close = document.getElementById('ai-copilot-close');
+        els.hint = document.getElementById('ai-copilot-hint');
 
         // Cache the server-rendered empty state so resetTranscript() can restore it verbatim.
         els.emptyTemplate = els.transcript.querySelector('.ai-copilot__empty').cloneNode(true);

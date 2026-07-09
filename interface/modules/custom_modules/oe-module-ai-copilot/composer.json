@@ -1,0 +1,36 @@
+{
+    "name": "openemr/oe-module-ai-copilot",
+    "description": "AgentForge Clinical Co-Pilot - in-chart chat panel backed by a standalone agent service, authenticated with a SMART patient-scoped token",
+    "type": "openemr-module",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Josie Machalek",
+            "email": "01josie@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "OpenEMR\\Modules\\AiCopilot\\": "src/"
+        }
+    },
+    "extra": {
+        "openemr": {
+            "type": "custom-module",
+            "directory": "oe-module-ai-copilot"
+        }
+    },
+    "keywords": [
+        "openemr",
+        "module",
+        "smart-on-fhir",
+        "ai",
+        "clinical-copilot"
+    ],
+    "support": {
+        "issues": "https://github.com/openemr/openemr/issues"
+    }
+}

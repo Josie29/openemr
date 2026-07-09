@@ -1,0 +1,306 @@
+/**
+ * Clinical Co-Pilot docked sidebar.
+ *
+ * A VS Code-style panel docked to the right of the OpenEMR shell: fixed, full-height, resizable,
+ * pushing the chart content aside rather than covering it. See context/specs/copilot-sidebar.md.
+ *
+ * @package   OpenEMR
+ * @link      https://www.open-emr.org
+ * @author    Josie Machalek <01josie@gmail.com>
+ * @copyright Copyright (c) 2026 Josie Machalek
+ * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ */
+
+:root {
+    /* Live width, driven by the resize handle and restored from localStorage by the JS. */
+    --ai-copilot-width: 20vw;
+}
+
+/* Push, not overlay: when open, the shell body reserves space so the chart reflows beside us. */
+body.ai-copilot-open {
+    margin-right: var(--ai-copilot-width);
+    /* The chart frames read the shrunken body width; keep the transition gentle. */
+    transition: margin-right 0.12s ease-out;
+}
+
+/* ---- The sidebar shell ---- */
+
+.ai-copilot {
+    --copilot-space-1: 0.25rem;
+    --copilot-space-2: 0.5rem;
+    --copilot-space-3: 0.75rem;
+    --copilot-space-4: 1rem;
+
+    --copilot-radius: 0.25rem;
+    --copilot-border: #d3d9df;
+    --copilot-muted: #5b6770;
+    --copilot-accent: #0b5fa5;
+    --copilot-error: #a32020;
+    --copilot-surface: #ffffff;
+    --copilot-surface-alt: #f6f8fa;
+    --copilot-question-bg: #eef3f8;
+
+    --copilot-font-sm: 0.8125rem;
+    --copilot-font-base: 0.9375rem;
+
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 1080; /* above OpenEMR chrome; below Bootstrap modals (1050+ varies, kept clear of dialogs) */
+    display: flex;
+    flex-direction: column;
+    width: var(--ai-copilot-width);
+    height: 100dvh;
+    background: var(--copilot-surface);
+    border-left: 1px solid var(--copilot-border);
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
+    font-size: var(--copilot-font-base);
+}
+
+.ai-copilot[hidden] {
+    display: none;
+}
+
+/* ---- Resize handle (left edge) ---- */
+
+.ai-copilot__resizer {
+    position: absolute;
+    top: 0;
+    left: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+}
+
+.ai-copilot__resizer:hover,
+.ai-copilot__resizer:focus-visible {
+    background: var(--copilot-accent);
+    outline: none;
+}
+
+/* ---- Header ---- */
+
+.ai-copilot__header {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: start;
+    gap: var(--copilot-space-1) var(--copilot-space-2);
+    padding: var(--copilot-space-3);
+    border-bottom: 1px solid var(--copilot-border);
+}
+
+.ai-copilot__title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.ai-copilot__patient {
+    margin: 0;
+    font-size: var(--copilot-font-sm);
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__patient:empty {
+    display: none;
+}
+
+.ai-copilot__actions {
+    display: flex;
+    gap: var(--copilot-space-2);
+    align-items: center;
+}
+
+.ai-copilot__clear {
+    border: 1px solid var(--copilot-border);
+    background: var(--copilot-surface);
+    border-radius: var(--copilot-radius);
+    padding: 0 var(--copilot-space-2);
+    font-size: var(--copilot-font-sm);
+    color: var(--copilot-muted);
+    cursor: pointer;
+}
+
+.ai-copilot__clear[hidden] {
+    display: none;
+}
+
+.ai-copilot__close {
+    border: none;
+    background: transparent;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: var(--copilot-muted);
+    cursor: pointer;
+}
+
+.ai-copilot__status {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: var(--copilot-font-sm);
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__status--error {
+    color: var(--copilot-error);
+}
+
+.ai-copilot__status:empty {
+    display: none;
+}
+
+/* ---- Transcript ---- */
+
+.ai-copilot__transcript {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-3);
+    padding: var(--copilot-space-3);
+    overflow-y: auto;
+}
+
+.ai-copilot__intro {
+    margin: 0 0 var(--copilot-space-3);
+    color: var(--copilot-muted);
+    font-size: var(--copilot-font-sm);
+}
+
+/* ---- Starter-prompt chips ---- */
+
+.ai-copilot__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--copilot-space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ai-copilot__chip {
+    border: 1px solid var(--copilot-accent);
+    background: var(--copilot-surface-alt);
+    color: var(--copilot-accent);
+    border-radius: 1rem;
+    padding: var(--copilot-space-1) var(--copilot-space-3);
+    font-size: var(--copilot-font-sm);
+    cursor: pointer;
+    text-align: left;
+}
+
+.ai-copilot__chip:hover {
+    background: var(--copilot-question-bg);
+}
+
+/* ---- Turns ---- */
+
+.ai-copilot__question {
+    margin: 0;
+    padding: var(--copilot-space-2) var(--copilot-space-3);
+    background: var(--copilot-question-bg);
+    border-radius: var(--copilot-radius);
+    font-weight: 600;
+}
+
+.ai-copilot__error {
+    margin: 0;
+    color: var(--copilot-error);
+}
+
+.ai-copilot__answer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+}
+
+.ai-copilot__summary {
+    margin: 0;
+}
+
+.ai-copilot__claims {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+    margin: 0;
+    padding-left: var(--copilot-space-4);
+}
+
+.ai-copilot__claim {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-1);
+}
+
+/*
+ * The citation is the point of the verification design: every claim resolves to a real field of a
+ * real resource the agent read. Keep it visually attached to its claim and monospaced so the
+ * resource id / record value read as data, not prose.
+ */
+.ai-copilot__citation {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--copilot-space-1) var(--copilot-space-2);
+    padding: var(--copilot-space-1) var(--copilot-space-2);
+    border-left: 2px solid var(--copilot-accent);
+    background: var(--copilot-surface-alt);
+    border-radius: 0 var(--copilot-radius) var(--copilot-radius) 0;
+    font-family: var(--font-family-monospace, monospace);
+    font-size: var(--copilot-font-sm);
+    font-style: normal;
+    color: var(--copilot-muted);
+    overflow-wrap: anywhere;
+}
+
+.ai-copilot__citation-resource {
+    color: var(--copilot-accent);
+}
+
+/* ---- Composer ---- */
+
+.ai-copilot__composer {
+    display: flex;
+    gap: var(--copilot-space-2);
+    padding: var(--copilot-space-3);
+    border-top: 1px solid var(--copilot-border);
+}
+
+.ai-copilot__input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ai-copilot__send {
+    flex: 0 0 auto;
+}
+
+/* ---- Banner toggle button (injected next to DOB/Age) ---- */
+
+.ai-copilot-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--copilot-space-1, 0.25rem);
+    margin-left: 0.5rem;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid #0b5fa5;
+    border-radius: 1rem;
+    background: #ffffff;
+    color: #0b5fa5;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.ai-copilot-toggle[hidden] {
+    display: none;
+}
+
+.ai-copilot-toggle[aria-expanded="true"] {
+    background: #0b5fa5;
+    color: #ffffff;
+}
+
+.ai-copilot-toggle__icon {
+    font-size: 0.75rem;
+}

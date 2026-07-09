@@ -23,6 +23,9 @@ place it by asking which of these it is:
 - `context/decisions/` — justifies a choice made in a PRD deliverable (why this
   architecture, this persona, this data-exposure finding). Cited by name from
   `ARCHITECTURE.md`/`USERS.md`/`AUDIT.md`.
+- `context/specs/` — the agreed design contract for a feature *before* it is built:
+  goals/non-goals, UX, data model, risks, acceptance criteria. Upstream of an execution
+  prompt (which then implements the spec). E.g. `context/specs/copilot-sidebar.md`.
 - `context/execution/` — a prompt handed to a fresh session to execute a specific
   increment, plus the findings/write-up that came back from running it.
 - `context/planning/` — cross-cutting project ops that isn't deliverable evidence

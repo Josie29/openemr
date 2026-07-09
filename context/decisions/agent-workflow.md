@@ -338,7 +338,7 @@ confirmation):
 
 > **1. Single-agent assumption** — ~~confirmed against `USERS.md`? If any UC needs real
 > delegation, revisit LangGraph (1-day spike on the UC-4 med/problem flow).~~
-> **Confirmed** against all five use cases in `context/agent-workflow.md` — every UC is one
+> **Confirmed** against all five use cases in `context/decisions/agent-workflow.md` — every UC is one
 > conversational agent over the five-tool set with a verification validator; no capability
 > needs role-delegation *or a context-isolated sub-agent*. Under the orchestrator → sub-agent
 > lens, our capabilities are deterministic tools (FHIR reads) or inline reasoning over bounded
@@ -350,6 +350,61 @@ confirmation):
 The LangGraph/ADK framework spike (open question #2) still stands on its own merits — it
 validates *how cleanly Pydantic AI expresses the gate*, independent of the single-vs-multi
 question this doc settles.
+
+---
+
+## The free-text gap — the agent-vs-dashboard linchpin (open decision)
+
+The PRD grades one thing hardest about this project: *why an agent and not a dashboard.*
+Stress-testing that against the actual tools surfaces a gap worth stating plainly.
+
+**The tools we build return the dashboard-able subset of the record.** All five FHIR reads
+fetch **bounded, structured** data — coded problem/med/allergy lists, encounter metadata.
+That is precisely what a dashboard renders well. So the agent's justification cannot come
+from the tools; it comes from what they *enable* — open-ended NL queries, multi-turn
+follow-up, and synthesis. Checking which use cases actually lean on that:
+
+| UC | Dashboard could do it? | Agent decisively justified? |
+|---|---|---|
+| UC-1 orient me | Yes — a summary panel | Weak (it's the *opening turn*, not the value) |
+| UC-2 what changed | Yes — a "changes since last visit" panel | Weak (agent only adds salience) |
+| UC-3 why / drill-down | **No** | **Strong — the real case** |
+| UC-4 reconciliation | Partly (static med-recon matrices exist) | Medium (the *conversation* about flags) |
+| UC-5 cross-cover | Synthesis half: yes; auth: orthogonal | Inherits UC-1/UC-3; auth doesn't argue for agent |
+
+**The capability that structurally cannot be a dashboard is reasoning over free-text
+narrative** — "what did cardiology actually say?", "was chest pain ever mentioned?", and
+UC-3's **why** (a med's discontinuation reason lives in the note prose, not a coded field).
+A dashboard renders fields into widgets; it cannot answer an arbitrary NL question over
+unstructured prose. That is inherently a language-model job — the one thing that makes the
+agent un-replaceable.
+
+**The inconsistency:** `USERS.md` lists exactly these free-text questions as motivating
+("what did cardiology actually say?"; UC-3's *why*), but the five scoped tools return only
+the **structured** layer. As tooled, the agent can report *that* a med stopped, not *why* —
+so it cannot fully serve UC-3, the use case that most justifies its existence.
+
+**Open decision — add a free-text tool, or accept the narrower justification?** A free-text
+capability (encounter/clinical-note bodies via FHIR `DocumentReference` or encounter form
+data) is the highest-value differentiator, but it is a **separate, harder bet**, not "tool
+#6":
+
+- **Different FHIR surface** — note text is not in the five scoped resources; it needs
+  `DocumentReference` (or encounter forms), which must be verified against what OpenEMR's
+  FHIR actually exposes.
+- **It reopens two things we optimized away.** Note bodies are large → the context-volume
+  pressure that pushed us to structured-only tools (the sub-agent tripwire in §6). And
+  grounding a claim to *a span of prose* is materially harder than resolving it to a typed
+  field — it stresses the faithfulness half of the verification gate (`ARCHITECTURE.md` §7),
+  not the deterministic half.
+
+**Recommendation.** Treat structured-only as the correct MVP scope (fast, verifiable,
+single-agent), and reframe UC-1/UC-2 honestly as conversation *entry points* whose value is
+the follow-up. Sequence the free-text tool as a distinct, later increment — the point at
+which it lands is also the point at which the retrieval sub-agent tripwire and prose-level
+faithfulness checking must be answered together. Until then, the agent-vs-dashboard case
+rests on UC-3/UC-4, and that should be said out loud in the defense rather than claimed for
+all five.
 
 ---
 

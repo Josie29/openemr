@@ -6,7 +6,7 @@
 > **no code, no scaffolding, no other deliverable.** A single-focus session writes a
 > sharper document than one where the doc is a warm-up before building.
 >
-> **Supersedes** `context/implementation-prompt-01-walking-skeleton.md` "Phase 0". Once
+> **Supersedes** `context/execution/implementation-prompt-01-walking-skeleton.md` "Phase 0". Once
 > `ARCHITECTURE.md` exists, prompt-01 should be run assuming the doc is already written —
 > its Phase 0 is redundant with this.
 
@@ -46,20 +46,20 @@ trace to them; where they conflict with each other, the **PRD wins**, then the d
    gap, the new PHI→LLM outbound flow (BAA + §164.514 de-identification), secrets hygiene,
    no in-app TLS/HSTS, med-storage data-quality quirks. The Interview prep asks "how did
    the audit change the plan?" — the doc must show that lineage.
-4. **`context/deployment-strategy.md`** — **Option D is selected.** The full A/B/C/D
+4. **`context/decisions/deployment-strategy.md`** — **Option D is selected.** The full A/B/C/D
    comparison, the Railway topology (both diagrams), the FHIR-only + patient-scoped-token
    + no-DB-creds data model, and the authorization model. This is the bulk of the
    "where the agent lives" content.
-5. **`context/agent-tech-stack.md`** — the stack and *why*: Pydantic AI (runner-up
+5. **`context/decisions/agent-tech-stack.md`** — the stack and *why*: Pydantic AI (runner-up
    LangGraph), Claude tiered (Sonnet 5 default / Haiku 4.5 cheap checks / Opus 4.8 hard
    cases), Langfuse, FastAPI, `fhir.resources` + httpx, Pydantic Evals. The verification
    gate is Pydantic AI's `output_validator` raising `ModelRetry`.
-6. **`context/agent-workflow.md`** — the single-vs-multi-agent derivation, the five-tool
+6. **`context/decisions/agent-workflow.md`** — the single-vs-multi-agent derivation, the five-tool
    inventory, the per-UC orchestration breakdown, and the traceability matrix. This is
    the "how the agent works per use case" content and the load-bearing **single-agent
    verdict** (with the tripwires that would flip it).
-7. **`context/persona-analysis.md`**, **`context/synthetic-data-generation.md`**,
-   **`context/patient-data-exposure-map.md`** — supporting evidence; cite where relevant.
+7. **`context/decisions/persona-analysis.md`**, **`context/decisions/synthetic-data-generation.md`**,
+   **`context/decisions/patient-data-exposure-map.md`** — supporting evidence; cite where relevant.
 
 If anything in these turns out to be stale against the actual code or live seed DB, **stop
 and flag it** rather than repeating it — do not invent.

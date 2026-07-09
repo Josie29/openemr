@@ -38,18 +38,18 @@ Do not start coding until these are read — every decision below traces to them
    UC-5 (cross-cover) is the authorization test case.
 4. `AUDIT.md` — the security/compliance constraints the design must respect (IDOR gap, new
    PHI→LLM flow / BAA + de-identification seam, secrets hygiene, no in-app TLS).
-5. `context/agent-workflow.md` — **the most directly actionable doc for this work.** The
+5. `context/decisions/agent-workflow.md` — **the most directly actionable doc for this work.** The
    middle layer between `USERS.md` and the architecture: it fixes the **canonical tool
    inventory** (`get_patient` → `PatientDemographics`, `get_problems`, `get_medications`,
    `get_allergies`, `get_encounters`, plus an optional `get_patient_snapshot` composite),
    the per-UC call patterns and orchestration, what the verification gate must catch per UC,
    and the **single-agent verdict**. Use its tool names and typed return models verbatim;
    do not invent new ones.
-6. `context/deployment-strategy.md`, `context/agent-tech-stack.md` — decision evidence
+6. `context/decisions/deployment-strategy.md`, `context/decisions/agent-tech-stack.md` — decision evidence
    *behind* `ARCHITECTURE.md` (the roads not taken: why Option D, why Pydantic AI / Claude /
    Langfuse). Consult for the *why* when a decision is unclear; `ARCHITECTURE.md` is what to
    build to.
-7. `context/synthetic-data-generation.md` — supporting (seed patient data).
+7. `context/decisions/synthetic-data-generation.md` — supporting (seed patient data).
 
 If anything below contradicts `ARCHITECTURE.md`, **the architecture doc wins** — stop and
 flag it.
@@ -73,7 +73,7 @@ architecture:
   flag it.
 - **Name the contracts first.** List the Pydantic v2 models you'll define (`/chat`
   request/response, `PatientDemographics`, the tool I/O) and confirm their shapes match the
-  canonical inventory in `context/agent-workflow.md`. Contracts are the source of truth, not
+  canonical inventory in `context/decisions/agent-workflow.md`. Contracts are the source of truth, not
   the implementation (PRD engineering req).
 - **Confirm the cut line.** Restate what this increment builds vs. defers (§ Non-goals), so
   the plan is a thin vertical slice and not a creeping rebuild.
@@ -97,7 +97,7 @@ request end to end:
 POST /chat  { patient_id, message }
   → correlation-ID middleware stamps a request-scoped ID
   → Pydantic AI agent runs ONE tool: get_patient() → PatientDemographics (FHIR R4 Patient)
-    (canonical name + return model from context/agent-workflow.md — use it verbatim)
+    (canonical name + return model from context/decisions/agent-workflow.md — use it verbatim)
   → Claude (Sonnet 5) produces a structured answer
   → output_validator gate rejects any claim without a source citation (ModelRetry on fail)
   → response returned as a typed Pydantic model, every claim carrying a source reference
@@ -119,7 +119,7 @@ them — do not restate or reinterpret; implement §10:
 
 **Deliberately one tool.** `get_patient()` reads the simplest FHIR resource (`Patient`) and
 is needed by every UC — it's the right first tool to prove parse-don't-validate with
-`fhir.resources`. The other four tools from the `context/agent-workflow.md` inventory
+`fhir.resources`. The other four tools from the `context/decisions/agent-workflow.md` inventory
 (`get_problems`, `get_medications`, `get_allergies`, `get_encounters`), the med dedup /
 text-fallback logic that lives inside `get_medications()`, and clinical-constraint
 verification are **explicit non-goals of this increment** (see § Non-goals) and come in
@@ -208,7 +208,7 @@ redefine the requirements:
   and propagation into every log line, tool call, LLM call, and Langfuse trace attribute.
 - **Canonical Pydantic v2 contracts** (PRD; `ARCHITECTURE.md` §4 tool table) — **now**: strict
   models for `/chat` request/response and the `get_patient` tool I/O, matching the canonical
-  shapes in `context/agent-workflow.md`.
+  shapes in `context/decisions/agent-workflow.md`.
 - **`/health` vs `/ready`** (§10) — **now**, as in §1.1 above.
 - **Langfuse tracing** (§10) — **now**, for the single turn: step order, per-step latency,
   tool success/failure, tokens + cost, verification pass/fail.
@@ -275,7 +275,7 @@ Run `ruff` + `mypy` before declaring any step done.
 
 ## 4. Non-goals (explicitly out of scope for this prompt — do NOT build)
 
-- The other four tools from `context/agent-workflow.md` (`get_problems`, `get_medications`,
+- The other four tools from `context/decisions/agent-workflow.md` (`get_problems`, `get_medications`,
   `get_allergies`, `get_encounters`), the `get_patient_snapshot` composite, med dedup, and
   text-match fallback → prompt `-02`.
 - The faithfulness (Haiku entailment judge) and domain-constraint checks — §7's other two
@@ -303,7 +303,7 @@ If you hit any of these, stop and flag rather than guessing — they change the 
   `source_ref` shape / citation granularity, or the §4 `PatientDemographics` field set) —
   make the minimal choice for the skeleton and flag it as a contract the follow-up prompts
   inherit, so `-02`/`-03` don't each re-guess it.
-- `ARCHITECTURE.md`, `context/agent-workflow.md`, or the PRD turn out to disagree, or any of
+- `ARCHITECTURE.md`, `context/decisions/agent-workflow.md`, or the PRD turn out to disagree, or any of
   them is stale against the actual code / live seed DB — flag it; **`ARCHITECTURE.md` is the
   tiebreaker** (verify against source, then reconcile, as the deployment doc models).
 ```

@@ -1,0 +1,60 @@
+name: Agent evals (report-only)
+
+# The paid eval: makes real Anthropic API calls (agent + judges) and writes a run to Langfuse, so
+# it costs money per run. It therefore runs ONLY on release-promotion PRs into main
+# (qa/integration -> main; main = prod) and on manual dispatch — NOT on feature -> qa/integration
+# PRs. Free deterministic agent tests (pytest/ruff/mypy) run on every PR via agent-tests.yml.
+# REPORT-ONLY: results are posted as a PR comment but never fail the job (see should_fail_on_*
+# below). To turn this into an enforcing gate once the judges are calibrated, flip
+# should_fail_on_regression to "true" — the thresholds already live in evals/experiment.py.
+
+on:
+  pull_request:
+    # Base-branch filter: only PRs targeting main (i.e. qa/integration -> main promotions).
+    branches:
+      - main
+    paths:
+      - "agent/**"
+      - ".github/workflows/evals.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      # Install the agent package so the experiment script can `import copilot.*` and so the
+      # ambient env carries our pinned langfuse (>=4) SDK — hence should_skip_sdk_installation.
+      - name: Install agent package
+        run: pip install -e ./agent
+
+      - uses: langfuse/experiment-action@377da5adb75223b208b7da05276598ff093aaf48 # v1.0.5
+        env:
+          # The agent-under-test and the Haiku judges both call Anthropic.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          langfuse_public_key: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          langfuse_base_url: ${{ secrets.LANGFUSE_BASE_URL }}
+          experiment_path: agent/src/copilot/evals/experiment.py
+          dataset_name: copilot-grounding-v1
+          should_skip_sdk_installation: "true"
+          # Report-only: comment on the PR, but do not fail the job on regression or script error.
+          should_fail_on_regression: "false"
+          should_fail_on_script_error: "false"
+          should_comment_on_pr: "true"
+          github_token: ${{ github.token }}

@@ -68,6 +68,11 @@ services:
       EASY_DEV_MODE: "yes"
       EASY_DEV_MODE_NEW: "yes"
       DEVELOPER_TOOLS: "yes"
+      # Puts OpenEMR in dev mode: v_js_includes becomes per-request (version.php), so edited
+      # JS/CSS busts the browser cache on every reload instead of sticking at the static release
+      # version. Also enables on-screen PHP errors and Twig debug. Local dev-easy only; never set
+      # on the Railway prod image, which stays on the release-version cache-buster.
+      OPENEMR__ENVIRONMENT: "dev"
       XDEBUG_ON: 1
       XDEBUG_PROFILER_ON: 1
       # setting xdebug client host for cases where xdebug.discover_client_host fails

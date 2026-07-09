@@ -64,9 +64,16 @@ class HttpFhirClient:
     ) -> None:
         self._base_url = base_url.rstrip("/")
         transport = httpx.AsyncHTTPTransport(retries=max_retries)
+        headers = {"Accept": "application/fhir+json"}
+        # An empty token must not become "Authorization: Bearer " — httpx rejects the trailing space
+        # as an illegal header value, which would fail every request including the unauthenticated
+        # /metadata readiness probe. Reads without a token then fail closed at the server (401);
+        # the probe needs no credential and still works.
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            headers={"Authorization": f"Bearer {bearer_token}", "Accept": "application/fhir+json"},
+            headers=headers,
             timeout=timeout_seconds,
             transport=transport,
         )

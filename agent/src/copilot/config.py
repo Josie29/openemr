@@ -1,8 +1,9 @@
 from enum import StrEnum
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class ModelTier(StrEnum):
@@ -57,10 +58,39 @@ class Settings(BaseSettings):
     )
     fhir_bearer_token: str | None = Field(
         default=None,
-        description="SMART patient/*.read token (env-var stand-in until the PHP module mints it)",
+        description=(
+            "Fallback SMART patient/*.read token, used only when a request carries no "
+            "Authorization header. The PHP module mints a per-request token; see /chat."
+        ),
     )
     fhir_timeout_seconds: float = 10.0
     fhir_max_retries: int = 2
+
+    # Browser origins allowed to call /chat directly (ARCHITECTURE.md §4: the chat XHR goes from the
+    # physician's browser to this service, not proxied through PHP). Empty means no browser may call
+    # us — fail closed rather than defaulting to "*", which would let any page spend a stolen token.
+    # NoDecode is load-bearing: pydantic-settings JSON-decodes complex fields inside the env source,
+    # before any validator runs, so a bare "http://localhost:8301" raises SettingsError at startup.
+    # NoDecode hands the raw string to the validator below instead.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description="Comma-separated browser origins, e.g. http://localhost:8301",
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, value: object) -> object:
+        """Accept a comma-separated string, since env vars cannot carry a JSON list ergonomically.
+
+        Args:
+            value: The raw environment value, or an already-parsed list.
+
+        Returns:
+            A list of trimmed origins when given a string; the value untouched otherwise.
+        """
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
     # Observability (Langfuse — ARCHITECTURE.md §10).
     # Accept the SDK's native LANGFUSE_* names (what the Langfuse UI hands you) as well as our

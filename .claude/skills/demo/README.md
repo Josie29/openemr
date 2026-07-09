@@ -17,10 +17,12 @@ Installs `ffmpeg` + `whisper-cpp` (Homebrew), a dedicated Python venv with
 `~/.cache/demo-skill/`. Idempotent — safe to re-run.
 
 **macOS Screen Recording permission (required, one-time):** the pipeline captures the
-screen via ffmpeg avfoundation, which needs Screen Recording permission for the terminal
-app hosting Claude Code. Grant it under **System Settings → Privacy & Security → Screen
-Recording**, then **fully quit and reopen** the app (it only takes effect after a
-restart). Without it, avfoundation won't even list the screen and `preflight` will block.
+screen via ffmpeg avfoundation, which needs Screen Recording permission for the **app
+hosting Claude Code** — i.e. your editor/terminal (e.g. **Visual Studio Code**, iTerm,
+Terminal), **not** the standalone Claude desktop app. Grant it under **System Settings →
+Privacy & Security → Screen Recording**, then **fully quit and reopen** that app (it only
+takes effect after a restart). Without it, avfoundation won't even list the screen and
+`preflight` will block — `preflight` auto-detects and names the exact app to grant.
 
 ## Usage
 

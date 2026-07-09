@@ -130,6 +130,54 @@ def _ffprobe_dimensions(path: Path) -> tuple[int, int]:
         raise PipelineError(f"Could not read dimensions of {path}") from exc
 
 
+def _detect_host_app() -> str | None:
+    """Best-effort name of the macOS ``.app`` hosting this session.
+
+    Screen Recording permission (TCC) attaches to the top-level app that launched this
+    process tree — the editor/terminal hosting Claude Code (e.g. Visual Studio Code,
+    iTerm, Terminal), not necessarily an app named "Claude". Walking the parent chain and
+    reporting that app name makes the permission error unambiguous.
+
+    Returns:
+        The hosting app's name (without ``.app``), or None if it cannot be determined.
+    """
+    pid = os.getppid()
+    for _ in range(20):
+        if pid <= 1:
+            break
+        out = subprocess.run(
+            ["ps", "-o", "ppid=,command=", "-p", str(pid)],
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if not out:
+            break
+        parts = out.split(None, 1)
+        if len(parts) < 2:
+            break
+        ppid_s, command = parts
+        m = re.search(r"/([^/]+)\.app/", command)  # first (outermost) .app bundle in path
+        if m:
+            return m.group(1)
+        try:
+            pid = int(ppid_s)
+        except ValueError:
+            break
+    return None
+
+
+def _permission_hint() -> str:
+    """Return the Screen Recording permission guidance, naming the host app if known."""
+    app = _detect_host_app()
+    who = f"'{app}'" if app else "the app hosting Claude Code (your editor/terminal)"
+    return (
+        f"On macOS this almost always means {who} lacks Screen Recording permission: "
+        "grant it under System Settings > Privacy & Security > Screen Recording, then "
+        "fully quit and reopen that app (the permission only takes effect after a "
+        "restart). Note: this is the app running Claude Code, not necessarily an app "
+        "named 'Claude'. Advanced override: set DEMO_SCREEN_DEVICE to the avfoundation index."
+    )
+
+
 def detect_screen_device() -> str:
     """Find the avfoundation device index for the primary display capture.
 
@@ -154,13 +202,7 @@ def detect_screen_device() -> str:
     # ffmpeg lists devices on stderr and exits non-zero — that is expected here.
     match = re.search(r"\[(\d+)\]\s+Capture screen 0", proc.stderr)
     if not match:
-        raise PipelineError(
-            "No screen-capture device found. On macOS this almost always means the "
-            "terminal/host app lacks Screen Recording permission: grant it under "
-            "System Settings > Privacy & Security > Screen Recording, then fully quit "
-            "and reopen the app (the permission only takes effect after a restart). "
-            "Advanced override: set DEMO_SCREEN_DEVICE to the avfoundation index."
-        )
+        raise PipelineError(f"No screen-capture device found. {_permission_hint()}")
     return match.group(1)
 
 

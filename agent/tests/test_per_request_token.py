@@ -1,10 +1,11 @@
 import httpx
 import pytest
 from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from copilot.config import FhirClientMode, ModelTier, Settings
 from copilot.fhir.client import FhirError, HttpFhirClient
-from copilot.main import _bearer_token, _request_scoped_fhir_client
+from copilot.main import _bearer_token, _resolve_request_fhir, create_app
 
 # These tests guard ARCHITECTURE.md §5's load-bearing claim: the agent reads FHIR under the SMART
 # token of whoever is asking, so a patient/*.read token binds the turn to exactly one patient. If
@@ -72,14 +73,19 @@ def test_cors_origins_default_to_empty_not_wildcard(monkeypatch: pytest.MonkeyPa
 )
 def test_bearer_token_parsing(header: str, expected: str | None) -> None:
     # A malformed Authorization header must yield no token rather than a garbage one, so the
-    # caller falls back to the static token (or fails) instead of sending "Basic abc123" to FHIR.
+    # caller falls back to the static token (or is rejected) instead of sending "Basic abc123".
     assert _bearer_token(_request_with_headers({"authorization": header})) == expected
 
 
-def test_no_authorization_header_falls_back_to_the_static_client() -> None:
-    # Returning None hands the turn to app.state.fhir (the static-token client), preserving the
-    # server-to-server workflow the walking skeleton depends on.
-    assert _request_scoped_fhir_client(_request_with_headers({}), _http_settings()) is None
+def test_no_header_falls_back_to_the_static_token_when_configured() -> None:
+    # With no caller token but a static token configured (dev / walking-skeleton), the turn uses the
+    # static token rather than being rejected. NOTE: production omits the static token, so a
+    # tokenless /chat is rejected with 401 instead (see test_tools.py). This fallback is a dev-only
+    # escape hatch — the moment COPILOT_FHIR_BEARER_TOKEN is unset, the service fails closed.
+    resolved = _resolve_request_fhir(_request_with_headers({}), _http_settings(), "cid")
+    assert not isinstance(resolved, JSONResponse)
+    client, _ = resolved
+    assert client._client.headers["Authorization"] == "Bearer static-fallback-token"
 
 
 def test_empty_token_sends_no_authorization_header() -> None:
@@ -93,7 +99,8 @@ def test_empty_token_sends_no_authorization_header() -> None:
 
 def test_fixture_mode_ignores_the_callers_token() -> None:
     # In fixture mode there is no live FHIR server to authorize against, so a stray Authorization
-    # header must not cause the service to construct an HTTP client pointed at nothing.
+    # header must not cause the service to build an HTTP client pointed at nothing — the shared
+    # fixture client serves the read and there is no per-request client to close.
     settings = Settings(
         model_tier=ModelTier.SONNET,
         fhir_client_mode=FhirClientMode.FIXTURE,
@@ -101,9 +108,20 @@ def test_fixture_mode_ignores_the_callers_token() -> None:
         langfuse_public_key=None,
         langfuse_secret_key=None,
     )
-    request = _request_with_headers({"authorization": "Bearer patient-scoped-token"})
+    app = create_app(settings)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/chat",
+        "headers": [(b"authorization", b"Bearer patient-scoped-token")],
+        "app": app,
+    }
+    resolved = _resolve_request_fhir(Request(scope), settings, "cid")
 
-    assert _request_scoped_fhir_client(request, settings) is None
+    assert not isinstance(resolved, JSONResponse)
+    client, per_request = resolved
+    assert client is app.state.fhir  # the shared fixture client, not one built from the header
+    assert per_request is None  # nothing to close
 
 
 async def test_callers_token_reaches_the_fhir_server() -> None:
@@ -118,8 +136,9 @@ async def test_callers_token_reaches_the_fhir_server() -> None:
         return httpx.Response(500, json={"message": "patient id invalid"})
 
     request = _request_with_headers({"authorization": "Bearer patient-scoped-token"})
-    client = _request_scoped_fhir_client(request, _http_settings())
-    assert client is not None
+    resolved = _resolve_request_fhir(request, _http_settings(), "cid")
+    assert not isinstance(resolved, JSONResponse)
+    client, _ = resolved
 
     # HttpFhirClient builds its own AsyncClient, so there is no transport seam to inject through.
     # Swap it, preserving the headers the constructor set — those are exactly what we are testing.

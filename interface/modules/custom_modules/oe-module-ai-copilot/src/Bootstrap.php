@@ -142,6 +142,18 @@ final class Bootstrap
         return str_ends_with($pageName, self::SHELL_PAGE);
     }
 
+    /**
+     * Build the webroot-relative URL for a bundled asset.
+     *
+     * Deliberately appends no cache-buster: the shell runs every module-enqueued script/style
+     * through Header::createElement(), which already appends `?v={v_js_includes}` (src/Core/Header.php).
+     * That token is per-request in dev (OPENEMR__ENVIRONMENT=dev) and the release version in prod, so
+     * bump $v_js_includes in version.php when shipping JS/CSS changes. Adding our own query here would
+     * only produce a doubled `?v=...&v=...`.
+     *
+     * @param string $relativePath Asset path relative to public/assets/ (e.g. "js/ai-copilot.js").
+     * @return string The webroot-relative URL.
+     */
     private function assetPath(string $relativePath): string
     {
         return $this->globalsBag->getWebRoot() . self::MODULE_INSTALLATION_PATH . '/public/assets/' . $relativePath;

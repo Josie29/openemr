@@ -87,6 +87,14 @@ tooling, evals). Integrate them on `qa/integration`, test locally, then promote 
 - **Promote:** `qa/integration → main` via squash PR, then **reset `qa` to `main`**
   so the next cycle starts from the real prod state and doesn't drift:
   `git checkout qa/integration && git merge --ff-only main`.
+- **Bump `$v_js_includes` in `version.php` whenever the promotion changes any
+  `.js`/`.css`** (module assets included). Prod runs with `OPENEMR__ENVIRONMENT`
+  unset, so the shell cache-busts assets with the *static* release version
+  (`?v=<n>`); without a bump, returning prod users keep the old cached file.
+  Dev doesn't hit this — dev-easy sets `OPENEMR__ENVIRONMENT=dev`, making the
+  token per-request. Do **not** hand-roll a per-module `?v=` (it just doubles the
+  shell's query); the version bump is the sanctioned mechanism (see
+  `version.php` header comment and `src/Core/Header.php`).
 
 ### Which worktree tool — depends on whether the component needs OpenEMR
 

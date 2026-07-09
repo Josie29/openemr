@@ -13,13 +13,20 @@ _FIXTURE_PATIENT = Path(__file__).parent / "fixtures" / "patient.json"
 @pytest.fixture
 def patient_resource() -> dict[str, Any]:
     """The recorded FHIR Patient resource used across tests (seed patient id '1')."""
-    return json.loads(_FIXTURE_PATIENT.read_text())
+    resource: dict[str, Any] = json.loads(_FIXTURE_PATIENT.read_text())
+    return resource
 
 
 @pytest.fixture
 def fhir_client(patient_resource: dict[str, Any]) -> FixtureFhirClient:
     """A fixture-backed FHIR client seeded with the recorded patient."""
-    return FixtureFhirClient({patient_resource["id"]: patient_resource})
+    return FixtureFhirClient({patient_resource["id"]: {"Patient": patient_resource}})
+
+
+@pytest.fixture
+def seed_client() -> FixtureFhirClient:
+    """A fixture-backed client loaded from the bundled seed (patient '1' with full record)."""
+    return FixtureFhirClient.from_seed()
 
 
 @pytest.fixture

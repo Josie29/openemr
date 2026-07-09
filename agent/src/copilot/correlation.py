@@ -60,5 +60,5 @@ def _extract_header(scope: Scope) -> str | None:
     target = CORRELATION_HEADER.encode()
     for name, value in scope.get("headers", []):
         if name == target and value:
-            return value.decode()
+            return bytes(value).decode()
     return None

@@ -488,6 +488,18 @@ of scope until a use case justifies it.
   explicit "the chart doesn't record the reason" behavior, and eval cases targeting both
   specifically. This is the honest limit of source-attribution as a verification strategy —
   which is why the physician stays the expert-in-the-loop — and the first thing to harden next.
+- **Free-text reasoning & the agent-vs-dashboard case (open).** The five scoped tools return
+  the *structured* record — coded lists and encounter metadata — which is the dashboard-able
+  subset. The capability a dashboard structurally cannot replicate is reasoning over
+  free-text notes ("what did cardiology say?", UC-3's *why*), and those live in note prose
+  (`DocumentReference` / encounter forms), not the five resources. As tooled, the agent
+  serves UC-1/UC-2 (which a dashboard could too) but only partially serves UC-3, the case
+  that most justifies the agent shape. Decision: keep structured-only as the verifiable MVP
+  and sequence a free-text tool as a distinct later increment — it reopens the retrieval
+  sub-agent question (§6 tripwires) and shifts verification load onto the *faithfulness* half
+  of the gate (§7). Full analysis in
+  [`context/decisions/agent-workflow.md`](context/decisions/agent-workflow.md). The honest
+  defense position: the agent earns its shape on UC-3/UC-4, not on all five.
 - **Framework spike (open).** Prototype the verify-then-answer gate in Pydantic AI (and,
   time permitting, LangGraph/ADK) to confirm which most cleanly expresses "unattributable
   claim → force a retry." Low-stakes because the pick is reversible; worth 1 day.

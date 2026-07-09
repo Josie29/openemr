@@ -1,24 +1,55 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
 
 from copilot.fhir.client import FhirClient
-from copilot.fhir.models import PatientDemographics
+from copilot.fhir.models import (
+    Allergy,
+    Encounter,
+    Medication,
+    NoteContent,
+    PatientDemographics,
+    Problem,
+)
 from copilot.schemas import ChatResponse
-from copilot.verification import FetchLog, resolve_claims
+from copilot.verification import FetchLog, FhirRecordable, resolve_claims
 
-SYSTEM_PROMPT = """You are a Clinical Co-Pilot embedded in an electronic health record. You
-help a physician orient on the patient currently open, using ONLY the tools provided to read
-that patient's record.
+SYSTEM_PROMPT = """You are a Clinical Co-Pilot embedded in an electronic health record. You help a
+physician orient on the patient currently open, using ONLY the tools provided to read that
+patient's record. Every tool is already scoped to the one open patient.
+
+Your tools (each returns typed resources; call the ones a question needs, in parallel when
+independent):
+- get_patient: demographics (Patient).
+- get_problems: the active/inactive problem list (Condition resources).
+- get_medications: current medications (MedicationRequest resources), already deduplicated.
+- get_allergies: allergies (AllergyIntolerance resources).
+- get_encounters: recent encounters, metadata only — dates, type, reason (Encounter resources).
+- get_encounter_note(encounter_id): the free-text clinical note for one visit — the narrative
+  ("why", "what was said") the structured lists don't hold. Find the visit with get_encounters
+  first, then read its note.
+
+For a broad "give me the picture / who is this" request, fetch problems, medications, allergies,
+and the most recent encounters, then give a short scannable orientation with the single most
+relevant item flagged.
 
 Rules you must follow without exception:
-- Answer only from data returned by the tools. Never state a fact you did not read from a tool
-  this turn. If the record does not contain something, say so plainly rather than inferring.
-- Every factual statement you make must be a Claim carrying a SourceRef that cites the resource
-  (resource_type and resource_id) and the exact `field` name from that tool's returned data
-  (e.g. full_name, gender, birth_date). If you cannot cite a fetched field for a statement, do
-  not make the statement. Leave SourceRef.value empty — the system fills it from the record.
+- Answer only from data returned by the tools this turn. Never state a fact you did not read from
+  a tool. If the record does not contain something (e.g. labs, vitals), say so plainly rather than
+  inferring or guessing.
+- Every factual statement must be a Claim carrying a SourceRef that cites the resource EXACTLY as
+  it appears in the tool output: copy its `resource_type` and `resource_id` verbatim, and name the
+  `field` the statement draws from (e.g. display, name, substance, birth_date, onset_date). If you
+  cannot cite a fetched field for a statement, do not make the statement. Leave SourceRef.value
+  empty — the system fills it from the record.
+- For a clinical note (DocumentReference from get_encounter_note), instead of `field` set `quote`
+  to the EXACT verbatim text from the note that supports your statement — copy it word-for-word. A
+  paraphrase will be rejected, so quote precisely.
+- Do not assert drug interactions or clinical conclusions as fact. If a medication and an allergy
+  or problem look inconsistent, surface it as something for the physician to review, citing the
+  specific rows — never state it as a definite interaction.
 - Keep the summary short and scannable — a physician has seconds. Do not pad a sparse record.
 """
 
@@ -28,7 +59,9 @@ class CopilotDeps:
     """Per-request dependencies injected into the agent run.
 
     Constructed at the route boundary and passed to ``agent.run`` — the agent never reaches
-    into global state. ``fetched`` is mutated by tools and read by the verification gate.
+    into global state. ``fhir`` is built per request from the inbound patient-scoped token, so
+    it can only read the one open patient. ``fetched`` is mutated by tools and read by the
+    verification gate.
     """
 
     fhir: FhirClient
@@ -37,12 +70,31 @@ class CopilotDeps:
     fetched: FetchLog
 
 
+def _track[T: FhirRecordable | Sequence[FhirRecordable]](
+    ctx: RunContext[CopilotDeps], result: T
+) -> T:
+    """Record everything a tool fetched, then return it unchanged.
+
+    Wrapping every fetch in ``_track`` makes "record what you read" one visual unit at each tool's
+    return — a tool cannot fetch data without also grounding it in the FetchLog.
+
+    Args:
+        ctx: The run context (holds the fetch registry).
+        result: The resource, or list of resources, the tool fetched.
+
+    Returns:
+        ``result`` unchanged.
+    """
+    ctx.deps.fetched.record_all(result)
+    return result
+
+
 def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
     """Construct the single Clinical Co-Pilot agent (ARCHITECTURE.md §6 — one agent).
 
-    The agent owns one tool (``get_patient``) and one output validator (the grounding gate).
-    The model is a parameter so tests can inject ``TestModel``/``FunctionModel`` and run the
-    full flow deterministically with no live LLM call.
+    The agent owns the five FHIR read tools and one output validator (the grounding gate). The
+    model is a parameter so tests can inject ``TestModel``/``FunctionModel`` and run the full flow
+    deterministically with no live LLM call.
 
     Args:
         model: A Pydantic AI model identifier string (e.g. ``"anthropic:claude-sonnet-5"``) or
@@ -60,33 +112,54 @@ def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
 
     @agent.tool
     async def get_patient(ctx: RunContext[CopilotDeps]) -> PatientDemographics:
-        """Read the open patient's demographics (name, birth date, sex) from FHIR.
+        """Read the open patient's demographics (name, birth date, sex) from FHIR."""
+        return _track(ctx, await ctx.deps.fhir.get_patient(ctx.deps.patient_id))
 
-        Records the fetch so the verification gate can confirm any citation to this resource
-        is grounded.
+    @agent.tool
+    async def get_problems(ctx: RunContext[CopilotDeps]) -> list[Problem]:
+        """Read the open patient's problem list (active and inactive Conditions)."""
+        return _track(ctx, await ctx.deps.fhir.get_problems(ctx.deps.patient_id))
+
+    @agent.tool
+    async def get_medications(ctx: RunContext[CopilotDeps]) -> list[Medication]:
+        """Read the open patient's current medications (deduplicated MedicationRequests)."""
+        return _track(ctx, await ctx.deps.fhir.get_medications(ctx.deps.patient_id))
+
+    @agent.tool
+    async def get_allergies(ctx: RunContext[CopilotDeps]) -> list[Allergy]:
+        """Read the open patient's allergies (AllergyIntolerance resources)."""
+        return _track(ctx, await ctx.deps.fhir.get_allergies(ctx.deps.patient_id))
+
+    @agent.tool
+    async def get_encounters(ctx: RunContext[CopilotDeps]) -> list[Encounter]:
+        """Read the open patient's recent encounters (metadata only — no note bodies)."""
+        return _track(ctx, await ctx.deps.fhir.get_encounters(ctx.deps.patient_id))
+
+    @agent.tool
+    async def get_encounter_note(
+        ctx: RunContext[CopilotDeps], encounter_id: str
+    ) -> list[NoteContent]:
+        """Read the free-text clinical note(s) for one encounter — the narrative behind a visit.
+
+        Use for "why"/"what did the note say" questions the structured lists can't answer. Find the
+        relevant visit with get_encounters first, then pass its id here.
 
         Args:
-            ctx: The run context carrying per-request dependencies.
-
-        Returns:
-            The patient's typed demographics.
-
-        Raises:
-            FhirError: If the FHIR read fails; the caller degrades gracefully.
+            ctx: The run context.
+            encounter_id: The Encounter id whose note to read (from get_encounters).
         """
-        demographics = await ctx.deps.fhir.get_patient(ctx.deps.patient_id)
-        ctx.deps.fetched.record("Patient", demographics.patient_id, demographics)
-        return demographics
+        return _track(
+            ctx, await ctx.deps.fhir.get_encounter_note(ctx.deps.patient_id, encounter_id)
+        )
 
     @agent.output_validator
     async def enforce_grounding(ctx: RunContext[CopilotDeps], output: ChatResponse) -> ChatResponse:
         """Reject any claim not grounded in a fetched field, and stamp the real value into the rest.
 
-        This is the deterministic half of ARCHITECTURE.md §7 — the only verification the walking
-        skeleton enforces. Each claim's citation is resolved against the actual fetched resource;
-        grounded claims get the record's true value stamped in (code-populated, so it is
-        trustworthy), and any claim that cannot be resolved forces a retry. Faithfulness (the
-        Haiku entailment judge) and domain constraints are deferred to prompt ``-02``.
+        This is the deterministic half of ARCHITECTURE.md §7. Each claim's citation is resolved
+        against the actual fetched resource; grounded claims get the record's true value stamped in
+        (code-populated, so it is trustworthy), and any claim that cannot be resolved forces a
+        retry. Faithfulness (the Haiku entailment judge) is a later increment.
 
         Args:
             ctx: The run context (holds the fetch registry).

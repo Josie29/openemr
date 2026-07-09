@@ -5,11 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field
 class SourceRef(BaseModel):
     """A citation binding a claim to a specific field of a resource the agent actually read.
 
-    The load-bearing contract for the verification gate (ARCHITECTURE.md §7): the gate resolves
-    ``(resource_type, resource_id, field)`` against the resource a tool returned this turn and
-    rejects any claim that does not resolve to a real value. ``value`` is then stamped in **by
-    code, from the fetched record** — never written by the model — so a reader can compare the
-    claim against the exact record value it came from.
+    The load-bearing contract for the verification gate (ARCHITECTURE.md §7). Two citation modes,
+    both resolved deterministically against the resource a tool returned:
+
+    - **Structured** (coded fields): set ``field``; the gate resolves ``(resource_type,
+      resource_id, field)`` to the exact record value.
+    - **Free-text note**: set ``quote`` to the verbatim supporting span; the gate checks it is a
+      substring of the fetched note's text.
+
+    Either way the gate rejects a claim that does not resolve, and ``value`` is stamped in **by
+    code, from the fetched record** — never written by the model.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -19,6 +24,14 @@ class SourceRef(BaseModel):
     field: str | None = Field(
         default=None,
         description="Field name in the tool's returned data the claim draws from, e.g. birth_date",
+    )
+    quote: str | None = Field(
+        default=None,
+        description=(
+            "For a free-text note citation only: the EXACT verbatim span from the note that "
+            "supports the claim, copied word-for-word (not paraphrased). Use `field` instead for "
+            "structured resources."
+        ),
     )
     value: str | None = Field(
         default=None,
@@ -56,3 +69,7 @@ class ChatRequest(BaseModel):
 
     patient_id: str = Field(description="FHIR Patient logical id the turn is scoped to")
     message: str = Field(description="The physician's question")
+    conversation_id: str | None = Field(
+        default=None,
+        description="Opaque id echoed from a prior turn's response; omit to start a new one",
+    )

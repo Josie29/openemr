@@ -90,7 +90,7 @@ class TurnTrace:
 
 @contextmanager
 def observe_turn(
-    enabled: bool, correlation_id: str, patient_id: str, message: str
+    enabled: bool, correlation_id: str, conversation_id: str, patient_id: str, message: str
 ) -> Iterator[TurnTrace]:
     """Open an active ``chat-turn`` span for one agent turn and yield a :class:`TurnTrace`.
 
@@ -101,7 +101,9 @@ def observe_turn(
 
     Args:
         enabled: Whether observability is configured.
-        correlation_id: The turn's correlation id (trace session id + metadata).
+        correlation_id: The turn's correlation id (per-turn; recorded as trace metadata).
+        conversation_id: The conversation id, used as the Langfuse session id so all turns of one
+            conversation group under a single session timeline.
         patient_id: The patient the turn is scoped to.
         message: The physician's question, recorded as the trace input.
 
@@ -116,8 +118,12 @@ def observe_turn(
     with (
         propagate_attributes(
             trace_name="chat-turn",
-            session_id=correlation_id,
-            metadata={"correlation_id": correlation_id, "patient_id": patient_id},
+            session_id=conversation_id,
+            metadata={
+                "correlation_id": correlation_id,
+                "conversation_id": conversation_id,
+                "patient_id": patient_id,
+            },
             tags=["clinical-copilot", "walking-skeleton"],
             version=__version__,
         ),

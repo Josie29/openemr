@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,13 +13,13 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 
 from copilot.agent import CopilotDeps, build_agent
 from copilot.config import FhirClientMode, Settings, get_settings
+from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
-from copilot.fhir.client import FhirError, HttpFhirClient
+from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.health import check_readiness
 from copilot.observability import configure_observability, observe_turn, shutdown_observability
 from copilot.schemas import ChatRequest, ChatResponse
-from copilot.verification import FetchLog
 
 logger = logging.getLogger("copilot")
 
@@ -28,82 +29,58 @@ _UNAVAILABLE_ANSWER = ChatResponse(
 )
 
 
-def _build_fhir_client(settings: Settings) -> HttpFhirClient | FixtureFhirClient:
-    """Construct the process-lifetime FHIR client (dependency injection at the edge).
+def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirClient:
+    """Construct the app-lifetime FHIR client used by the ``/ready`` probe (and fixture reads).
 
-    In ``HTTP`` mode this client exists for the ``/ready`` probe and as the fallback for requests
-    that arrive without an ``Authorization`` header. Per-request, patient-scoped reads use a client
-    built from that header instead — see :func:`_request_scoped_fhir_client`.
+    In ``HTTP`` mode this client carries no per-patient token — ``/ready`` only pings the
+    unauthenticated FHIR ``/metadata`` capability statement. Per-request reads build their own
+    token-scoped client from the inbound ``Authorization`` header (in the ``/chat`` route), so the
+    readiness client is never used to read patient data. In ``FIXTURE`` mode the same client
+    both answers readiness and serves reads (no token exists).
 
     Args:
         settings: Service settings selecting the client mode and endpoint.
 
     Returns:
-        A fixture-backed client (dev/tests) or an httpx-backed client (live OpenEMR).
+        A fixture-backed client (dev/tests) or a token-less httpx client (live OpenEMR).
 
     Raises:
         ValueError: If ``HTTP`` mode is selected without a base URL.
     """
     if settings.fhir_client_mode is FhirClientMode.FIXTURE:
         return FixtureFhirClient.from_seed()
-    if not settings.fhir_base_url:
-        raise ValueError("HTTP FHIR mode needs COPILOT_FHIR_BASE_URL")
-    # The bearer token is now optional: the readiness probe hits the unauthenticated /metadata
-    # endpoint, and data reads prefer the caller's own token.
+    # HTTP mode. A missing base URL is a misconfiguration, but we do not raise at startup —
+    # crash-looping the deploy hides the cause. Construct a client anyway (empty base URL) so the
+    # process starts and the misconfig surfaces as a red /ready FHIR probe; /chat separately 500s
+    # with a clear message (see the route). This keeps observability, not opacity, as the failure.
     return HttpFhirClient(
-        settings.fhir_base_url,
-        settings.fhir_bearer_token or "",
+        settings.fhir_base_url or "",
+        settings.fhir_bearer_token,  # optional dev fallback; None is fine for the /metadata ping
         timeout_seconds=settings.fhir_timeout_seconds,
         max_retries=settings.fhir_max_retries,
     )
 
 
 def _bearer_token(request: Request) -> str | None:
-    """Extract the bearer token from the request's ``Authorization`` header.
+    """Extract the SMART patient-scoped token from the ``Authorization: Bearer`` header.
+
+    This is the contract with the PHP module (deployment-strategy.md, Option D): the module mints
+    a patient-scoped token and sends it per request, so the agent's FHIR reads can only touch the
+    one open patient.
 
     Args:
-        request: The inbound request.
+        request: The inbound HTTP request.
 
     Returns:
-        The token, or ``None`` when the header is absent or is not a non-empty ``Bearer``
-        credential.
+        The bearer token, or None when no well-formed bearer header is present.
     """
     header = request.headers.get("authorization")
     if not header:
         return None
-    scheme, _, credential = header.partition(" ")
-    if scheme.lower() != "bearer":
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
         return None
-    return credential.strip() or None
-
-
-def _request_scoped_fhir_client(request: Request, settings: Settings) -> HttpFhirClient | None:
-    """Build a FHIR client bound to *this caller's* SMART token, if they supplied one.
-
-    This is what makes ARCHITECTURE.md §5's claim true in production rather than only on paper. A
-    ``patient/*.read`` token is bound to exactly one patient, so reads through this client
-    physically cannot reach another — whereas the process-lifetime client's static token is the
-    same for every caller and enforces no per-patient scoping at all.
-
-    Args:
-        request: The inbound request, whose ``Authorization`` header carries the SMART token.
-        settings: Service settings supplying the FHIR base URL and transport budget.
-
-    Returns:
-        A client scoped to the caller's token, or ``None`` when the caller sent no usable token or
-        the service is running against fixtures (where tokens are meaningless).
-    """
-    if settings.fhir_client_mode is not FhirClientMode.HTTP or not settings.fhir_base_url:
-        return None
-    token = _bearer_token(request)
-    if token is None:
-        return None
-    return HttpFhirClient(
-        settings.fhir_base_url,
-        token,
-        timeout_seconds=settings.fhir_timeout_seconds,
-        max_retries=settings.fhir_max_retries,
-    )
+    return token.strip()
 
 
 def _build_model(settings: Settings) -> Model:
@@ -122,6 +99,52 @@ def _build_model(settings: Settings) -> Model:
     _, _, model_id = settings.model_tier.value.partition(":")
     provider = AnthropicProvider(api_key=settings.anthropic_api_key or "not-configured")
     return AnthropicModel(model_id, provider=provider)
+
+
+def _resolve_request_fhir(
+    request: Request, settings: Settings, correlation_id: str
+) -> tuple[FhirClient, HttpFhirClient | None] | JSONResponse:
+    """Resolve the FHIR client for one ``/chat`` turn from the request's auth context.
+
+    In HTTP mode the client is scoped to the inbound patient token, so the agent can physically
+    read only the one open patient (ARCHITECTURE.md §5). In fixture mode the shared app client
+    serves reads (no token exists).
+
+    Args:
+        request: The inbound request (carries the ``Authorization`` header and app state).
+        settings: Service settings (mode, FHIR endpoint, timeouts).
+        correlation_id: This turn's correlation id, for logging.
+
+    Returns:
+        On success, a ``(client, per_request_client)`` pair — ``per_request_client`` is the
+        closable client the caller must ``aclose`` (HTTP mode) or ``None`` (fixture mode). On a
+        bad request, a ``JSONResponse`` (401 no token, 500 misconfigured) to return directly.
+    """
+    if settings.fhir_client_mode is FhirClientMode.FIXTURE:
+        return request.app.state.fhir, None
+    token = _bearer_token(request) or settings.fhir_bearer_token
+    if not token:
+        logger.info("rejected /chat with no patient token", extra={"cid": correlation_id})
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": "missing patient-scoped FHIR token",
+                "correlation_id": correlation_id,
+            },
+        )
+    if not settings.fhir_base_url:
+        logger.error("HTTP mode without a FHIR base URL", extra={"cid": correlation_id})
+        return JSONResponse(
+            status_code=500,
+            content={"error": "agent misconfigured", "correlation_id": correlation_id},
+        )
+    client = HttpFhirClient(
+        settings.fhir_base_url,
+        token,
+        timeout_seconds=settings.fhir_timeout_seconds,
+        max_retries=settings.fhir_max_retries,
+    )
+    return client, client
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -160,8 +183,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     # Enable Langfuse + Pydantic AI OTel instrumentation before any agent runs.
     app.state.observability_enabled = configure_observability(settings)
-    app.state.fhir = _build_fhir_client(settings)
+    app.state.fhir = _build_readiness_client(settings)
     app.state.agent = build_agent(_build_model(settings))
+    # Server-side conversation state so multi-turn history (which contains PHI) stays in the
+    # service rather than round-tripping through the client. TTL-evicted; single-instance.
+    app.state.conversation_store = ConversationStore(ttl_seconds=1800, max_sessions=1000)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -184,25 +210,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         recorded as a score. Tracing failures never affect the response.
         """
         correlation_id = current_correlation_id()
-        settings = request.app.state.settings
         enabled = request.app.state.observability_enabled
+        settings: Settings = request.app.state.settings
+        store: ConversationStore = request.app.state.conversation_store
 
-        # Prefer the caller's SMART token over the process-wide static one, so every FHIR read this
-        # turn makes is scoped to the one patient that token permits.
-        scoped_fhir = _request_scoped_fhir_client(request, settings)
-        deps = CopilotDeps(
-            fhir=scoped_fhir or request.app.state.fhir,
-            patient_id=payload.patient_id,
-            correlation_id=correlation_id,
-            fetched=FetchLog(),
-        )
+        resolved = _resolve_request_fhir(request, settings, correlation_id)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        fhir, per_request_client = resolved
 
+        content: dict[str, Any] = {}
         status_code = 200
         try:
-            with observe_turn(enabled, correlation_id, payload.patient_id, payload.message) as turn:
+            # Resolve (or open) the conversation. It is bound to one patient; a mismatch is refused
+            # so a follow-up cannot surface a different patient's accumulated history (§5).
+            if payload.conversation_id is not None:
+                session = store.get(payload.conversation_id)
+                if session is None:
+                    return JSONResponse(
+                        status_code=404,
+                        content={
+                            "error": "conversation not found",
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                if session.patient_id != payload.patient_id:
+                    logger.info("conversation/patient mismatch", extra={"cid": correlation_id})
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "conversation is bound to a different patient",
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                conversation_id = payload.conversation_id
+            else:
+                conversation_id, session = store.create(payload.patient_id)
+
+            deps = CopilotDeps(
+                fhir=fhir,
+                patient_id=payload.patient_id,
+                correlation_id=correlation_id,
+                # Accumulated across the conversation so a follow-up can cite earlier turns' reads.
+                fetched=session.fetched,
+            )
+
+            with observe_turn(
+                enabled, correlation_id, conversation_id, payload.patient_id, payload.message
+            ) as turn:
                 try:
-                    result = await request.app.state.agent.run(payload.message, deps=deps)
+                    result = await request.app.state.agent.run(
+                        payload.message, message_history=session.messages, deps=deps
+                    )
                     turn.verified(passed=True)
+                    session.messages = result.all_messages()
                     content = result.output.model_dump()
                     turn.output(content)
                 except UnexpectedModelBehavior:
@@ -215,15 +276,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # LLM provider rejected the call (billing, rate limit, outage). Always logged;
                     # the specific reason is surfaced too, which aids debugging in this demo system.
                     # (A production PHI deployment would genericize this — see ARCHITECTURE.md §8.)
-                    logger.warning(
-                        "LLM request failed", extra={"cid": correlation_id}, exc_info=True
-                    )
+                    logger.warning("LLM request failed", extra={"cid": correlation_id}, exc_info=True)  # noqa: E501
                     status_code = 502
                     content = {"error": str(exc), "correlation_id": correlation_id}
                 except FhirError:
-                    # A data read failed — report the gap, never fabricate around it (§8). This also
-                    # covers a denied cross-patient read, which OpenEMR surfaces as a bare HTTP 500
-                    # rather than a 403 (smart-token-spike-findings.md §1): any non-2xx is a denial.
+                    # A data read failed — report the gap, never fabricate around it (§8).
                     logger.warning("FHIR read failed", extra={"cid": correlation_id}, exc_info=True)
                     status_code = 502
                     content = {
@@ -231,11 +288,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "correlation_id": correlation_id,
                     }
         finally:
-            # The per-request client owns its own connection pool; leaking one per turn would
-            # exhaust sockets under load.
-            if scoped_fhir is not None:
-                await scoped_fhir.aclose()
+            # Close the per-request token-scoped client so its connection pool never leaks.
+            if per_request_client is not None:
+                await per_request_client.aclose()
 
+        # Echo the conversation id on every answered turn so the client keeps the thread.
+        content["conversation_id"] = conversation_id
         return JSONResponse(status_code=status_code, content=content)
 
     return app

@@ -5,10 +5,48 @@ skeleton** (implementation prompt `context/execution/implementation-prompt-01-wa
 end-to-end turn — `POST /chat` → correlation ID → one FHIR tool → Claude → verification gate →
 grounded structured answer → Langfuse trace — plus real `/health` and `/ready` probes.
 
-It is deliberately narrow. Only `get_patient` (FHIR `Patient`) is wired; the verification gate
-enforces **grounding only** (every claim cites a fetched resource). The other four FHIR tools,
-faithfulness/domain verification, SSE streaming, tiered routing, and the PHP module are
-follow-up increments (`-02`, `-03`). See the prompt's Non-goals.
+Six FHIR read tools are wired — `get_patient` (`Patient`), `get_problems` (`Condition`),
+`get_medications` (`MedicationRequest`, deduplicated), `get_allergies` (`AllergyIntolerance`),
+`get_encounters` (`Encounter`, metadata), and `get_encounter_note` (`DocumentReference` — the
+free-text clinical note for one visit, base64-decoded) — covering UC-1 orientation, UC-4
+cross-referencing, and UC-3 note drill-down. Reads run under a **per-request patient-scoped token**
+(the `Authorization: Bearer` header the PHP module sends; see
+[Chat API contract](#chat-api-contract)), and **multi-turn conversations** are supported with
+server-side history (also in the contract). The verification gate grounds every claim
+**deterministically**: a structured claim cites a fetched field; a note claim cites a **verbatim
+quote** checked as a substring of the note text. Faithfulness (a Haiku entailment judge), domain
+constraints, SSE streaming, model tiering, and evals are follow-up increments. See
+`context/decisions/agent-workflow.md`.
+
+## How a turn flows
+
+The one canonical view of the current agent workflow — kept in sync with the code as it grows.
+When it needs several views (per-use-case sequences, deployment), we'll promote them to
+`agent/docs/`; the system-level topology stays in the root `ARCHITECTURE.md`.
+
+```mermaid
+flowchart TD
+    client([Client / chat panel]) -->|POST /chat| cid[correlation-ID middleware]
+    cid --> obs[observe_turn:<br/>open chat-turn span]
+    obs --> agent{{Pydantic AI agent · Claude}}
+
+    agent -->|tool call| tool[FHIR read tools:<br/>patient · problems · meds · allergies<br/>· encounters · encounter_note]
+    tool --> fhir[FhirClient<br/>fixture · or SMART httpx, no DB creds]
+    fhir -->|R4 resources| parse[parse → typed models]
+    parse --> flog[(FetchLog<br/>typed resource)]
+    parse --> agent
+
+    agent -->|candidate ChatResponse| gate{output_validator:<br/>grounding gate}
+    flog -. resolve field → value .-> gate
+    gate -->|claim not grounded| retry[ModelRetry] --> agent
+    gate -->|all grounded| stamp[stamp source.value<br/>from the record]
+    stamp --> resp[[ChatResponse:<br/>claims + verified values]]
+    resp -->|200 JSON| client
+
+    obs -. tokens · cost · verification score .-> lf[(Langfuse trace)]
+```
+
+`/health` and `/ready` are orthogonal probes, not part of the turn (see below).
 
 ## Layout
 
@@ -18,9 +56,9 @@ src/copilot/
   config.py        pydantic-settings; all config/secrets from env (COPILOT_ prefix)
   schemas.py       ChatRequest / ChatResponse / Claim / SourceRef contracts
   agent.py         Pydantic AI agent: get_patient tool + output_validator gate
-  verification.py  FetchLog registry + grounding check (ARCHITECTURE.md §7)
+  verification.py  FetchLog + field-level grounding & value stamping (ARCHITECTURE.md §7)
   correlation.py   X-Correlation-ID middleware
-  observability.py Langfuse tracer (tokens, cost, verification outcome) + NullTracer
+  observability.py Langfuse + Pydantic AI instrumentation; chat-turn span + verification score
   health.py        /health + /ready dependency probes
   fhir/            FhirClient protocol, httpx impl, fixture impl, PatientDemographics
 tests/             deterministic tests (fixtures + FunctionModel; no live LLM/FHIR)
@@ -84,12 +122,60 @@ ruff check .
 mypy
 ```
 
+## Chat API contract
+
+The PHP module (built in a separate worktree) calls the agent over HTTP. The contract:
+
+```
+POST /chat
+Authorization: Bearer <SMART patient/*.read token>   # minted by the module for the open patient
+Content-Type: application/json
+
+{ "patient_id": "<FHIR Patient id>",
+  "message": "<the physician's question>",
+  "conversation_id": "<id from a prior turn's response, or omit to start a new conversation>" }
+```
+
+- The **token travels in the `Authorization: Bearer` header**, never the body. In `http` mode the
+  agent builds a FHIR client scoped to that token per request, so it can physically read only the
+  one patient the token is bound to (ARCHITECTURE.md §5).
+- **No token in `http` mode → `401`** before any FHIR read or LLM call. `patient_id` in the body
+  must match the patient the token is scoped to (the FHIR server enforces the scope).
+- **Multi-turn:** omit `conversation_id` to start a conversation; every answered turn's response
+  carries a `conversation_id` the client must echo on the next turn to continue the thread. History
+  is kept server-side (it contains PHI), so the client only round-trips the id. A conversation is
+  bound to one patient: reusing its id with a different `patient_id` → **`403`**; an unknown or
+  expired id → **`404`** (start a new conversation).
+- In `fixture` mode the header is ignored (no token exists) and the bundled seed patient is served,
+  so local dev needs no token.
+- Response: `200` with `{summary, claims[], conversation_id}` (each claim carries a code-stamped
+  `source`), or a refusal / `401` / `403` / `404` / `502` per ARCHITECTURE.md §8.
+
+## Demo without the module (fixture toggle)
+
+`/chat` in `http` mode requires the module's SMART token, so a bare `curl`/Swagger call returns
+`401` (correct). To demo the agent **standalone** — no token, no live FHIR — flip the deployed
+service to fixture mode, which serves the bundled seed patient (`patient_id: "1"`, Marisol Reyes):
+
+```bash
+railway variables --set COPILOT_FHIR_CLIENT_MODE=fixture --service copilot-agent   # redeploys
+# then, tokenless:
+curl -X POST https://<agent-domain>/chat -H 'content-type: application/json' \
+  -d '{"patient_id":"1","message":"what do you know about this patient"}'          # 200 + grounded answer
+railway variables --set COPILOT_FHIR_CLIENT_MODE=http --service copilot-agent      # flip back to real FHIR
+```
+
+Fixture mode exercises the full pipeline (Claude · 5 tools · grounding gate · Langfuse trace) on
+seed data; it does **not** hit live FHIR or the auth path. Default the deployed service to `http`.
+
 ## Deploy (Railway)
 
 Same project/region as OpenEMR (internal networking). Build from this `agent/` directory using
-the `Dockerfile`; set the `COPILOT_*` variables as Railway service variables. For live FHIR set
-`COPILOT_FHIR_CLIENT_MODE=http` plus `COPILOT_FHIR_BASE_URL` and `COPILOT_FHIR_BEARER_TOKEN`
-(the SMART token; minted by the PHP module once `-03` lands).
+the `Dockerfile`; set the `COPILOT_*` / native-SDK variables as Railway service variables. For live
+FHIR set `COPILOT_FHIR_CLIENT_MODE=http` and `COPILOT_FHIR_BASE_URL` (the OpenEMR FHIR R4 base). The
+per-patient token arrives per request via the `Authorization` header above, so **no static token is
+needed in production**; `COPILOT_FHIR_BEARER_TOKEN` remains only as an optional dev fallback for
+hitting live FHIR without the module.
 
 ## Roadmap: observability-driven development loop (planned)
 

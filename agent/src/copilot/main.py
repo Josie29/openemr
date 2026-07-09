@@ -23,6 +23,20 @@ from copilot.schemas import ChatRequest, ChatResponse
 
 logger = logging.getLogger("copilot")
 
+
+def _configure_logging() -> None:
+    """Route the service's own ``copilot`` logs to stdout at INFO.
+
+    Uvicorn configures only its own loggers, so without this the app's ``logger.info`` calls
+    (token rejections, gate refusals, FHIR failures) fall through to the root logger's default
+    WARNING threshold and never appear. Idempotent — ``basicConfig`` is a no-op once the root
+    logger already has handlers, so repeated ``create_app`` calls (tests) don't stack handlers.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
+    )
+
 _UNAVAILABLE_ANSWER = ChatResponse(
     summary="I could not produce an answer I can fully attribute to this patient's record.",
     claims=[],
@@ -157,6 +171,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         The configured FastAPI application.
     """
     settings = settings or get_settings()
+    _configure_logging()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

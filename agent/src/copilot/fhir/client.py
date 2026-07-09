@@ -6,6 +6,7 @@ from copilot.fhir.models import (
     Allergy,
     Encounter,
     Medication,
+    NoteContent,
     PatientDemographics,
     Problem,
     bundle_resources,
@@ -71,6 +72,18 @@ class FhirClient(Protocol):
         """
         ...
 
+    async def get_encounter_note(self, patient_id: str, encounter_id: str) -> list[NoteContent]:
+        """Read the free-text clinical note(s) for one encounter.
+
+        Reads ``DocumentReference`` (category ``clinical-note``) for the patient and keeps those
+        tied to ``encounter_id`` — the FHIR API has no ``encounter`` search param, so the filter is
+        client-side (verified against OpenEMR's FHIR service).
+
+        Raises:
+            FhirError: If the read fails or times out.
+        """
+        ...
+
     async def ping(self) -> None:
         """Cheaply verify the FHIR endpoint is reachable, for the ``/ready`` probe.
 
@@ -111,12 +124,15 @@ class HttpFhirClient:
             transport=transport,
         )
 
-    async def _search(self, resource_type: str, patient_id: str) -> list[dict[str, object]]:
+    async def _search(
+        self, resource_type: str, patient_id: str, extra_params: dict[str, str] | None = None
+    ) -> list[dict[str, object]]:
         """Run a ``GET /<resource_type>?patient=<id>`` search and return the matching resources.
 
         Args:
             resource_type: The FHIR resource type to search, e.g. ``"Condition"``.
             patient_id: The patient logical id to scope the search to.
+            extra_params: Extra query params to merge in (e.g. a ``category`` filter).
 
         Returns:
             The resources from the returned searchset ``Bundle``.
@@ -125,7 +141,8 @@ class HttpFhirClient:
             FhirError: If the search request fails.
         """
         try:
-            response = await self._client.get(f"/{resource_type}", params={"patient": patient_id})
+            params = {"patient": patient_id, **(extra_params or {})}
+            response = await self._client.get(f"/{resource_type}", params=params)
             response.raise_for_status()
             bundle = response.json()
         except httpx.HTTPError as exc:
@@ -155,6 +172,13 @@ class HttpFhirClient:
 
     async def get_encounters(self, patient_id: str) -> list[Encounter]:
         return [Encounter.from_fhir(r) for r in await self._search("Encounter", patient_id)]
+
+    async def get_encounter_note(self, patient_id: str, encounter_id: str) -> list[NoteContent]:
+        resources = await self._search(
+            "DocumentReference", patient_id, {"category": "clinical-note"}
+        )
+        notes = [NoteContent.from_fhir(r) for r in resources]
+        return [note for note in notes if note.encounter_id == encounter_id]
 
     async def ping(self) -> None:
         try:

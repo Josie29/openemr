@@ -61,23 +61,56 @@ class FetchLog:
     def resolve(self, ref: SourceRef) -> str | None:
         """Resolve a citation to the real value in the fetched resource.
 
+        Two modes, both deterministic: a ``quote`` citation (free-text note) is grounded when the
+        quote appears verbatim in the fetched note's text; otherwise a ``field`` citation
+        (structured resource) resolves to that field's value.
+
         Args:
             ref: The claim's citation.
 
         Returns:
-            The stringified record value, or None when the claim cannot be grounded — the
-            resource was not fetched this turn, no field is cited, the field does not exist on
-            the resource, or its value is null.
+            The stringified record value (or the matched quote), or None when the claim cannot be
+            grounded — the resource was not fetched, neither quote nor field is cited, the field or
+            note text is missing, or the quote is not found in the note.
         """
-        if ref.field is None:
-            return None
         resource = self._objects.get((ref.resource_type, ref.resource_id))
         if resource is None:
+            return None
+        if ref.quote is not None:
+            return _resolve_quote(resource, ref.quote)
+        if ref.field is None:
             return None
         value = getattr(resource, ref.field, _MISSING)
         if value is _MISSING or value is None:
             return None
         return str(value)
+
+
+def _normalize_ws(text: str) -> str:
+    """Collapse runs of whitespace so quote matching tolerates line breaks and reflowing."""
+    return " ".join(text.split())
+
+
+def _resolve_quote(resource: Any, quote: str) -> str | None:
+    """Ground a free-text note citation: the quote must appear verbatim in the note's text.
+
+    This keeps note grounding deterministic — the cited span literally exists in the fetched note,
+    or the claim is refused. A paraphrase fails and forces the model to quote exactly.
+
+    Args:
+        resource: The fetched resource the claim cites (expected to carry a ``text`` note body).
+        quote: The verbatim span the claim says supports it.
+
+    Returns:
+        The stripped quote when it is a whitespace-normalized substring of the note text; otherwise
+        None (the resource has no text, or the quote is not found).
+    """
+    text = getattr(resource, "text", None)
+    if not isinstance(text, str) or not quote.strip():
+        return None
+    if _normalize_ws(quote) in _normalize_ws(text):
+        return quote.strip()
+    return None
 
 
 def resolve_claims(response: ChatResponse, fetched: FetchLog) -> tuple[ChatResponse, list[Claim]]:

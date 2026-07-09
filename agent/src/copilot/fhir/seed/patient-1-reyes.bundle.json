@@ -160,6 +160,36 @@
         "reasonCode": [{ "text": "Hypertension check and antibiotic course" }],
         "period": { "start": "2026-06-02T14:30:00Z", "end": "2026-06-02T14:50:00Z" }
       }
+    },
+    {
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "note-2025-11",
+        "status": "current",
+        "type": {
+          "coding": [{ "system": "http://loinc.org", "code": "11506-3", "display": "Progress note" }]
+        },
+        "category": [
+          {
+            "coding": [{ "system": "http://hl7.org/fhir/us/core/CodeSystem/us-core-documentreference-category", "code": "clinical-note", "display": "Clinical Note" }]
+          }
+        ],
+        "subject": { "reference": "Patient/1", "type": "Patient" },
+        "date": "2025-11-12T09:20:00Z",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "text/plain",
+              "data": "U3ViamVjdGl2ZTogUGF0aWVudCBoZXJlIGZvciByb3V0aW5lIGRpYWJldGVzIGZvbGxvdy11cCwgcmVwb3J0cyBmZWVsaW5nIHdlbGwgd2l0aCBubyBuZXcgY29tcGxhaW50cy4gQXNzZXNzbWVudC9QbGFuOiBUeXBlIDIgZGlhYmV0ZXMgbWVsbGl0dXMsIHJlYXNvbmFibHkgY29udHJvbGxlZC4gTWV0Zm9ybWluIDUwMCBtZyBjb250aW51ZWQ7IHRvbGVyYXRpbmcgd2VsbCwgbm8gR0kgdXBzZXQgcmVwb3J0ZWQuIFJlaW5mb3JjZWQgZGlldCBhbmQgZGFpbHkgd2Fsa2luZy4gRXNzZW50aWFsIGh5cGVydGVuc2lvbiBzdGFibGUgb24gbGlzaW5vcHJpbC4gRm9sbG93IHVwIGluIDMgbW9udGhzLg=="
+            },
+            "format": { "system": "http://ihe.net/fhir/ValueSet/IHE.FormatCode.codesystem", "code": "urn:ihe:iti:xds:2017:mimeTypeSufficient", "display": "mimeType Sufficient" }
+          }
+        ],
+        "context": {
+          "encounter": [{ "reference": "Encounter/enc-2025-11", "type": "Encounter" }],
+          "period": { "start": "2025-11-12T09:00:00Z" }
+        }
+      }
     }
   ]
 }

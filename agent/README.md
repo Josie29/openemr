@@ -5,14 +5,17 @@ skeleton** (implementation prompt `context/execution/implementation-prompt-01-wa
 end-to-end turn — `POST /chat` → correlation ID → one FHIR tool → Claude → verification gate →
 grounded structured answer → Langfuse trace — plus real `/health` and `/ready` probes.
 
-All five FHIR read tools are wired — `get_patient` (`Patient`), `get_problems` (`Condition`),
-`get_medications` (`MedicationRequest`, deduplicated), `get_allergies` (`AllergyIntolerance`), and
-`get_encounters` (`Encounter`, metadata only) — enough for UC-1 orientation and UC-4-style
-cross-referencing. Reads run under a **per-request patient-scoped token** (the `Authorization:
-Bearer` header the PHP module sends; see [Chat API contract](#chat-api-contract)). The verification
-gate enforces **grounding only** so far (every claim cites a fetched resource/field); faithfulness
-(the Haiku entailment judge), domain constraints, SSE streaming, model tiering, and free-text
-encounter reasoning are follow-up increments. See the prompt's Non-goals and
+Six FHIR read tools are wired — `get_patient` (`Patient`), `get_problems` (`Condition`),
+`get_medications` (`MedicationRequest`, deduplicated), `get_allergies` (`AllergyIntolerance`),
+`get_encounters` (`Encounter`, metadata), and `get_encounter_note` (`DocumentReference` — the
+free-text clinical note for one visit, base64-decoded) — covering UC-1 orientation, UC-4
+cross-referencing, and UC-3 note drill-down. Reads run under a **per-request patient-scoped token**
+(the `Authorization: Bearer` header the PHP module sends; see
+[Chat API contract](#chat-api-contract)), and **multi-turn conversations** are supported with
+server-side history (also in the contract). The verification gate grounds every claim
+**deterministically**: a structured claim cites a fetched field; a note claim cites a **verbatim
+quote** checked as a substring of the note text. Faithfulness (a Haiku entailment judge), domain
+constraints, SSE streaming, model tiering, and evals are follow-up increments. See
 `context/decisions/agent-workflow.md`.
 
 ## How a turn flows
@@ -27,7 +30,7 @@ flowchart TD
     cid --> obs[observe_turn:<br/>open chat-turn span]
     obs --> agent{{Pydantic AI agent · Claude}}
 
-    agent -->|tool call| tool[FHIR read tools:<br/>patient · problems · meds<br/>· allergies · encounters]
+    agent -->|tool call| tool[FHIR read tools:<br/>patient · problems · meds · allergies<br/>· encounters · encounter_note]
     tool --> fhir[FhirClient<br/>fixture · or SMART httpx, no DB creds]
     fhir -->|R4 resources| parse[parse → typed models]
     parse --> flog[(FetchLog<br/>typed resource)]

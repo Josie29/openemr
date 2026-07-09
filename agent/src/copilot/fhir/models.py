@@ -1,3 +1,4 @@
+import base64
 from datetime import date
 from typing import Any
 
@@ -359,6 +360,106 @@ class Encounter(BaseModel):
             start_date=period.get("start") if isinstance(period.get("start"), str) else None,
             end_date=period.get("end") if isinstance(period.get("end"), str) else None,
             status=resource.get("status") if isinstance(resource.get("status"), str) else None,
+        )
+
+
+def _encounter_ref_id(resource: dict[str, Any]) -> str | None:
+    """Extract the referenced encounter id from a DocumentReference's ``context.encounter``.
+
+    Args:
+        resource: A FHIR ``DocumentReference`` resource.
+
+    Returns:
+        The encounter logical id (``"enc-1"`` from ``"Encounter/enc-1"``), or None.
+    """
+    context = resource.get("context")
+    if not isinstance(context, dict):
+        return None
+    encounters = context.get("encounter")
+    if not isinstance(encounters, list) or not encounters:
+        return None
+    first = encounters[0]
+    reference = first.get("reference") if isinstance(first, dict) else None
+    if not isinstance(reference, str) or "/" not in reference:
+        return None
+    return reference.rsplit("/", 1)[-1]
+
+
+def _decode_note_text(content: Any) -> str | None:
+    """Decode the inline plain-text note body from a DocumentReference ``content`` list.
+
+    OpenEMR emits a clinical note as base64-encoded ``text/plain`` in
+    ``content[].attachment.data`` (no ``url``/Binary) — verified against the FHIR service code.
+    Returns None when no decodable ``text/plain`` attachment is present (e.g. the data-absent
+    variant OpenEMR emits when the note body is empty).
+
+    Args:
+        content: The ``DocumentReference.content`` value (a list of content dicts), or anything.
+
+    Returns:
+        The decoded note text, or None when absent/undecodable.
+    """
+    if not isinstance(content, list):
+        return None
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        attachment = item.get("attachment")
+        if not isinstance(attachment, dict) or attachment.get("contentType") != "text/plain":
+            continue
+        data = attachment.get("data")
+        if not isinstance(data, str) or not data:
+            continue
+        try:
+            return base64.b64decode(data, validate=True).decode("utf-8", errors="replace")
+        except ValueError:
+            # binascii.Error (malformed base64) subclasses ValueError.
+            return None
+    return None
+
+
+class NoteContent(BaseModel):
+    """Typed projection of a FHIR R4 ``DocumentReference`` clinical note — free text (UC-3).
+
+    The one tool that reads *narrative* rather than coded fields: ``text`` is the decoded note body.
+    A claim citing a note must carry a verbatim ``quote`` that the grounding gate checks is a
+    substring of this text (ARCHITECTURE.md §7) — the same deterministic guarantee as structured
+    fields, applied to prose.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    resource_type: str = Field(
+        default="DocumentReference", description="FHIR resource type, always 'DocumentReference'"
+    )
+    resource_id: str = Field(description="FHIR DocumentReference.id")
+    encounter_id: str | None = Field(default=None, description="Encounter this note belongs to")
+    date: str | None = Field(default=None, description="DocumentReference.date")
+    type_display: str | None = Field(default=None, description="Note type (LOINC display)")
+    status: str | None = Field(default=None, description="current | entered-in-error ...")
+    text: str | None = Field(default=None, description="Decoded free-text note body")
+
+    @classmethod
+    def from_fhir(cls, resource: dict[str, Any]) -> "NoteContent":
+        """Parse a FHIR ``DocumentReference`` clinical note into a typed value.
+
+        Args:
+            resource: A FHIR ``DocumentReference`` resource (parsed JSON).
+
+        Returns:
+            The typed ``NoteContent``.
+
+        Raises:
+            ValueError: If ``resource`` is not a ``DocumentReference`` or lacks an ``id``.
+        """
+        resource_id = _require_id(resource, "DocumentReference")
+        return cls(
+            resource_id=resource_id,
+            encounter_id=_encounter_ref_id(resource),
+            date=resource.get("date") if isinstance(resource.get("date"), str) else None,
+            type_display=_codeable_text(resource.get("type")),
+            status=resource.get("status") if isinstance(resource.get("status"), str) else None,
+            text=_decode_note_text(resource.get("content")),
         )
 
 

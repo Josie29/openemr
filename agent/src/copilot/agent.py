@@ -5,7 +5,14 @@ from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
 
 from copilot.fhir.client import FhirClient
-from copilot.fhir.models import Allergy, Encounter, Medication, PatientDemographics, Problem
+from copilot.fhir.models import (
+    Allergy,
+    Encounter,
+    Medication,
+    NoteContent,
+    PatientDemographics,
+    Problem,
+)
 from copilot.schemas import ChatResponse
 from copilot.verification import FetchLog, FhirRecordable, resolve_claims
 
@@ -20,6 +27,9 @@ independent):
 - get_medications: current medications (MedicationRequest resources), already deduplicated.
 - get_allergies: allergies (AllergyIntolerance resources).
 - get_encounters: recent encounters, metadata only — dates, type, reason (Encounter resources).
+- get_encounter_note(encounter_id): the free-text clinical note for one visit — the narrative
+  ("why", "what was said") the structured lists don't hold. Find the visit with get_encounters
+  first, then read its note.
 
 For a broad "give me the picture / who is this" request, fetch problems, medications, allergies,
 and the most recent encounters, then give a short scannable orientation with the single most
@@ -34,6 +44,9 @@ Rules you must follow without exception:
   `field` the statement draws from (e.g. display, name, substance, birth_date, onset_date). If you
   cannot cite a fetched field for a statement, do not make the statement. Leave SourceRef.value
   empty — the system fills it from the record.
+- For a clinical note (DocumentReference from get_encounter_note), instead of `field` set `quote`
+  to the EXACT verbatim text from the note that supports your statement — copy it word-for-word. A
+  paraphrase will be rejected, so quote precisely.
 - Do not assert drug interactions or clinical conclusions as fact. If a medication and an allergy
   or problem look inconsistent, surface it as something for the physician to review, citing the
   specific rows — never state it as a definite interaction.
@@ -121,6 +134,23 @@ def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
     async def get_encounters(ctx: RunContext[CopilotDeps]) -> list[Encounter]:
         """Read the open patient's recent encounters (metadata only — no note bodies)."""
         return _track(ctx, await ctx.deps.fhir.get_encounters(ctx.deps.patient_id))
+
+    @agent.tool
+    async def get_encounter_note(
+        ctx: RunContext[CopilotDeps], encounter_id: str
+    ) -> list[NoteContent]:
+        """Read the free-text clinical note(s) for one encounter — the narrative behind a visit.
+
+        Use for "why"/"what did the note say" questions the structured lists can't answer. Find the
+        relevant visit with get_encounters first, then pass its id here.
+
+        Args:
+            ctx: The run context.
+            encounter_id: The Encounter id whose note to read (from get_encounters).
+        """
+        return _track(
+            ctx, await ctx.deps.fhir.get_encounter_note(ctx.deps.patient_id, encounter_id)
+        )
 
     @agent.output_validator
     async def enforce_grounding(ctx: RunContext[CopilotDeps], output: ChatResponse) -> ChatResponse:

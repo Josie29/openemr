@@ -7,6 +7,7 @@ from copilot.fhir.models import (
     Allergy,
     Encounter,
     Medication,
+    NoteContent,
     PatientDemographics,
     Problem,
     bundle_resources,
@@ -100,7 +101,13 @@ class FixtureFhirClient:
             patient_id = patient.get("id")
             if isinstance(patient_id, str):
                 patients.setdefault(patient_id, {})["Patient"] = patient
-        for resource_type in ("Condition", "MedicationRequest", "AllergyIntolerance", "Encounter"):
+        for resource_type in (
+            "Condition",
+            "MedicationRequest",
+            "AllergyIntolerance",
+            "Encounter",
+            "DocumentReference",
+        ):
             for resource in bundle_resources(document, resource_type):
                 patient_id = _patient_ref_id(resource)
                 if patient_id is None:
@@ -133,6 +140,10 @@ class FixtureFhirClient:
 
     async def get_encounters(self, patient_id: str) -> list[Encounter]:
         return [Encounter.from_fhir(r) for r in self._resources(patient_id, "Encounter")]
+
+    async def get_encounter_note(self, patient_id: str, encounter_id: str) -> list[NoteContent]:
+        notes = [NoteContent.from_fhir(r) for r in self._resources(patient_id, "DocumentReference")]
+        return [note for note in notes if note.encounter_id == encounter_id]
 
     async def ping(self) -> None:
         # In-memory fixtures are always reachable.

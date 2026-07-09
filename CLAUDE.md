@@ -70,6 +70,35 @@ docker compose up --detach --wait
 - **Login:** `admin` / `pass`
 - **phpMyAdmin:** http://localhost:8310/
 
+## Branching & integration workflow
+
+The Clinical Co-Pilot is built as separable components (frontend/sidebar, agent
+tooling, evals). Integrate them on `qa/integration`, test locally, then promote to
+`main` — which **is** production:
+
+- **`main` = prod.** The Railway `copilot-agent` service auto-deploys from `main`
+  (watch path `agent/**`); the `openemr` service is the flex image that re-clones
+  `main` on redeploy (`railway redeploy -s openemr`). A merge to `main` therefore
+  reaches Railway prod — treat it as a release.
+- **`qa/integration` = local staging.** Cut each component branch off it, do the
+  work in a worktree, merge the component back into `qa/integration`, and run the
+  full local flow (`make agent-live` + the OpenEMR sidebar) to test the pieces
+  *together* before promoting.
+- **Promote:** `qa/integration → main` via squash PR, then **reset `qa` to `main`**
+  so the next cycle starts from the real prod state and doesn't drift:
+  `git checkout qa/integration && git merge --ff-only main`.
+
+### Which worktree tool — depends on whether the component needs OpenEMR
+
+- **No OpenEMR needed** (agent tooling, evals — pure Python, run via `make agent`):
+  a **raw `git worktree add`** off `qa/integration` is fine. These never touch the
+  docker stack, so there is no openemr-cmd state to manage.
+- **OpenEMR needed** (frontend/PHP module — must render in a live OpenEMR): use
+  **`openemr-cmd worktree add <name> -b --base qa/integration --start`**, never a
+  raw worktree. A raw worktree plus a hand-started stack orphans docker resources
+  and openemr-cmd state (ports, `.env`, `.worktrees.json`) that the tooling can no
+  longer tear down — see the next section for why.
+
 ## Working in a git worktree
 
 OpenEMR supports concurrent development across branches via git worktrees

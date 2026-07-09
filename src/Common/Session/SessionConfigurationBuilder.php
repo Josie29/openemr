@@ -86,14 +86,6 @@ class SessionConfigurationBuilder
             ->setName(SessionUtil::CORE_SESSION_ID)
             ->setCookiePath((!empty($webRoot)) ? $webRoot . '/' : '/')
             ->setCookieHttpOnly(false)
-            // The AI Co-Pilot SMART EHR-launch (oe-module-ai-copilot) drives launch.php inside a
-            // hidden iframe. On an HTTPS origin the browser withholds a SameSite=Strict cookie from
-            // that embedded context, so the launch request arrives session-less and 400s. OpenEMR's
-            // own guidance (SessionUtil docblock) is that SMART apps within OpenEMR need
-            // SameSite=None; None requires Secure. CSRF tokens still guard every form, and the
-            // /oauth2/ session already ships as None+Secure.
-            ->setCookieSameSite('None')
-            ->setCookieSecure(true)
             ->setReadOnly($readOnly)
             ->build();
     }

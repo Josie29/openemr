@@ -20,6 +20,14 @@ declare(strict_types=1);
 // has to persist the PKCE verifier for the callback leg to find.
 $sessionAllowWrite = true;
 
+// Behind a TLS-terminating proxy the physician's core session can rotate its id (OpenEMR's
+// restoreSession churn across the tabs frameset), leaving this write-session's early site lookup
+// empty so globals.php rejects the request with a 400 (MissingSiteIdException). The login itself
+// (auth + open patient) is intact -- only the site needs resolving -- so pin it from the request.
+// Single-site deployment, so 'default' is correct.
+// TODO(multisite): carry the real site id from the launch context in the iframe URL instead.
+$_GET['site'] ??= 'default';
+
 require_once __DIR__ . '/../../../../globals.php';
 
 use OpenEMR\BC\ServiceContainer;

@@ -128,7 +128,9 @@ POST /chat
 Authorization: Bearer <SMART patient/*.read token>   # minted by the module for the open patient
 Content-Type: application/json
 
-{ "patient_id": "<FHIR Patient id>", "message": "<the physician's question>" }
+{ "patient_id": "<FHIR Patient id>",
+  "message": "<the physician's question>",
+  "conversation_id": "<id from a prior turn's response, or omit to start a new conversation>" }
 ```
 
 - The **token travels in the `Authorization: Bearer` header**, never the body. In `http` mode the
@@ -136,10 +138,15 @@ Content-Type: application/json
   one patient the token is bound to (ARCHITECTURE.md §5).
 - **No token in `http` mode → `401`** before any FHIR read or LLM call. `patient_id` in the body
   must match the patient the token is scoped to (the FHIR server enforces the scope).
+- **Multi-turn:** omit `conversation_id` to start a conversation; every answered turn's response
+  carries a `conversation_id` the client must echo on the next turn to continue the thread. History
+  is kept server-side (it contains PHI), so the client only round-trips the id. A conversation is
+  bound to one patient: reusing its id with a different `patient_id` → **`403`**; an unknown or
+  expired id → **`404`** (start a new conversation).
 - In `fixture` mode the header is ignored (no token exists) and the bundled seed patient is served,
   so local dev needs no token.
-- Response: `200` with `{summary, claims[]}` (each claim carries a code-stamped `source`), or a
-  refusal / `401` / `502` per ARCHITECTURE.md §8.
+- Response: `200` with `{summary, claims[], conversation_id}` (each claim carries a code-stamped
+  `source`), or a refusal / `401` / `403` / `404` / `502` per ARCHITECTURE.md §8.
 
 ## Demo without the module (fixture toggle)
 

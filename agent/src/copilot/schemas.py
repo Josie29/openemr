@@ -56,3 +56,7 @@ class ChatRequest(BaseModel):
 
     patient_id: str = Field(description="FHIR Patient logical id the turn is scoped to")
     message: str = Field(description="The physician's question")
+    conversation_id: str | None = Field(
+        default=None,
+        description="Opaque id echoed from a prior turn's response; omit to start a new one",
+    )

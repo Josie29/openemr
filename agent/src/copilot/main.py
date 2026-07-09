@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -11,13 +12,13 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 
 from copilot.agent import CopilotDeps, build_agent
 from copilot.config import FhirClientMode, Settings, get_settings
+from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.health import check_readiness
 from copilot.observability import configure_observability, observe_turn, shutdown_observability
 from copilot.schemas import ChatRequest, ChatResponse
-from copilot.verification import FetchLog
 
 logger = logging.getLogger("copilot")
 
@@ -172,6 +173,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.observability_enabled = configure_observability(settings)
     app.state.fhir = _build_readiness_client(settings)
     app.state.agent = build_agent(_build_model(settings))
+    # Server-side conversation state so multi-turn history (which contains PHI) stays in the
+    # service rather than round-tripping through the client. TTL-evicted; single-instance.
+    app.state.conversation_store = ConversationStore(ttl_seconds=1800, max_sessions=1000)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -196,25 +200,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         correlation_id = current_correlation_id()
         enabled = request.app.state.observability_enabled
         settings: Settings = request.app.state.settings
+        store: ConversationStore = request.app.state.conversation_store
 
         resolved = _resolve_request_fhir(request, settings, correlation_id)
         if isinstance(resolved, JSONResponse):
             return resolved
         fhir, per_request_client = resolved
 
-        deps = CopilotDeps(
-            fhir=fhir,
-            patient_id=payload.patient_id,
-            correlation_id=correlation_id,
-            fetched=FetchLog(),
-        )
-
+        content: dict[str, Any] = {}
         status_code = 200
         try:
-            with observe_turn(enabled, correlation_id, payload.patient_id, payload.message) as turn:
+            # Resolve (or open) the conversation. It is bound to one patient; a mismatch is refused
+            # so a follow-up cannot surface a different patient's accumulated history (§5).
+            if payload.conversation_id is not None:
+                session = store.get(payload.conversation_id)
+                if session is None:
+                    return JSONResponse(
+                        status_code=404,
+                        content={
+                            "error": "conversation not found",
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                if session.patient_id != payload.patient_id:
+                    logger.info("conversation/patient mismatch", extra={"cid": correlation_id})
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "conversation is bound to a different patient",
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                conversation_id = payload.conversation_id
+            else:
+                conversation_id, session = store.create(payload.patient_id)
+
+            deps = CopilotDeps(
+                fhir=fhir,
+                patient_id=payload.patient_id,
+                correlation_id=correlation_id,
+                # Accumulated across the conversation so a follow-up can cite earlier turns' reads.
+                fetched=session.fetched,
+            )
+
+            with observe_turn(
+                enabled, correlation_id, conversation_id, payload.patient_id, payload.message
+            ) as turn:
                 try:
-                    result = await request.app.state.agent.run(payload.message, deps=deps)
+                    result = await request.app.state.agent.run(
+                        payload.message, message_history=session.messages, deps=deps
+                    )
                     turn.verified(passed=True)
+                    session.messages = result.all_messages()
                     content = result.output.model_dump()
                     turn.output(content)
                 except UnexpectedModelBehavior:
@@ -243,6 +280,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if per_request_client is not None:
                 await per_request_client.aclose()
 
+        # Echo the conversation id on every answered turn so the client keeps the thread.
+        content["conversation_id"] = conversation_id
         return JSONResponse(status_code=status_code, content=content)
 
     return app

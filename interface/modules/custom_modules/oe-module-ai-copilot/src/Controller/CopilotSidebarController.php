@@ -96,10 +96,12 @@ final readonly class CopilotSidebarController
         // which cannot be run through xl().
         $dataLabels = implode(' ', [
             'data-label-toggle="' . xla('Co-Pilot') . '"',
-            'data-label-connecting="' . xla('Connecting to the record...') . '"',
             'data-label-auth-failed="' . xla('Could not authorize against the record. Try again.') . '"',
             'data-label-unavailable="' . xla('The co-pilot is unavailable.') . '"',
             'data-label-clear-confirm="' . xla('Clear this conversation? This cannot be undone.') . '"',
+            // Caption under the animated indicator while a turn is in flight (spec §5.3.1).
+            'data-label-thinking="' . xla('Checking the record...') . '"',
+            'data-label-has-conversation="' . xla('You have a saved conversation for this patient') . '"',
         ]);
 
         $chips = $this->renderStarterChips();
@@ -173,8 +175,10 @@ final readonly class CopilotSidebarController
                 aria-controls="ai-copilot-sidebar"
                 hidden
             >
-                <span class="ai-copilot-toggle__icon" aria-hidden="true">&#9673;</span>
+                <span class="ai-copilot-toggle__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z"/></svg></span>
                 <span class="ai-copilot-toggle__label">{$toggleLabel}</span>
+                <span class="ai-copilot-toggle__chevron" aria-hidden="true"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>
+                <span class="ai-copilot-toggle__hint" id="ai-copilot-hint" hidden aria-hidden="true"></span>
             </button>
             HTML;
     }

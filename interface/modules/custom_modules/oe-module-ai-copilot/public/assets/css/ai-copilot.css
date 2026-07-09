@@ -208,26 +208,37 @@ body.ai-copilot-open {
     color: var(--copilot-error);
 }
 
-/* ---- In-flight indicator: shown between question and answer (spec §5.3.1) ---- */
+/* ---- In-flight indicator: shown between question and answer (spec §5.3.1) ----
+ *
+ * A distinct "assistant is working" bubble so the pause between question and answer (which can run
+ * ~20s while the agent reads the record) never reads as a dead panel. Given its own surface, border,
+ * and accent-colored dots so it stands clear of the white transcript rather than dissolving into it.
+ */
 
 .ai-copilot__pending {
     display: flex;
-    flex-direction: column;
-    gap: var(--copilot-space-1);
+    align-items: center;
+    gap: var(--copilot-space-3);
+    align-self: flex-start; /* hug content, like a chat bubble, rather than span the transcript */
+    max-width: 100%;
+    padding: var(--copilot-space-2) var(--copilot-space-3);
+    background: var(--copilot-surface-alt);
+    border: 1px solid var(--copilot-border);
+    border-radius: var(--copilot-radius);
 }
 
 .ai-copilot__dots {
     display: inline-flex;
+    flex: 0 0 auto;
     gap: 5px;
-    padding: var(--copilot-space-1) 0;
 }
 
 .ai-copilot__dots span {
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: var(--copilot-muted);
-    opacity: 0.35;
+    background: var(--copilot-accent); /* accent, not faint grey -- reads as active */
+    opacity: 0.4;
     /* Staggered typing indicator: reads as "composing a reply", not a busy spinner. */
     animation: ai-copilot-blink 1.25s infinite ease-in-out;
 }
@@ -242,26 +253,27 @@ body.ai-copilot-open {
 
 @keyframes ai-copilot-blink {
     0%, 60%, 100% {
-        opacity: 0.3;
+        opacity: 0.35;
         transform: translateY(0);
     }
     30% {
         opacity: 1;
-        transform: translateY(-3px);
+        transform: translateY(-4px);
     }
 }
 
 .ai-copilot__thinking {
     margin: 0;
     font-size: var(--copilot-font-sm);
-    color: var(--copilot-muted);
+    font-weight: 500;
+    color: var(--copilot-accent); /* match the dots so the caption reads as one signal */
 }
 
 /* Reduced motion: hold the dots steady rather than animating them (spec §5.3.1). */
 @media (prefers-reduced-motion: reduce) {
     .ai-copilot__dots span {
         animation: none;
-        opacity: 0.6;
+        opacity: 0.7;
     }
 }
 

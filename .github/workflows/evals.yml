@@ -1,12 +1,18 @@
 name: Agent evals (report-only)
 
-# Runs the Clinical Co-Pilot grounding/faithfulness eval on every PR that touches the agent, and
-# on manual dispatch. REPORT-ONLY: results are posted as a PR comment but never fail the job (see
-# should_fail_on_* below). To turn this into an enforcing gate once the judges are calibrated, flip
+# The paid eval: makes real Anthropic API calls (agent + judges) and writes a run to Langfuse, so
+# it costs money per run. It therefore runs ONLY on release-promotion PRs into main
+# (qa/integration -> main; main = prod) and on manual dispatch — NOT on feature -> qa/integration
+# PRs. Free deterministic agent tests (pytest/ruff/mypy) run on every PR via agent-tests.yml.
+# REPORT-ONLY: results are posted as a PR comment but never fail the job (see should_fail_on_*
+# below). To turn this into an enforcing gate once the judges are calibrated, flip
 # should_fail_on_regression to "true" — the thresholds already live in evals/experiment.py.
 
 on:
   pull_request:
+    # Base-branch filter: only PRs targeting main (i.e. qa/integration -> main promotions).
+    branches:
+      - main
     paths:
       - "agent/**"
       - ".github/workflows/evals.yml"

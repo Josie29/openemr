@@ -338,7 +338,7 @@ confirmation):
 
 > **1. Single-agent assumption** — ~~confirmed against `USERS.md`? If any UC needs real
 > delegation, revisit LangGraph (1-day spike on the UC-4 med/problem flow).~~
-> **Confirmed** against all five use cases in `context/agent-workflow.md` — every UC is one
+> **Confirmed** against all five use cases in `context/decisions/agent-workflow.md` — every UC is one
 > conversational agent over the five-tool set with a verification validator; no capability
 > needs role-delegation *or a context-isolated sub-agent*. Under the orchestrator → sub-agent
 > lens, our capabilities are deterministic tools (FHIR reads) or inline reasoning over bounded

@@ -1729,6 +1729,15 @@ class AuthorizationController
         // scopes in the session are a single string.
         $apiSession['scopes'] = implode(" ", $scopes);
         $apiSession['persist_login'] = 0;
+        // getLoggedInCoreUserUuid() swaps this->session out for a freshly started one (to read the
+        // core session cookie) and restoreOAuthSession() replaces the object again, so every value
+        // written to the session before the skip branch -- including the 'csrf' set from the
+        // authorization request's state in oauthAuthorizationFlow() -- is gone by the time we cache
+        // the session here. Without it, oauthAuthorizeToken() rejects the subsequent
+        // authorization_code exchange with "CSRF check failed" and the EHR launch can never obtain
+        // a token. Re-establish it from the authorization request, which is the same source
+        // oauthAuthorizationFlow() used.
+        $apiSession['csrf'] = $authRequest->getState();
         unset($apiSession['csrf_private_key']);
         $session_cache = json_encode($apiSession, JSON_THROW_ON_ERROR);
         // now we need to get our session user_id

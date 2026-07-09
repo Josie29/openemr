@@ -19,6 +19,10 @@ declare(strict_types=1);
 // The callback consumes (and therefore clears) the PKCE verifier it finds in the session.
 $sessionAllowWrite = true;
 
+// Same proxy/session-rotation guard as launch.php: pin the site from the request so globals.php
+// never 400s on an empty site lookup. Single-site deployment. TODO(multisite): derive real site.
+$_GET['site'] ??= 'default';
+
 require_once __DIR__ . '/../../../../globals.php';
 
 use GuzzleHttp\Client;

@@ -85,6 +85,7 @@ def test_no_header_falls_back_to_the_static_token_when_configured() -> None:
     resolved = _resolve_request_fhir(_request_with_headers({}), _http_settings(), "cid")
     assert not isinstance(resolved, JSONResponse)
     client, _ = resolved
+    assert isinstance(client, HttpFhirClient)  # HTTP mode resolves to the concrete client
     assert client._client.headers["Authorization"] == "Bearer static-fallback-token"
 
 
@@ -139,6 +140,7 @@ async def test_callers_token_reaches_the_fhir_server() -> None:
     resolved = _resolve_request_fhir(request, _http_settings(), "cid")
     assert not isinstance(resolved, JSONResponse)
     client, _ = resolved
+    assert isinstance(client, HttpFhirClient)  # HTTP mode resolves to the concrete client
 
     # HttpFhirClient builds its own AsyncClient, so there is no transport seam to inject through.
     # Swap it, preserving the headers the constructor set — those are exactly what we are testing.

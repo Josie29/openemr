@@ -122,6 +122,26 @@ set). Skip this section if the working directory does not match
 worktree, where `<slug>` is the branch label. `openemr-cmd worktree list`
 confirms.
 
+> **⚠️ `openemr-cmd worktree` does not work in this fork — it is a git
+> submodule.** This repo is checked out as a submodule of a parent
+> `gauntlet-ai` repo (`.git` is a file pointing at
+> `../../.git/modules/projects/…`, not a directory). `openemr-cmd worktree`
+> resolves the compose dir from the submodule's gitdir
+> (`.git/modules/…/docker/development-easy`), which does not exist, so
+> `worktree add`/`--start` fail (`Compose directory not found`) even though
+> exit code is 0. **Fallback:** for code-only components (PHP/JS edits that
+> don't need to render live *while you write them*), cut a **raw
+> `git worktree add -b feature/<name> <path> qa/integration`**, implement and
+> commit there (`--no-verify`, since the container-routed commit hook also
+> needs a stack it can't find), then merge the branch into the **primary
+> checkout's** `qa/integration` and run the live stack + full code-quality
+> there before promoting. Note a raw worktree has **no `vendor/`** (gitignored,
+> not materialized), so it cannot lint/test/run — all verification happens in
+> the primary. The "no orphaned openemr-cmd state" concern below does not apply
+> to a code-only raw worktree because you never start a stack or register
+> openemr-cmd state for it. Fixing `openemr-cmd` to support the submodule
+> layout is tracked as a low-priority Linear issue.
+
 **Never use raw `git worktree add`, `git worktree remove`, or
 `git worktree move` against this repo.** The `openemr-cmd worktree` script
 owns state that bare git does not: a JSON state file tracking each worktree,

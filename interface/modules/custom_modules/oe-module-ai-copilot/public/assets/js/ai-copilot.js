@@ -377,14 +377,44 @@
 
         var claims = Array.isArray(answer.claims) ? answer.claims : [];
         if (claims.length > 0) {
+            // Provenance is collapsed by default: the clinician reads the narrative; the evidence
+            // trail is one click away for anyone who wants to verify or audit a claim.
+            var details = document.createElement('details');
+            details.className = 'ai-copilot__evidence';
+
+            var toggle = document.createElement('summary');
+            toggle.className = 'ai-copilot__evidence-toggle';
+            toggle.textContent = 'Show evidence (' + claims.length + ')';
+            details.appendChild(toggle);
+
             var list = document.createElement('ol');
             list.className = 'ai-copilot__claims';
             claims.forEach(function (claim) {
                 list.appendChild(renderClaim(claim));
             });
-            wrapper.appendChild(list);
+            details.appendChild(list);
+            wrapper.appendChild(details);
         }
         appendNode(wrapper);
+    }
+
+    /**
+     * Turn a machine token into a human-readable label:
+     * "clinical_status" -> "Clinical status", "AllergyIntolerance" -> "Allergy intolerance".
+     *
+     * @param {string} token snake_case field name or CamelCase FHIR resource type
+     * @returns {string}
+     */
+    function humanizeToken(token) {
+        if (!token) {
+            return '';
+        }
+        var spaced = String(token)
+            .replace(/_/g, ' ')                       // snake_case -> spaced words
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')   // CamelCase -> spaced words
+            .trim()
+            .toLowerCase();
+        return spaced.charAt(0).toUpperCase() + spaced.slice(1);
     }
 
     function renderClaim(claim) {
@@ -400,16 +430,24 @@
         var cite = document.createElement('cite');
         cite.className = 'ai-copilot__citation';
 
+        // Show a human source label ("Allergy intolerance"), not the raw FHIR UUID, which is
+        // clinician-noise. Keep the full `Type/id` reference in attributes for hover + audit.
         var resource = document.createElement('span');
         resource.className = 'ai-copilot__citation-resource';
-        resource.textContent = source.resource_type + '/' + source.resource_id;
+        resource.textContent = humanizeToken(source.resource_type);
+        if (source.resource_type && source.resource_id) {
+            var ref = source.resource_type + '/' + source.resource_id;
+            cite.title = ref;
+            cite.setAttribute('data-resource-ref', ref);
+        }
         cite.appendChild(resource);
 
         if (source.field) {
             var field = document.createElement('span');
             field.className = 'ai-copilot__citation-field';
             // `value` is stamped in by the agent from the fetched record, never written by the model.
-            field.textContent = source.value ? source.field + ' = ' + source.value : source.field;
+            var label = humanizeToken(source.field);
+            field.textContent = source.value ? label + ': ' + source.value : label;
             cite.appendChild(field);
         }
 

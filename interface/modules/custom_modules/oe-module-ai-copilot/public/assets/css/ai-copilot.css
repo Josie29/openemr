@@ -303,8 +303,9 @@ body.ai-copilot-open {
 
 /*
  * The citation is the point of the verification design: every claim resolves to a real field of a
- * real resource the agent read. Keep it visually attached to its claim and monospaced so the
- * resource id / record value read as data, not prose.
+ * real resource the agent read. Keep it visually attached to its claim. It now shows a human
+ * source label ("Allergy intolerance") plus the record value; the raw FHIR reference lives in the
+ * element's title/data-resource-ref for hover + audit, so it no longer needs a monospace/data look.
  */
 .ai-copilot__citation {
     display: flex;
@@ -314,7 +315,6 @@ body.ai-copilot-open {
     border-left: 2px solid var(--copilot-accent);
     background: var(--copilot-surface-alt);
     border-radius: 0 var(--copilot-radius) var(--copilot-radius) 0;
-    font-family: var(--font-family-monospace, monospace);
     font-size: var(--copilot-font-sm);
     font-style: normal;
     color: var(--copilot-muted);
@@ -323,6 +323,43 @@ body.ai-copilot-open {
 
 .ai-copilot__citation-resource {
     color: var(--copilot-accent);
+    font-weight: 600;
+}
+
+.ai-copilot__citation-field {
+    color: var(--copilot-muted);
+}
+
+/*
+ * Evidence collapses by default: narrative first, provenance one click away.
+ * Uses native <details>/<summary> so it stays keyboard-accessible with no JS.
+ */
+.ai-copilot__evidence-toggle {
+    cursor: pointer;
+    list-style: none;                 /* hide default <summary> marker (standards + Firefox) */
+    padding: var(--copilot-space-1) 0;
+    font-size: var(--copilot-font-sm);
+    color: var(--copilot-accent);
+    user-select: none;
+}
+
+.ai-copilot__evidence-toggle::-webkit-details-marker {
+    display: none;                    /* hide default disclosure triangle in WebKit/Blink */
+}
+
+.ai-copilot__evidence-toggle::before {
+    content: '\25B8';                 /* U+25B8 black right-pointing small triangle */
+    display: inline-block;
+    margin-right: var(--copilot-space-1);
+    transition: transform 0.15s ease;
+}
+
+.ai-copilot__evidence[open] .ai-copilot__evidence-toggle::before {
+    transform: rotate(90deg);         /* rotate to point down when expanded */
+}
+
+.ai-copilot__evidence[open] .ai-copilot__claims {
+    margin-top: var(--copilot-space-2);
 }
 
 /* ---- Composer ---- */

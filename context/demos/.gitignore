@@ -1,0 +1,9 @@
+# Generated demo artifacts — narration.md is the source of truth and stays tracked.
+*.mov
+*.mp4
+*.wav
+*.srt
+*.png
+captions/
+.record.*
+.permcheck.mp4

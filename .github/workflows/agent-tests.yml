@@ -1,0 +1,41 @@
+name: Agent tests (free)
+
+# Deterministic agent checks — pytest (scripted FunctionModel/TestModel, no real Claude calls),
+# ruff, and mypy. Zero API cost, so these run on EVERY PR touching the agent (feature ->
+# qa/integration included) and block on failure. The paid Langfuse eval (evals.yml) is separate
+# and runs only on promotion PRs into main.
+
+on:
+  pull_request:
+    paths:
+      - "agent/**"
+      - ".github/workflows/agent-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install agent with dev extras
+        run: pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: Mypy
+        run: mypy
+
+      - name: Pytest
+        run: pytest -q

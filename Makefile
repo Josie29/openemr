@@ -13,13 +13,16 @@
 # Both agent targets run uvicorn in the foreground: logs (colored) stream to the terminal, and
 # Ctrl-C stops it cleanly. --reload picks up code edits without a manual restart.
 #
-# agent-live defaults target the already-configured worktree stack on http://localhost:8301,
-# whose sidebar is wired (AI_COPILOT_AGENT_URL) to call the agent at http://localhost:8000. Both
-# sides are HTTP on purpose: an HTTPS page calling an HTTP agent is a mixed-content block, and a
-# self-signed cert on the agent does not prompt for fetch() (module README). Same scheme avoids it.
+# agent-live defaults target the local dev OpenEMR (docker/development-easy) at
+# http://localhost:8300, with the agent at http://localhost:8000. Keep both HTTP: an HTTPS page
+# calling an HTTP agent is a mixed-content block, so browse :8300 (not the :9300 TLS port).
+# NOTE: the *agent* wiring here is necessary but NOT sufficient for the sidebar — the :8300 OpenEMR
+# must also be configured for the module (enable it in Module Manager, register a SMART OAuth
+# client, set the AI_COPILOT_* env + site_addr_oath=http://localhost:8300). Without that the panel
+# won't render / can't mint a token.
 #
 # Point at a different stack by overriding, e.g.:
-#   make agent-live OEMR_ORIGIN=http://localhost:8300 FHIR_BASE=http://localhost:8300/apis/default/fhir
+#   make agent-live OEMR_ORIGIN=http://localhost:8301 FHIR_BASE=http://localhost:8301/apis/default/fhir
 #
 # COPILOT_* config is passed inline, so agent/.env is never mutated (real env vars beat .env).
 
@@ -29,8 +32,8 @@ UVICORN    := .venv/bin/uvicorn
 
 # Origin the browser loads OpenEMR from (must equal the agent's CORS origin, same scheme) and the
 # FHIR base the agent reads (a server-side hop — plain http is fine).
-OEMR_ORIGIN := http://localhost:8301
-FHIR_BASE   := http://localhost:8301/apis/default/fhir
+OEMR_ORIGIN := http://localhost:8300
+FHIR_BASE   := http://localhost:8300/apis/default/fhir
 
 # Clear the agent port first, so every agent target is a clean restart. Force-kills the whole
 # process group (reloader + worker) with SIGKILL, which also reaps a suspended (Ctrl-Z'd) agent

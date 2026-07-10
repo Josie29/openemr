@@ -14,6 +14,19 @@
 > hooks and the config island already exposes `conversationUrl`, so resuming is self-contained.
 > Phase 4 (staleness polish) is moot until Phase 3 lands.
 
+> **Design refresh (2026-07-09).** The spec now names two components explicitly — the
+> **Co-Pilot Launcher** (banner pill) and the **Co-Pilot Panel** (docked surface) — and adds
+> two approved UI changes on top of the built Phases 1–2: a **sparkle-glyph Launcher icon**
+> replacing the ring-dot (spec §4.4) and a **Panel loading state** (spec §5.3.1). These are
+> **Phase 6** below. The has-conversation hint dot (§4.2) is spec-complete but stays dark
+> until Phase 3 persistence lands (nothing to detect while conversations are in-memory).
+
+> **Concurrency (2026-07-09).** A separate session is fixing token auth on this branch and
+> holds `public/launch.php`, `public/callback.php`, and
+> `src/Common/Session/SessionConfigurationBuilder.php`. **Do not edit those.** The
+> Launcher/Panel work does not need them (token flow reused verbatim); treat their
+> postMessage token contract as a consumer, not an owner.
+
 ---
 
 ## 0. What this is, and what it builds on
@@ -106,6 +119,32 @@ live manual drive. Do not invest in new automated test suites here.
   filtered to changed files (fix at source, no new baseline entries); confirm the agent tests
   still pass (no agent files change this pass). Live drive of the full flow.
 
+**Phase 6 — Launcher icon + Panel loading state (design refresh; additive to Phases 1–2).**
+Reference mock: `context/specs/assets/copilot-mock.html` (approved). All JS/CSS; no PHP.
+- **Launcher icon (spec §4.4).** Replace the ring-dot glyph in the banner pill with a
+  **four-point sparkle SVG + "Co-Pilot" label**. Apply the violet→blue AI accent (distinct
+  from the banner's functional blue). Express state on the pill: closed → ghost/outline
+  sparkle on a tinted pill; open → filled-gradient pill + white sparkle + a chevron that
+  rotates 90° (drive from `aria-expanded`). Keep the existing MutationObserver re-injection
+  and the toggle wiring — only the markup/label/styling change.
+- **Has-conversation hint dot (spec §4.2).** Add the corner dot markup + CSS and a
+  `setHasConversation(bool)` hook the load path can call. **It stays hidden until Phase 3**
+  reports an existing thread; do not fake it against in-memory state.
+- **Panel loading state (spec §5.3.1).** On send: echo the question into the transcript
+  immediately (optimistic); render a pending answer bubble with an **animated typing
+  indicator** (staggered dots, not a spinner) + an optional "Checking the record…" caption;
+  **disable the input + Send** until the turn resolves; on success replace the pending bubble
+  with the answer, on error show the §5.3 inline error + retry and re-enable. Honor
+  `prefers-reduced-motion` (freeze the dots). This pending bubble is the future streaming seam.
+- *Verify:* icon reads as "AI assistant" not a filter, and is visually distinct from banner
+  toggles; open/closed styling tracks the panel; sending shows the loading state and disables
+  input; reduced-motion users get a static indicator.
+
+**Naming migration (optional, flag before doing).** The spec renames DOM ids/classes
+`ai-copilot-*` → `copilot-launcher*` / `copilot-panel*`. This is churn on already-built,
+already-verified code and risks confusing the concurrent session. **Do not do it as part of
+Phase 6** unless explicitly requested; if done, it is its own isolated commit.
+
 ## 3. Non-goals (deferred; do not build)
 
 - Streaming / token-by-token output.
@@ -141,9 +180,14 @@ Mirror `context/specs/copilot-sidebar.md` §10. In short:
 - [ ] Patient switch swaps thread + re-scopes token; no cross-patient or cross-user bleed.
 - [ ] Conversation storage server-side, user_id from session; no PHI in the browser.
 - [ ] Dashboard card mount removed.
+- [ ] Launcher uses the sparkle glyph + label (ring-dot gone), violet→blue accent, and
+      tracks open/closed via `aria-expanded` (§4.4).
+- [ ] Panel shows the loading state on send — optimistic echo, animated indicator, disabled
+      input, graceful error/retry, reduced-motion safe (§5.3.1).
 
 ## References
 - `context/specs/copilot-sidebar.md` (source of truth)
+- `context/specs/assets/copilot-mock.html` (approved Phase 6 design mock — icon states + loading)
 - `context/execution/implementation-prompt-03b-copilot-widget.md` (foundation; Section B superseded)
 - `context/execution/smart-token-spike-findings.md`
 - `src/Events/Main/Tabs/RenderEvent.php`, `src/Core/Header.php`,

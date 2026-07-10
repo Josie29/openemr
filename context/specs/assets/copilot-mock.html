@@ -1,0 +1,413 @@
+<title>Co-Pilot Launcher & Loading — Design Review</title>
+<style>
+  :root {
+    --ground: #ffffff;
+    --surface: #f6f8fb;
+    --surface-2: #eef2f7;
+    --text: #1c2430;
+    --muted: #64707e;
+    --border: #dfe5ec;
+    --border-strong: #c8d2de;
+    --accent: #1667d6;          /* plain functional EHR blue */
+    --accent-ink: #0f4ea8;
+    --ai-a: #7c5cff;            /* AI sparkle gradient — violet ... */
+    --ai-b: #2b8bf2;            /* ... to blue */
+    --ai-tint: #f0edff;
+    --good: #1f9d63;
+    --shadow: 0 1px 2px rgba(20,32,48,.06), 0 8px 24px rgba(20,32,48,.08);
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0f141b; --surface: #171e27; --surface-2: #1f2833;
+      --text: #e7edf4; --muted: #93a0b0; --border: #2a3542; --border-strong: #384657;
+      --accent: #4f92f5; --accent-ink: #7fb0f8;
+      --ai-a: #9a86ff; --ai-b: #4f92f5; --ai-tint: #1c2233;
+      --good: #43c988;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f141b; --surface: #171e27; --surface-2: #1f2833;
+    --text: #e7edf4; --muted: #93a0b0; --border: #2a3542; --border-strong: #384657;
+    --accent: #4f92f5; --accent-ink: #7fb0f8;
+    --ai-a: #9a86ff; --ai-b: #4f92f5; --ai-tint: #1c2233;
+    --good: #43c988;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.45);
+  }
+  :root[data-theme="light"] {
+    --ground: #ffffff; --surface: #f6f8fb; --surface-2: #eef2f7;
+    --text: #1c2430; --muted: #64707e; --border: #dfe5ec; --border-strong: #c8d2de;
+    --accent: #1667d6; --accent-ink: #0f4ea8;
+    --ai-a: #7c5cff; --ai-b: #2b8bf2; --ai-tint: #f0edff;
+    --good: #1f9d63;
+    --shadow: 0 1px 2px rgba(20,32,48,.06), 0 8px 24px rgba(20,32,48,.08);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--ground);
+    color: var(--text);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+  .eyebrow {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); font-weight: 650; margin: 0 0 .5rem;
+  }
+  h1 { font-size: 1.9rem; line-height: 1.15; margin: 0 0 .6rem; text-wrap: balance; letter-spacing: -.01em; }
+  .lede { color: var(--muted); font-size: 1.02rem; max-width: 42rem; margin: 0; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between;
+    margin: 2rem 0 1.25rem; padding: .75rem 1rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  }
+  .toolbar .hint { font-size: .85rem; color: var(--muted); }
+  .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
+  .seg button {
+    font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer;
+    border: 0; background: transparent; color: var(--muted);
+    padding: .3rem .9rem; border-radius: 999px;
+  }
+  .seg button[aria-pressed="true"] { background: var(--ground); color: var(--text); box-shadow: var(--shadow); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  h2 {
+    font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--muted); font-weight: 700; margin: 2.75rem 0 .35rem;
+    padding-bottom: .5rem; border-bottom: 1px solid var(--border);
+  }
+  .section-note { color: var(--muted); font-size: .95rem; margin: .75rem 0 1.5rem; max-width: 44rem; }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.1rem; }
+  @media (min-width: 40rem) { .grid { grid-template-columns: 1fr 1fr; } }
+
+  /* --- Banner card: a faithful slice of the OpenEMR patient banner --- */
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .card.flag { border-color: color-mix(in srgb, var(--ai-a) 45%, var(--border)); }
+  .card-label {
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    padding: .7rem .9rem; border-bottom: 1px solid var(--border);
+    font-size: .82rem; font-weight: 650;
+  }
+  .tag {
+    font-size: .64rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
+    padding: .12rem .45rem; border-radius: 5px;
+  }
+  .tag.before { background: color-mix(in srgb, #d64545 16%, transparent); color: #c0392b; }
+  .tag.rec { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+  .tag.later { background: var(--surface-2); color: var(--muted); }
+  @media (prefers-color-scheme: dark) { .tag.before { color: #ff8080; } }
+
+  .banner { background: var(--ground); padding: 1rem; display: flex; gap: .75rem; align-items: flex-start; }
+  .avatar { width: 40px; height: 40px; border-radius: 8px; background: var(--surface-2); flex: none;
+    display: grid; place-items: center; color: var(--muted); }
+  .pt-name { color: var(--accent); font-weight: 700; font-size: 1.05rem; line-height: 1.2; }
+  .pt-name .paren { color: var(--muted); font-weight: 500; }
+  .pt-dob { font-size: .78rem; color: var(--muted); margin-top: .1rem; }
+  .pt-launch-row { margin-top: .6rem; }
+  .card-caption { padding: .75rem .9rem 1rem; font-size: .85rem; color: var(--muted); }
+  .card-caption b { color: var(--text); font-weight: 640; }
+
+  /* --- BEFORE: the ring-dot filter-looking pill --- */
+  .pill-before {
+    display: inline-flex; align-items: center; gap: .4rem;
+    background: var(--accent); color: #fff; border: 0;
+    font: inherit; font-size: .8rem; font-weight: 600;
+    padding: .28rem .7rem .28rem .55rem; border-radius: 999px; cursor: pointer;
+  }
+  .ringdot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff;
+    display: grid; place-items: center; }
+  .ringdot::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #fff; }
+
+  /* --- AI sparkle launcher: ghost (closed) -> filled gradient (open) --- */
+  .launcher {
+    display: inline-flex; align-items: center; gap: .45rem; position: relative;
+    font: inherit; font-size: .8rem; font-weight: 650; cursor: pointer;
+    padding: .32rem .75rem; border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--ai-a) 40%, var(--border));
+    background: var(--ai-tint); color: var(--accent-ink);
+    transition: background .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .launcher .spark { color: var(--ai-a); transition: color .18s ease; }
+  .launcher .chev { opacity: .55; transition: transform .18s ease; }
+  .launcher:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .launcher .bubble-wrap { display: inline-grid; place-items: center; }
+
+  /* open state (driven by [data-state=open] on <body>) */
+  [data-state="open"] .launcher {
+    background: linear-gradient(120deg, var(--ai-a), var(--ai-b));
+    color: #fff; border-color: transparent;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--ai-a) 40%, transparent);
+  }
+  [data-state="open"] .launcher .spark { color: #fff; }
+  [data-state="open"] .launcher .chev { transform: rotate(90deg); }
+
+  /* has-conversation hint dot */
+  .hint-dot { position: absolute; top: -2px; right: -2px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--ai-b); border: 2px solid var(--ground); }
+
+  .state-echo { font-weight: 600; color: var(--text); }
+
+  /* --- Loading-state panel mock --- */
+  .panel-demo { display: grid; grid-template-columns: 1fr; gap: 1.25rem; align-items: start; }
+  @media (min-width: 46rem) { .panel-demo { grid-template-columns: minmax(0,340px) 1fr; } }
+  .panel {
+    background: var(--ground); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column;
+    min-height: 400px;
+  }
+  .panel-head { padding: .85rem 1rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+  .panel-head .title { display: flex; align-items: center; gap: .45rem; font-weight: 700; font-size: .95rem; }
+  .panel-head .title .spark { color: var(--ai-a); }
+  .panel-head .sub { font-size: .78rem; color: var(--muted); margin-top: .1rem; }
+  .panel-head .ctrls { display: flex; gap: .4rem; }
+  .ghost-btn { font: inherit; font-size: .74rem; font-weight: 600; color: var(--muted);
+    background: transparent; border: 1px solid var(--border); border-radius: 7px; padding: .2rem .5rem; cursor: pointer; }
+  .panel-body { flex: 1; padding: 1rem; display: flex; flex-direction: column; gap: .9rem; overflow-y: auto; }
+  .turn-q { align-self: flex-end; max-width: 85%; background: var(--accent); color: #fff;
+    padding: .5rem .8rem; border-radius: 12px 12px 3px 12px; font-size: .88rem; }
+  .turn-a { align-self: flex-start; max-width: 90%; background: var(--surface); border: 1px solid var(--border);
+    padding: .6rem .8rem; border-radius: 12px 12px 12px 3px; font-size: .88rem; }
+  .pending { display: flex; flex-direction: column; gap: .4rem; }
+  .status-cap { font-size: .74rem; color: var(--muted); display: flex; align-items: center; gap: .4rem; }
+  .status-cap .spark { color: var(--ai-a); }
+  .dots { display: inline-flex; gap: 5px; padding: .3rem .1rem; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: .35;
+    animation: blink 1.25s infinite ease-in-out; }
+  .dots i:nth-child(2) { animation-delay: .18s; }
+  .dots i:nth-child(3) { animation-delay: .36s; }
+  @keyframes blink { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+  .panel-foot { border-top: 1px solid var(--border); padding: .7rem; display: flex; gap: .5rem; align-items: center; }
+  .panel-foot input { flex: 1; font: inherit; font-size: .85rem; padding: .5rem .7rem;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+  .panel-foot input:disabled { opacity: .55; }
+  .panel-foot .send { font: inherit; font-weight: 650; font-size: .85rem; color: #fff; background: var(--accent);
+    border: 0; border-radius: 8px; padding: .5rem .95rem; cursor: pointer; }
+  .panel-foot .send:disabled { opacity: .5; cursor: default; }
+
+  .explain { font-size: .92rem; color: var(--muted); }
+  .explain ul { padding-left: 1.1rem; margin: .5rem 0 0; }
+  .explain li { margin: .4rem 0; }
+  .explain b { color: var(--text); font-weight: 640; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .84em;
+    background: var(--surface-2); padding: .05rem .3rem; border-radius: 4px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dots i { animation: none; opacity: .6; }
+    .launcher, .launcher .chev { transition: none; }
+  }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border);
+    font-size: .82rem; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Clinical Co-Pilot &middot; Design review</p>
+  <h1>Launcher iconography &amp; Panel loading state</h1>
+  <p class="lede"><b style="color:var(--text)">Decided.</b> Launcher ships as <b style="color:var(--text)">Option A (sparkle + label) with the has-conversation hint dot</b>; the Panel loading state below is approved as shown. Variants are kept for the record. The AI affordance carries a <b style="color:var(--text)">violet&rarr;blue</b> gradient so it reads as <em>assistant</em>, not as another functional-blue toggle.</p>
+
+  <div class="toolbar">
+    <span class="hint">Toggle to see how each Launcher expresses open / closed &mdash; the pill doubles as the drawer control.</span>
+    <div class="seg" role="group" aria-label="Launcher state">
+      <button type="button" data-set="closed" aria-pressed="true">Closed</button>
+      <button type="button" data-set="open" aria-pressed="false">Open</button>
+    </div>
+  </div>
+
+  <h2>1 &middot; The Launcher</h2>
+  <p class="section-note">Problem: the current pill's ring-dot is the visual grammar of a radio button / active filter. In a banner full of toggles it reads "a filter is on," not "AI assistant." Every option below swaps in the sparkle family &mdash; the near-universal LLM signifier &mdash; and deliberately avoids a chat-bubble, which would collide with the banner's existing Messages metaphor.</p>
+
+  <div class="grid">
+    <!-- BEFORE -->
+    <div class="card">
+      <div class="card-label"><span class="tag before">Before</span> Ring-dot pill &mdash; reads as a filter</div>
+      <div class="banner">
+        <div class="avatar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-5 0-9 2.5-9 6v2h18v-2c0-3.5-4-6-9-6z"/></svg>
+        </div>
+        <div>
+          <div class="pt-name">Bessie Muller <span class="paren">(2)</span></div>
+          <div class="pt-dob">DOB: 1971-11-02 &middot; Age 54</div>
+          <div class="pt-launch-row">
+            <button class="pill-before" type="button"><span class="ringdot"></span> Co-Pilot</button>
+          </div>
+        </div>
+      </div>
+      <div class="card-caption">The ring-dot is indistinguishable from the checkbox / radio controls elsewhere in the chart. This is the signifier bug we're fixing.</div>
+    </div>
+
+    <!-- OPTION A -->
+    <div class="card flag">
+      <div class="card-label"><span class="tag rec">Shipping</span> A &mdash; Sparkle + label</div>
+      <div class="banner">
+        <div class="avatar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-5 0-9 2.5-9 6v2h18v-2c0-3.5-4-6-9-6z"/></svg>
+        </div>
+        <div>
+          <div class="pt-name">Bessie Muller <span class="paren">(2)</span></div>
+          <div class="pt-dob">DOB: 1971-11-02 &middot; Age 54</div>
+          <div class="pt-launch-row">
+            <button class="launcher" type="button" aria-expanded="false" aria-controls="copilot-panel">
+              <span class="spark" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z"/></svg>
+              </span>
+              Co-Pilot
+              <span class="chev" aria-hidden="true">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="card-caption"><b>Clearest for first-time users.</b> Sparkle carries the "AI" meaning; the label removes all doubt; the chevron hints a right-side drawer and rotates on open.</div>
+    </div>
+
+    <!-- OPTION B -->
+    <div class="card flag">
+      <div class="card-label"><span class="tag before">Deferred</span> B &mdash; Sparkle-in-bubble (implies dialogue)</div>
+      <div class="banner">
+        <div class="avatar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-5 0-9 2.5-9 6v2h18v-2c0-3.5-4-6-9-6z"/></svg>
+        </div>
+        <div>
+          <div class="pt-name">Bessie Muller <span class="paren">(2)</span></div>
+          <div class="pt-dob">DOB: 1971-11-02 &middot; Age 54</div>
+          <div class="pt-launch-row">
+            <button class="launcher" type="button" aria-expanded="false" aria-controls="copilot-panel">
+              <span class="spark bubble-wrap" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 12a8 8 0 01-11.5 7.2L4 20l1-4.4A8 8 0 1121 12z"/><path d="M12 8.2c.25 1.9.5 2.5 2.5 3.3-2 .8-2.25 1.4-2.5 3.3-.25-1.9-.5-2.5-2.5-3.3 2-.8 2.25-1.4 2.5-3.3z" fill="currentColor" stroke="none"/></svg>
+              </span>
+              Co-Pilot
+              <span class="chev" aria-hidden="true">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="card-caption">Signals <b>AI</b> and <b>conversation</b> in one mark. Pick this if we want the pill to say "a dialogue lives here," not "a one-shot action."</div>
+    </div>
+
+    <!-- OPTION C: has-conversation hint -->
+    <div class="card flag">
+      <div class="card-label"><span class="tag rec">Shipping</span> A + has-conversation hint (final)</div>
+      <div class="banner">
+        <div class="avatar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-5 0-9 2.5-9 6v2h18v-2c0-3.5-4-6-9-6z"/></svg>
+        </div>
+        <div>
+          <div class="pt-name">Bessie Muller <span class="paren">(2)</span></div>
+          <div class="pt-dob">DOB: 1971-11-02 &middot; Age 54</div>
+          <div class="pt-launch-row">
+            <button class="launcher" type="button" aria-expanded="false" aria-controls="copilot-panel">
+              <span class="spark" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z"/></svg>
+              </span>
+              Co-Pilot
+              <span class="chev" aria-hidden="true">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+              </span>
+              <span class="hint-dot" title="You've discussed this patient before"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="card-caption"><b>This is what ships.</b> The dot means a saved thread exists for this patient &mdash; a cheap orientation cue (spec &sect;4.2). Reuses the Load endpoint, so no extra call.</div>
+    </div>
+  </div>
+
+  <h2>2 &middot; Panel loading state</h2>
+  <p class="section-note">Between submit and response the round-trip is a grounded FHIR lookup &mdash; seconds, not instant. The Panel echoes the question immediately, then shows an animated typing indicator (not a spinner: "composing a reply," not "system busy") with an optional grounded caption. The input disables to block double-submit. This pending bubble is the exact slot future streaming fills token-by-token.</p>
+
+  <div class="panel-demo">
+    <div class="panel" id="copilot-panel">
+      <div class="panel-head">
+        <div>
+          <div class="title"><span class="spark" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z"/></svg>
+          </span>Clinical Co-Pilot</div>
+          <div class="sub">Bessie Muller (2)</div>
+        </div>
+        <div class="ctrls"><button class="ghost-btn" type="button">Clear</button><button class="ghost-btn" type="button" aria-label="Close">&times;</button></div>
+      </div>
+      <div class="panel-body" id="panelBody">
+        <div class="turn-q">Any medication&ndash;allergy conflicts?</div>
+        <div class="pending" id="pendingTurn">
+          <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="status-cap"><span class="spark" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z"/></svg>
+          </span>Checking the record&hellip;</div>
+        </div>
+      </div>
+      <div class="panel-foot">
+        <input type="text" placeholder="Ask about this patient&hellip;" disabled value="">
+        <button class="send" type="button" disabled>Send</button>
+      </div>
+    </div>
+
+    <div class="explain">
+      <p style="margin-top:0"><b style="color:var(--text)">What you're seeing, in spec terms (&sect;5.3.1):</b></p>
+      <ul>
+        <li><b>Optimistic echo</b> &mdash; the question appears the instant it's sent, before an answer exists.</li>
+        <li><b>Animated typing indicator</b> &mdash; dots over a spinner; reads as "replying."</li>
+        <li><b>Grounded caption</b> &mdash; <code>Checking the record&hellip;</code> reassures the reply is FHIR-backed, not free-associated. Kept generic &mdash; no step we can't guarantee.</li>
+        <li><b>Input disabled</b> &mdash; no double-submit; re-enables on success or error.</li>
+        <li><b>Streaming seam</b> &mdash; the pending bubble is where tokens will later stream in. Building it now makes streaming a swap, not a rework.</li>
+      </ul>
+      <p style="margin-bottom:0"><button class="ghost-btn" type="button" id="resolveBtn" style="font-size:.82rem;padding:.35rem .7rem">&#9654; Play: resolve the turn</button></p>
+    </div>
+  </div>
+
+  <footer>
+    Mock for review &mdash; palette matches OpenEMR chrome; system-ui by design so it reads as the real EHR. Backs <code>context/specs/copilot-sidebar.md</code> &sect;4.4 and &sect;5.3.1.
+  </footer>
+</div>
+
+<script>
+  // Launcher open/closed toggle across all variants
+  const seg = document.querySelectorAll('.seg button');
+  seg.forEach(b => b.addEventListener('click', () => {
+    const set = b.dataset.set;
+    document.body.dataset.state = set;
+    seg.forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    document.querySelectorAll('.launcher').forEach(l => l.setAttribute('aria-expanded', String(set === 'open')));
+  }));
+  document.body.dataset.state = 'closed';
+
+  // Play: resolve the pending turn into an answer
+  const btn = document.getElementById('resolveBtn');
+  const pending = document.getElementById('pendingTurn');
+  const body = document.getElementById('panelBody');
+  const input = document.querySelector('.panel-foot input');
+  const send = document.querySelector('.panel-foot .send');
+  let resolved = false;
+  btn.addEventListener('click', () => {
+    if (resolved) {
+      // reset
+      body.innerHTML = '<div class="turn-q">Any medication&ndash;allergy conflicts?</div>'
+        + '<div class="pending" id="pendingTurn"><div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>'
+        + '<div class="status-cap"><span class="spark"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z"/></svg></span>Checking the record&hellip;</div></div>';
+      input.disabled = true; send.disabled = true; input.value = '';
+      btn.innerHTML = '&#9654; Play: resolve the turn';
+      resolved = false; return;
+    }
+    const p = document.getElementById('pendingTurn');
+    if (p) p.remove();
+    const a = document.createElement('div');
+    a.className = 'turn-a';
+    a.innerHTML = 'No conflicts found. No active allergies or current medications are documented for this patient. <span style="color:var(--muted);font-size:.72rem;display:block;margin-top:.35rem">Reflects the record at 2:14 PM &middot; grounded in FHIR</span>';
+    body.appendChild(a);
+    input.disabled = false; send.disabled = false;
+    btn.innerHTML = '&#8635; Reset the demo';
+    resolved = true;
+  });
+</script>

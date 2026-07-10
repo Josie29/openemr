@@ -86,7 +86,13 @@ tooling, evals). Integrate them on `qa/integration`, test locally, then promote 
   *together* before promoting.
 - **Promote:** `qa/integration → main` via squash PR, then **reset `qa` to `main`**
   so the next cycle starts from the real prod state and doesn't drift:
-  `git checkout qa/integration && git merge --ff-only main`.
+  `git fetch origin && git checkout qa/integration && git reset --hard origin/main
+  && git push --force-with-lease origin qa/integration`. A **hard reset, not
+  `merge --ff-only`**: the squash collapses the PR's commits into one new commit on
+  `main`, so `qa`'s pre-merge commits are never ancestors of it and `--ff-only`
+  always refuses. The reset is safe because the squashed commit's tree is identical
+  to `qa`'s — confirm with `git diff --stat qa/integration origin/main` (empty output)
+  before resetting, so no local-only work is discarded.
 - **Bump `$v_js_includes` in `version.php` whenever the promotion changes any
   `.js`/`.css`** (module assets included). Prod runs with `OPENEMR__ENVIRONMENT`
   unset, so the shell cache-busts assets with the *static* release version

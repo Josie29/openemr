@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api *)",
+      "Bash(awk *)",
+      "Bash(railway logs *)",
+      "Bash(railway status *)",
+      "Bash(railway deployment list *)",
+      "Bash(git check-ignore *)",
+      "Bash(openemr-cmd worktree list *)",
+      "Bash(docker compose version)",
+      "mcp__claude-in-chrome__navigate",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude-in-chrome__tabs_context_mcp"
+    ]
+  }
+}

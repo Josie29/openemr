@@ -1,0 +1,43 @@
+meta {
+  name: 05 Chat - New Turn
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/chat
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+body:json {
+  {
+    "patient_id": "{{patient_id}}",
+    "message": "List this patient's current medications."
+  }
+}
+
+docs {
+  Opens a new conversation and asks a grounded question. The response is a `summary`
+  plus a list of `claims`, each carrying a citation (resource_type / resource_id /
+  field) resolved by the agent's grounding gate against the records it actually read.
+  The post-response script saves the returned conversation_id so the follow-up turn
+  can continue the same thread.
+}
+
+script:post-response {
+  if (res.getStatus() === 200 && res.getBody().conversation_id) {
+    bru.setEnvVar("conversation_id", res.getBody().conversation_id);
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.summary: isDefined
+  res.body.claims: isDefined
+  res.body.conversation_id: isDefined
+}

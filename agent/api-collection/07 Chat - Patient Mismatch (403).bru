@@ -1,0 +1,35 @@
+meta {
+  name: 07 Chat - Patient Mismatch (403)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/chat
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+body:json {
+  {
+    "patient_id": "a234015f-fe3e-4324-8f68-f066f203fa48",
+    "message": "Summarize this patient.",
+    "conversation_id": "{{conversation_id}}"
+  }
+}
+
+docs {
+  Cross-patient boundary case. A conversation is bound to one patient on creation; a
+  follow-up that names a different patient_id (here, a second patient) is refused with
+  403 so accumulated history can never leak across patients. Run 05 first to populate
+  conversation_id. Guards the invariant: one conversation, one patient.
+}
+
+assert {
+  res.status: eq 403
+  res.body.error: eq conversation is bound to a different patient
+}

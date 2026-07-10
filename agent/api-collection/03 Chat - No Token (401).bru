@@ -1,0 +1,29 @@
+meta {
+  name: 03 Chat - No Token (401)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/chat
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "patient_id": "{{patient_id}}",
+    "message": "Summarize this patient."
+  }
+}
+
+docs {
+  Authorization boundary case. /chat runs HTTP mode in prod: with no patient-scoped
+  Bearer token the agent refuses the turn (401) rather than reading any data. This is
+  the door that a stolen page cannot open. Runs cold, no setup.
+}
+
+assert {
+  res.status: eq 401
+  res.body.error: eq missing patient-scoped FHIR token
+}

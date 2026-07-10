@@ -1,0 +1,4 @@
+# The working prod environment holds live credentials (client_secret, refresh_token)
+# and runtime tokens the post-response scripts write back. It is delivered with the
+# submission, never committed. Graders copy prod.example.bru -> prod.bru and fill it in.
+environments/prod.bru

@@ -1,0 +1,35 @@
+meta {
+  name: 06 Chat - Follow-up
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/chat
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+body:json {
+  {
+    "patient_id": "{{patient_id}}",
+    "message": "Are there any interactions or duplicates among those medications?",
+    "conversation_id": "{{conversation_id}}"
+  }
+}
+
+docs {
+  Multi-turn continuation. Reuses the conversation_id from the previous turn, so the
+  agent answers with the prior turn's context in scope. Demonstrates the conversational
+  (not single-shot) shape the PRD requires. Run 05 first to populate conversation_id.
+}
+
+assert {
+  res.status: eq 200
+  res.body.summary: isDefined
+  res.body.conversation_id: eq {{conversation_id}}
+}

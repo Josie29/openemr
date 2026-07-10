@@ -1,0 +1,21 @@
+meta {
+  name: 01 Health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/health
+  body: none
+  auth: none
+}
+
+docs {
+  Liveness probe. 200 whenever the process is alive; no dependencies checked, no auth.
+  Runs cold against prod with zero setup.
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq alive
+}

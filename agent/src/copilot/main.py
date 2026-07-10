@@ -292,11 +292,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # the specific reason is surfaced too, which aids debugging in this demo system.
                     # (A production PHI deployment would genericize this — see ARCHITECTURE.md §8.)
                     logger.warning("LLM request failed", extra={"cid": correlation_id}, exc_info=True)  # noqa: E501
+                    turn.errored(tool_failure=False)
                     status_code = 502
                     content = {"error": str(exc), "correlation_id": correlation_id}
                 except FhirError:
                     # A data read failed — report the gap, never fabricate around it (§8).
                     logger.warning("FHIR read failed", extra={"cid": correlation_id}, exc_info=True)
+                    turn.errored(tool_failure=True)
                     status_code = 502
                     content = {
                         "error": "patient data is temporarily unavailable",

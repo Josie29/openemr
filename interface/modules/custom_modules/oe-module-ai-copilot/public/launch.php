@@ -3,9 +3,9 @@
 /**
  * Entry point of the SMART EHR-launch chain, loaded inside the panel's hidden iframe.
  *
- * Mints a launch token carrying the open chart's patient context, arms the PKCE/state pair in the
- * physician's session, and redirects the frame to OpenEMR's authorize endpoint. The chart page in
- * the parent frame never navigates.
+ * Mints a launch token carrying the open chart's patient context, seals the PKCE verifier into the
+ * OAuth `state`, and redirects the frame to OpenEMR's authorize endpoint. The chart page in the
+ * parent frame never navigates.
  *
  * @package   OpenEMR
  * @link      https://www.open-emr.org
@@ -16,20 +16,21 @@
 
 declare(strict_types=1);
 
-// Must precede globals.php: the session is opened read-only unless this is set, and the launch leg
-// has to persist the PKCE verifier for the callback leg to find.
-$sessionAllowWrite = true;
+// This leg reads the session (auth + open chart) but never writes it: the launch->callback bridge
+// travels in the encrypted `state`, not the session. Read-only is globals.php's default, so there
+// is deliberately no $sessionAllowWrite here -- that write is exactly what raced the proxy's session
+// rotation and logged the physician out.
 
-// Behind a TLS-terminating proxy the physician's core session can rotate its id (OpenEMR's
-// restoreSession churn across the tabs frameset), leaving this write-session's early site lookup
-// empty so globals.php rejects the request with a 400 (MissingSiteIdException). The login itself
-// (auth + open patient) is intact -- only the site needs resolving -- so pin it from the request.
-// Single-site deployment, so 'default' is correct.
+// Behind a TLS-terminating proxy the early site lookup can come up empty, so globals.php would
+// reject the request with a 400 (MissingSiteIdException). Pin it from the request. Single-site
+// deployment, so 'default' is correct.
 // TODO(multisite): carry the real site id from the launch context in the iframe URL instead.
 $_GET['site'] ??= 'default';
 
 require_once __DIR__ . '/../../../../globals.php';
 
+use DateTimeZone;
+use Lcobucci\Clock\SystemClock;
 use OpenEMR\BC\ServiceContainer;
 use OpenEMR\Common\Csrf\CsrfUtils;
 use OpenEMR\Common\Session\SessionWrapperFactory;
@@ -37,7 +38,7 @@ use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\FHIR\Config\ServerConfig;
 use OpenEMR\Modules\AiCopilot\Config\CopilotConfig;
 use OpenEMR\Modules\AiCopilot\Smart\LaunchController;
-use OpenEMR\Modules\AiCopilot\Smart\LaunchSession;
+use OpenEMR\Modules\AiCopilot\Smart\LaunchStateCodec;
 use OpenEMR\Modules\AiCopilot\Smart\TokenRelayView;
 use OpenEMR\Modules\AiCopilot\Support\ModuleUrls;
 use OpenEMR\Services\PatientService;
@@ -75,7 +76,10 @@ try {
     $launchController = new LaunchController(
         $config,
         $serverConfig,
-        new LaunchSession($session),
+        new LaunchStateCodec(
+            ServiceContainer::getCrypto(),
+            new SystemClock(new DateTimeZone(date_default_timezone_get()))
+        ),
         new PatientService()
     );
 

@@ -16,11 +16,24 @@
     --ai-copilot-width: 20vw;
 }
 
-/* Push, not overlay: when open, the shell body reserves space so the chart reflows beside us. */
+/*
+ * Push, not overlay: reserve space so the OpenEMR chart reflows beside the panel instead of being
+ * covered. The shell lays out html/body/#mainBox as a flex column whose body is pinned to the
+ * viewport width (min-width: 100vw), which silently defeats a plain margin-right -- the frames
+ * never shrink. Cap the body width and release its min-width instead so the flex column can
+ * narrow; #framesDisplay (flex: 1) follows it, and the fixed panel fills the freed gap on the
+ * right. !important is required to beat the theme's viewport-width pin on body.
+ */
 body.ai-copilot-open {
-    margin-right: var(--ai-copilot-width);
-    /* The chart frames read the shrunken body width; keep the transition gentle. */
-    transition: margin-right 0.12s ease-out;
+    min-width: 0 !important;
+    width: calc(100vw - var(--ai-copilot-width)) !important;
+    /* Gentle on open/close; suppressed mid-drag (below) so the width tracks the cursor 1:1. */
+    transition: width 0.12s ease-out;
+}
+
+/* While the resize handle is held, drop the ease so the chart edge follows the pointer exactly. */
+body.ai-copilot-resizing {
+    transition: none !important;
 }
 
 /* ---- The sidebar shell ---- */

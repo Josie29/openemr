@@ -32,13 +32,10 @@ use OpenEMR\Services\PatientService;
  */
 final readonly class LaunchController
 {
-    /** Bytes of entropy behind the opaque `state` value. */
-    private const STATE_BYTES = 32;
-
     public function __construct(
         private CopilotConfig $config,
         private ServerConfig $serverConfig,
-        private LaunchSession $launchSession,
+        private LaunchStateCodec $stateCodec,
         private PatientService $patientService,
     ) {
     }
@@ -53,14 +50,17 @@ final readonly class LaunchController
      *
      * @throws LaunchException If the patient has no FHIR UUID.
      * @throws \Random\RandomException If the platform CSPRNG is unavailable.
+     * @throws \JsonException If the state payload cannot be encoded.
      */
     public function buildAuthorizeUrl(int $pid, string $redirectUri): string
     {
         $patientUuid = $this->resolvePatientUuid($pid);
 
         $pkce = PkceChallenge::create();
-        $state = bin2hex(random_bytes(self::STATE_BYTES));
-        $this->launchSession->begin($state, $pkce->verifier, $patientUuid);
+        // The verifier + expected patient ride back to the callback inside `state`, sealed with
+        // authenticated encryption -- not the core session, whose write races the proxy and logs the
+        // physician out. See LaunchStateCodec.
+        $state = $this->stateCodec->encode($pkce->verifier, $patientUuid);
 
         $launchToken = new SMARTLaunchToken($patientUuid);
         // Must be one of SMARTLaunchToken::VALID_INTENTS -- an unrecognised intent is silently

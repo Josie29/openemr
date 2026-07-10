@@ -1,0 +1,22 @@
+meta {
+  name: 02 Ready
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/ready
+  body: none
+  auth: none
+}
+
+docs {
+  Readiness probe. Actively pings every downstream dependency (FHIR, the LLM provider,
+  Langfuse) and returns 200 only when all are reachable, 503 otherwise. The body lists
+  per-dependency status so a red dependency is visible without reading logs.
+}
+
+assert {
+  res.status: eq 200
+  res.body.ready: eq true
+}

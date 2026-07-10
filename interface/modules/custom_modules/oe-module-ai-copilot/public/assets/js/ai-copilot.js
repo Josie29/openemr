@@ -257,6 +257,7 @@
             }
             dragging = false;
             document.body.style.userSelect = '';
+            document.body.classList.remove('ai-copilot-resizing');
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
             var current = getComputedStyle(document.documentElement).getPropertyValue('--ai-copilot-width');
@@ -270,6 +271,7 @@
         els.resizer.addEventListener('pointerdown', function (e) {
             dragging = true;
             document.body.style.userSelect = 'none'; // stop text selection while dragging
+            document.body.classList.add('ai-copilot-resizing');
             window.addEventListener('pointermove', onMove);
             window.addEventListener('pointerup', onUp);
             e.preventDefault();

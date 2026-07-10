@@ -16,35 +16,39 @@
 
 declare(strict_types=1);
 
-// The callback consumes (and therefore clears) the PKCE verifier it finds in the session.
-$sessionAllowWrite = true;
+// Like launch.php, this leg reads the session only for auth: the launch->callback bridge arrives in
+// the encrypted `state`, so there is no $sessionAllowWrite -- avoiding the write that raced the
+// proxy's session rotation and logged the physician out.
 
-// Same proxy/session-rotation guard as launch.php: pin the site from the request so globals.php
-// never 400s on an empty site lookup. Single-site deployment. TODO(multisite): derive real site.
+// Pin the site from the request so globals.php never 400s on an empty site lookup behind the proxy.
+// Single-site deployment. TODO(multisite): derive real site.
 $_GET['site'] ??= 'default';
 
 require_once __DIR__ . '/../../../../globals.php';
 
+use DateTimeZone;
 use GuzzleHttp\Client;
+use Lcobucci\Clock\SystemClock;
 use OpenEMR\BC\ServiceContainer;
-use OpenEMR\Common\Session\SessionWrapperFactory;
 use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\FHIR\Config\ServerConfig;
 use OpenEMR\Modules\AiCopilot\Config\CopilotConfig;
 use OpenEMR\Modules\AiCopilot\Exception\LaunchException;
-use OpenEMR\Modules\AiCopilot\Smart\LaunchSession;
+use OpenEMR\Modules\AiCopilot\Smart\LaunchStateCodec;
 use OpenEMR\Modules\AiCopilot\Smart\TokenExchanger;
 use OpenEMR\Modules\AiCopilot\Smart\TokenRelayView;
 use OpenEMR\Modules\AiCopilot\Support\ModuleUrls;
 
 $globalsBag = OEGlobalsBag::getInstance();
-$session = SessionWrapperFactory::getInstance()->getActiveSession();
 $logger = ServiceContainer::getLogger();
 
 $serverConfig = new ServerConfig();
 $urls = ModuleUrls::create($serverConfig->getOauthAddress(), $globalsBag->getWebRoot());
 $relay = new TokenRelayView($urls->origin);
-$launchSession = new LaunchSession($session);
+$stateCodec = new LaunchStateCodec(
+    ServiceContainer::getCrypto(),
+    new SystemClock(new DateTimeZone(date_default_timezone_get()))
+);
 
 header('Content-Type: text/html; charset=utf-8');
 // The relayed document embeds a bearer token. Keep it out of every cache between here and the frame.
@@ -52,10 +56,9 @@ header('Cache-Control: no-store, private');
 
 try {
     // An authorization-server error (access_denied, invalid_scope, ...) arrives as a query param,
-    // not as a non-2xx. Discard the in-flight launch before doing anything else.
+    // not as a non-2xx.
     $error = filter_input(INPUT_GET, 'error');
     if (is_string($error)) {
-        $launchSession->clear();
         throw new LaunchException(sprintf('Authorization server refused the launch: %s', $error));
     }
 
@@ -65,8 +68,8 @@ try {
         throw new LaunchException('Callback is missing code or state');
     }
 
-    // Verifies state and clears the session keys, so a replayed callback finds nothing.
-    ['codeVerifier' => $codeVerifier, 'patientUuid' => $expectedPatientUuid] = $launchSession->consume($state);
+    // Decrypts and validates the state blob: proves this server minted it, then checks it is unexpired.
+    ['codeVerifier' => $codeVerifier, 'patientUuid' => $expectedPatientUuid] = $stateCodec->decode($state);
 
     $config = CopilotConfig::fromEnvironment();
     $exchanger = new TokenExchanger($config, new Client());

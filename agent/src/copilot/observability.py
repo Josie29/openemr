@@ -77,6 +77,26 @@ class TurnTrace:
         """Record the grounding gate's outcome as a ``verification_grounding`` score."""
         self._apply(lambda s: s.score_trace(name="verification_grounding", value=float(passed)))
 
+    def errored(self, *, tool_failure: bool) -> None:
+        """Flag an infrastructure failure on this turn so the alert monitors can count it.
+
+        Emits numeric scores the same way :meth:`verified` does (the proven monitorable signal),
+        because the route catches the failure *inside* the span — so the span itself closes
+        cleanly and would otherwise look successful. ``turn_error`` counts every failed turn (feeds
+        the error-rate alert); ``tool_error`` additionally marks the subset caused by a FHIR read
+        (feeds the tool-failure alert). The span level is set to ``ERROR`` so failures are visible
+        in the Langfuse trace view and dashboards, not only in the monitors. See
+        ``context/planning/alerting.md`` (A2, A3).
+
+        Args:
+            tool_failure: True when the failure was a FHIR tool read (vs an LLM-provider error),
+                so the tool-failure alert can be distinguished from a general turn error.
+        """
+        self._apply(lambda s: s.score_trace(name="turn_error", value=1.0))
+        if tool_failure:
+            self._apply(lambda s: s.score_trace(name="tool_error", value=1.0))
+        self._apply(lambda s: s.update(level="ERROR"))
+
     def output(self, data: object) -> None:
         """Record the turn's response as the trace output."""
         self._apply(lambda s: s.update(output=data))

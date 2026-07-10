@@ -58,9 +58,10 @@ fresh pair, run OpenEMR's token CLI on the prod `openemr` service as the `apache
 Enter the OpenEMR admin password at the hidden prompt (username defaults to `admin`):
 
 ```bash
-railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=a234013f-932b-434c-8f21-9edc54ff3892 --scopes=\"openid fhirUser launch patient/Patient.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Encounter.read offline_access\"'"
+railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=a234013f-932b-434c-8f21-9edc54ff3892 --scopes=openid,fhirUser,launch,patient/Patient.read,patient/Condition.read,patient/MedicationRequest.read,patient/AllergyIntolerance.read,patient/Encounter.read,offline_access'"
 ```
 
+- `--scopes` is a **comma-separated** list (the CLI splits on commas, not spaces).
 - `--patient` binds the token to one patient; `launch` + `patient/*.read` scope the FHIR
   reads; `offline_access` is what makes the CLI also emit a refresh token.
 - Paste the printed **refresh token** into `refresh_token` in `prod.bru`. The access token it

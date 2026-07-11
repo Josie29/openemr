@@ -1,0 +1,26 @@
+meta {
+  name: 07 Capability - metadata (ping)
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{base_url}}/metadata
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/fhir+json
+}
+
+docs {
+  Wraps the FHIR client's `ping` (used by /ready). The CapabilityStatement is unauthenticated
+  and cheap — a reachability probe, not a data read — so it works with NO access_token. Run it
+  cold to confirm the FHIR server is up before doing the auth dance.
+}
+
+assert {
+  res.status: eq 200
+  res.body.resourceType: eq CapabilityStatement
+}

@@ -1,0 +1,34 @@
+meta {
+  name: 04 Allergies - AllergyIntolerance (get_allergies)
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/AllergyIntolerance?patient={{patient_id}}
+  body: none
+  auth: bearer
+}
+
+params:query {
+  patient: {{patient_id}}
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  Accept: application/fhir+json
+}
+
+docs {
+  Wraps the agent tool `get_allergies`. Searches AllergyIntolerance for the patient; each
+  entry maps through `Allergy.from_fhir`. An empty searchset (total 0) is a valid result —
+  the tool reports "no allergies on record" rather than treating it as an error.
+}
+
+assert {
+  res.status: eq 200
+  res.body.resourceType: eq Bundle
+}

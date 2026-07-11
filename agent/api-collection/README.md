@@ -51,14 +51,34 @@ boundary tests: they hold whether or not you have a valid token.
   deployment. Tokens are minted out-of-band with OpenEMR's CLI (below), never via a public
   self-service grant.
 
-## Re-minting a token (when the 3-month refresh token expires)
+## Re-minting a token
 
-The refresh token lasts 3 months; the access token 1 hour (request 04 refreshes it). To mint a
-fresh pair, run OpenEMR's token CLI on the prod `openemr` service as the `apache` web user.
-Enter the OpenEMR admin password at the hidden prompt (username defaults to `admin`):
+The refresh token lasts 3 months; the access token 1 hour (request 04 refreshes it). The
+refresh token is also **single-use** — OpenEMR rotates it on every refresh — so if you run
+Auth from two places, or a stale copy gets used, it can revoke. **If request 04 returns
+`401 "Token has been revoked"` (or `invalid_grant`), the saved refresh token is dead and you
+need to re-mint.**
+
+### The easy way — helper script
 
 ```bash
-railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=a234013f-932b-434c-8f21-9edc54ff3892 --scopes=openid,fhirUser,launch,patient/Patient.read,patient/Condition.read,patient/MedicationRequest.read,patient/AllergyIntolerance.read,patient/Encounter.read,offline_access'"
+agent/scripts/mint-fhir-token.sh          # updates api-collection + fhir-substrate (if present)
+agent/scripts/mint-fhir-token.sh --graded-only
+```
+
+It prompts for your OpenEMR username (default `admin`) and password, runs the mint on prod,
+then **auto-extracts** the fresh access + refresh tokens from the CLI's JSON output and writes
+both into `prod.bru` — no copy/paste. The scopes — including `patient/DocumentReference.read`,
+needed for clinical-note reads — live in one place at the top of the script. Override
+`CLIENT_ID` / `PATIENT_ID` via env vars to target a different client or patient.
+
+### The manual way — CLI directly
+
+Run OpenEMR's token CLI on the prod `openemr` service as the `apache` web user (enter the admin
+password at the hidden prompt; username defaults to `admin`):
+
+```bash
+railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=a234013f-932b-434c-8f21-9edc54ff3892 --scopes=openid,fhirUser,launch,patient/Patient.read,patient/Condition.read,patient/MedicationRequest.read,patient/AllergyIntolerance.read,patient/Encounter.read,patient/DocumentReference.read,offline_access'"
 ```
 
 - `--scopes` is a **comma-separated** list (the CLI splits on commas, not spaces).
@@ -68,3 +88,7 @@ railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/op
   also prints is optional — request 04 will mint a fresh one.
 - To target a different patient, swap `--patient` for another Patient UUID and update
   `patient_id` in `prod.bru`.
+
+> **Note:** the prod DB (and thus the OAuth token store) lives on a persistent Railway volume,
+> so tokens survive `railway redeploy -s openemr`. A revoked token is a lifecycle event (rotation
+> or a re-mint), not a deploy wiping state — so re-minting fixes it durably.

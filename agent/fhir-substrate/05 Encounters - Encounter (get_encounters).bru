@@ -1,0 +1,34 @@
+meta {
+  name: 05 Encounters - Encounter (get_encounters)
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/Encounter?patient={{patient_id}}
+  body: none
+  auth: bearer
+}
+
+params:query {
+  patient: {{patient_id}}
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  Accept: application/fhir+json
+}
+
+docs {
+  Wraps the agent tool `get_encounters`. Searches Encounter for the patient; each entry maps
+  through `Encounter.from_fhir`. Grab an `id` from a Bundle entry here to feed the note read
+  in request 06.
+}
+
+assert {
+  res.status: eq 200
+  res.body.resourceType: eq Bundle
+}

@@ -191,6 +191,20 @@ class TurnTrace:
             self._apply(lambda s: s.score_trace(name="tool_error", value=1.0))
         self._apply(lambda s: s.update(level="ERROR"))
 
+    def costed(self, *, usd: float) -> None:
+        """Record the turn's model cost (USD) as a ``turn_cost`` numeric score.
+
+        Cost is attached by the auto-instrumentation to the per-generation child spans, not the
+        ``chat-turn`` root, so a Langfuse Monitor (which reads observation-level cost) cannot
+        threshold per-turn cost there. This explicit score gives the cost-spike alert a per-turn
+        value to watch — the same monitorable mechanism :meth:`verified`/:meth:`errored` use. See
+        ``context/planning/alerting.md`` (A5).
+
+        Args:
+            usd: The turn's model cost in US dollars (see ``pricing.turn_cost_usd``).
+        """
+        self._apply(lambda s: s.score_trace(name="turn_cost", value=usd))
+
     def output(self, data: object) -> None:
         """Record the turn's response as the trace output."""
         self._apply(lambda s: s.update(output=data))

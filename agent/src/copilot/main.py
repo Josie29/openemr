@@ -24,6 +24,7 @@ from copilot.observability import (
     shutdown_observability,
     sync_system_prompt,
 )
+from copilot.pricing import turn_cost_usd
 from copilot.schemas import ChatRequest, ChatResponse
 
 logger = logging.getLogger("copilot")
@@ -297,6 +298,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         payload.message, message_history=session.messages, deps=deps
                     )
                     turn.verified(passed=True)
+                    turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
                     session.messages = result.all_messages()
                     content = result.output.model_dump()
                     turn.output(content)

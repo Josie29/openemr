@@ -92,3 +92,24 @@ railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/op
 > **Note:** the prod DB (and thus the OAuth token store) lives on a persistent Railway volume,
 > so tokens survive `railway redeploy -s openemr`. A revoked token is a lifecycle event (rotation
 > or a re-mint), not a deploy wiping state — so re-minting fixes it durably.
+
+## For maintainers — delivering a live token
+
+The refresh token is **single-use**: every `04 Auth` run (and the fhir-substrate `00 Auth`)
+consumes the current refresh token and issues a new one. Two consequences that bit us and are
+worth knowing before you hand this off:
+
+- **Bruno does not persist the rotated token to disk.** The post-response script calls
+  `bru.setEnvVar("refresh_token", …)`, which updates Bruno's *runtime* environment but does
+  **not** reliably rewrite `environments/prod.bru`. So after an auth run the *session* keeps
+  working, but the *file* still holds the old — now revoked — token. `mint-fhir-token.sh`
+  writes the file directly, which is why it's the reliable way to refresh what's on disk.
+- **Exercising auth repeatedly burns tokens.** Running `04` (or `00`) several times, or across
+  both collections, rotates the shared token out from under the delivered file and leaves stale
+  copies that return `401 "Token has been revoked"`.
+
+**Delivery protocol:** mint the token **fresh right before submission**
+(`agent/scripts/mint-fhir-token.sh`) and don't run auth against the delivered copy afterward.
+A grader making a single pass is fine — they run `04` once, get a 1-hour access token, run the
+reads, and finish before rotation matters. The delivered token only needs to be alive *at
+submission*.

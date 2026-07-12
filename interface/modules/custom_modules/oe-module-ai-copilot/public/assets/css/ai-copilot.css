@@ -379,6 +379,9 @@ body.ai-copilot-resizing {
 
 .ai-copilot__composer {
     display: flex;
+    /* Bottom-align so the send button stays one line tall next to the last line
+       of the input as the textarea auto-grows (default stretch would tall-ify it). */
+    align-items: flex-end;
     gap: var(--copilot-space-2);
     padding: var(--copilot-space-3);
     border-top: 1px solid var(--copilot-border);
@@ -387,6 +390,12 @@ body.ai-copilot-resizing {
 .ai-copilot__input {
     flex: 1 1 auto;
     min-width: 0;
+    resize: none;                 /* auto-grown from JS; no manual drag handle */
+    line-height: 1.4rem;          /* one text line; JS scrollHeight math keys off this */
+    min-height: 2.25rem;          /* ~1 line + padding; matches the prior single-line height */
+    max-height: 7.25rem;          /* ~5 lines before internal scroll kicks in */
+    overflow-y: auto;             /* scrollbar only appears past max-height */
+    box-sizing: border-box;       /* scrollHeight (JS) includes padding, so cap stays honest */
 }
 
 .ai-copilot__send {

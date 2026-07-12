@@ -1,6 +1,6 @@
 from datetime import date
 
-from copilot.fhir.models import Allergy, NoteContent, PatientDemographics, Problem
+from copilot.fhir.models import Allergy, Encounter, NoteContent, PatientDemographics, Problem
 from copilot.schemas import ChatResponse, Claim, SourceRef
 from copilot.verification import FetchLog, resolve_claims
 
@@ -179,3 +179,90 @@ def test_note_quote_citation_is_stamped_with_the_note_identity() -> None:
     source = grounded.claims[0].source
     assert source.label == "Progress note"
     assert source.date == "2026-01-15"
+
+
+def _encounter_and_condition_log() -> FetchLog:
+    log = FetchLog()
+    log.record(
+        "Encounter",
+        "e1",
+        Encounter(
+            resource_id="e1",
+            type="Encounter for check up",
+            reason="Emergency room admission",
+            start_date="2026-01-06",
+        ),
+    )
+    log.record(
+        "Condition",
+        "c9",
+        Problem(
+            resource_id="c9",
+            display="Concussion",
+            clinical_status="active",
+            onset_date="2026-07-07",
+        ),
+    )
+    return log
+
+
+def test_claim_with_supporting_citations_grounds_and_stamps_each_record() -> None:
+    # A statement that legitimately draws on two records (a visit and a diagnosis) must ground BOTH:
+    # the primary in source and the other in supporting, each stamped with its own value + identity.
+    # If this breaks, a multi-record claim would show only one record's provenance on the card.
+    claim = Claim(
+        text="Emergency room admission on 6 January 2026; concussion is on the problem list",
+        source=SourceRef(resource_type="Encounter", resource_id="e1", field="start_date"),
+        supporting=[
+            SourceRef(resource_type="Condition", resource_id="c9", field="clinical_status")
+        ],
+    )
+
+    grounded, offenders = resolve_claims(
+        ChatResponse(summary="...", claims=[claim]),
+        _encounter_and_condition_log(),
+    )
+
+    assert offenders == []
+    src = grounded.claims[0].source
+    sup = grounded.claims[0].supporting[0]
+    assert src.label == "Emergency room admission"  # reason preferred over the hardcoded type
+    assert sup.label == "Concussion"
+    assert sup.value == "active"
+
+
+def test_claim_is_rejected_when_a_supporting_citation_is_ungrounded() -> None:
+    # The whole point of citing every record a statement draws on: if the model asserts a second
+    # record (e.g. a diagnosis) but cites one that was never fetched, the claim must be rejected —
+    # otherwise an uncited/inferred record slips through on the back of a valid primary citation.
+    claim = Claim(
+        text="ER visit for a diagnosis we never actually read",
+        source=SourceRef(resource_type="Encounter", resource_id="e1", field="start_date"),
+        supporting=[
+            SourceRef(resource_type="Condition", resource_id="ghost", field="clinical_status")
+        ],
+    )
+
+    _, offenders = resolve_claims(
+        ChatResponse(summary="...", claims=[claim]),
+        _encounter_and_condition_log(),
+    )
+
+    assert len(offenders) == 1
+
+
+def test_encounter_identity_prefers_real_category_over_hardcoded_type() -> None:
+    # OpenEMR hardcodes FHIR Encounter.type to a generic "check up" for every visit, so the identity
+    # must fall back to the reason (the real category) or every encounter card looks identical and
+    # an ER visit is mislabeled a checkup.
+    assert (
+        Encounter(
+            resource_id="e1", type="Encounter for check up", reason="Emergency room admission"
+        ).citation_identity.label
+        == "Emergency room admission"
+    )
+    # ...and when there is no reason, it falls back to the type rather than showing nothing.
+    assert (
+        Encounter(resource_id="e2", type="Encounter for check up").citation_identity.label
+        == "Encounter for check up"
+    )

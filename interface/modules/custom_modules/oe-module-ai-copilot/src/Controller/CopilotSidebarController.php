@@ -86,7 +86,7 @@ final readonly class CopilotSidebarController
         $title = xlt('Clinical Co-Pilot');
         $toggleLabel = xlt('Co-Pilot');
         $placeholder = xla('Ask about this patient...');
-        $sendLabel = xlt('Send');
+        $sendLabel = xlt('Ask');
         $clearLabel = xlt('Clear');
         $closeLabel = xla('Close Co-Pilot');
         $resizeLabel = xla('Resize Co-Pilot');

@@ -49,11 +49,13 @@ body.ai-copilot-resizing {
     --copilot-border: #d3d9df;
     --copilot-text: #1f2a33;
     --copilot-muted: #5b6770;
-    /* Bootstrap $primary ($blue) — the exact blue OpenEMR uses for links, card headers and
-       .btn-primary (see interface/themes/default-variables.scss). Keep in lockstep with the site. */
-    --copilot-accent: #007bff;
+    /* Co-Pilot panel accent — a deeper royal blue chosen for the assistant surface (distinct from
+       OpenEMR's lighter $primary #007bff). Every panel blue flows from this one token. */
+    --copilot-accent: #1e4ed8;
+    /* Darker shade for accent-button hover/active states. */
+    --copilot-accent-strong: #1a42b8;
     /* Lighter tint of the accent, used only for the assistant-avatar gradient's top stop. */
-    --copilot-accent-light: #3395ff;
+    --copilot-accent-light: #4b71e0;
     --copilot-error: #a32020;
     --copilot-surface: #ffffff;
     --copilot-surface-alt: #f6f8fa;
@@ -499,6 +501,25 @@ body.ai-copilot-resizing {
 
 .ai-copilot__send {
     flex: 0 0 auto;
+}
+
+/* Unify the composer button with the panel accent. The button carries Bootstrap's .btn-primary
+   (site #007bff); these two-class rules out-specify it so the button matches the panel's blue
+   bubbles and chips rather than the lighter site blue. */
+.ai-copilot__send.btn-primary {
+    background-color: var(--copilot-accent);
+    border-color: var(--copilot-accent);
+}
+
+.ai-copilot__send.btn-primary:hover,
+.ai-copilot__send.btn-primary:active {
+    background-color: var(--copilot-accent-strong);
+    border-color: var(--copilot-accent-strong);
+}
+
+.ai-copilot__send.btn-primary:focus {
+    /* Accent-tinted focus ring instead of Bootstrap's #007bff-based one. */
+    box-shadow: 0 0 0 0.2rem rgba(30, 78, 216, 0.5);
 }
 
 /* ---- Co-Pilot Launcher (banner pill; spec §4.4) ----

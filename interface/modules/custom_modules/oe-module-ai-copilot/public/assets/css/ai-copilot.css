@@ -180,8 +180,10 @@ body.ai-copilot-resizing {
     overflow-y: auto;
 }
 
+/* The welcome bubble's opening line. Sits inside an answer bubble (flex column with gap), so it
+   carries no margin of its own — the bubble's gap spaces it from the starter chips below. */
 .ai-copilot__intro {
-    margin: 0 0 var(--copilot-space-3);
+    margin: 0;
     color: var(--copilot-muted);
     font-size: var(--copilot-font-sm);
 }
@@ -199,7 +201,9 @@ body.ai-copilot-resizing {
 
 .ai-copilot__chip {
     border: 1px solid var(--copilot-accent);
-    background: var(--copilot-surface-alt);
+    /* Transparent (blue-on-white), like Bootstrap's .btn-outline-primary — so the accent sits on
+       the same white ground as the dashboard's blue headers and reads as the identical blue. */
+    background: transparent;
     color: var(--copilot-accent);
     border-radius: 1rem;
     padding: var(--copilot-space-1) var(--copilot-space-3);

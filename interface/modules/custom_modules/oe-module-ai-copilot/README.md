@@ -23,8 +23,10 @@ the shell via `ScriptFilterEvent`/`StyleFilterEvent` (pageName `main.php`).
 - `Bootstrap.php` wires the three shell events; `Controller/CopilotSidebarController.php` renders the
   sidebar shell + a JSON config island.
 - `public/assets/js/ai-copilot.js` drives it: banner-button injection (via a `MutationObserver` on
-  `#attendantData`), open/close, left-edge resize, push layout (`body { margin-right }`), the active
-  pid read from the shell's Knockout observable, patient-switch reset, and the chat/launch flow.
+  `#attendantData`), open/close, left-edge resize, push layout (a body **width cap**,
+  `width: calc(100vw - var(--ai-copilot-width))` — a plain `margin-right` is silently defeated by the
+  theme's `min-width:100vw` pin), the active pid read from the shell's Knockout observable,
+  patient-switch reset, and the chat/launch flow.
 - The sidebar carries **no patient id**; the active patient is resolved client-side and every turn
   is scoped by the token's own `patient` claim.
 - Width + open/closed persist in `localStorage` (a non-PHI UI preference).
@@ -48,13 +50,15 @@ hidden iframe ──► public/launch.php
                     • verifies CSRF, reads pid from the *session* (never a query param)
                     • pid → FHIR Patient UUID
                     • mints a SMARTLaunchToken carrying that patient
-                    • stores PKCE verifier + state server-side
-                    • 302 ──► /oauth2/default/authorize?launch=…&aud=…&iss=…
+                    • seals {PKCE verifier, expected patient UUID} into the encrypted
+                      OAuth `state` (LaunchStateCodec, 300s TTL) — no server-side session write
+                    • 302 ──► /oauth2/default/authorize?launch=…&aud=…&iss=…&state=…
                                 │
                                 │  first-party session cookie ⇒ skip login/consent
                                 ▼
                               302 ──► public/callback.php?code=…&state=…
-                                        • verifies state, consumes the verifier
+                                        • decrypts + authenticates `state` to recover the verifier
+                                          and expected patient (also session-read-only)
                                         • exchanges the code server-side (client_secret stays in PHP)
                                         • asserts token.patient == the chart's patient
                                         • postMessage ──► chart page
@@ -211,4 +215,4 @@ Found while building this; none are blocking, all are worth knowing.
 - **`needSMARTAuthorization()` substring-matches the raw scope string** — see the `launch/patient`
   warning above.
 - **The EHR-launch skip path only works for provider sessions**, not patient-portal logins
-  (`AuthorizationController.php:1844`).
+  (`AuthorizationController.php:1853`).

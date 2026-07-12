@@ -71,8 +71,11 @@ server-side during ingestion, so it populates a few seconds after the run finish
 
 ## CI (report-only)
 
-`.github/workflows/evals.yml` runs the suite via `langfuse/experiment-action` on every PR touching
-`agent/**`, and on manual dispatch. It **comments** the scores on the PR but does not fail the job.
+`.github/workflows/evals.yml` runs the suite via `langfuse/experiment-action` — but because each run
+makes real Anthropic calls (agent + judges) and costs money, it triggers **only on release-promotion
+PRs into `main`** (`qa/integration → main`) that touch `agent/**`, plus manual dispatch — *not* on
+feature → `qa/integration` PRs (the free deterministic pytest/ruff/mypy checks cover those via
+`agent-tests.yml`). It **comments** the scores on the PR but does not fail the job.
 
 Required repo secrets (`gh secret set <NAME>`):
 

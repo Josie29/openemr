@@ -46,6 +46,7 @@ body.ai-copilot-resizing {
 
     --copilot-radius: 0.25rem;
     --copilot-border: #d3d9df;
+    --copilot-text: #1f2a33;
     --copilot-muted: #5b6770;
     --copilot-accent: #0b5fa5;
     --copilot-error: #a32020;
@@ -316,9 +317,10 @@ body.ai-copilot-resizing {
 
 /*
  * The citation is the point of the verification design: every claim resolves to a real field of a
- * real resource the agent read. Keep it visually attached to its claim. It now shows a human
- * source label ("Allergy intolerance") plus the record value; the raw FHIR reference lives in the
- * element's title/data-resource-ref for hover + audit, so it no longer needs a monospace/data look.
+ * real resource the agent read. Keep it visually attached to its claim. It shows a human source
+ * label ("Allergy intolerance"), the record's own name + key date ("Asthma", "Onset 2019-04-02")
+ * that tie the proof to the specific record, and the grounded field value; the raw FHIR reference
+ * lives in the element's title/data-resource-ref for hover + audit, so it needs no data look.
  */
 .ai-copilot__citation {
     display: flex;
@@ -339,6 +341,14 @@ body.ai-copilot-resizing {
     font-weight: 600;
 }
 
+/* The record's own name — the specific record the proof points at. Stronger than the muted
+ * metadata around it, but not the accent colour reserved for the resource-type badge. */
+.ai-copilot__citation-name {
+    color: var(--copilot-text);
+    font-weight: 600;
+}
+
+.ai-copilot__citation-date,
 .ai-copilot__citation-field {
     color: var(--copilot-muted);
 }

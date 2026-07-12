@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from copilot.fhir.models import ResourceIdentity
 from copilot.schemas import ChatResponse, Claim, SourceRef
 
 _MISSING = object()
@@ -10,10 +11,12 @@ _MISSING = object()
 class FhirRecordable(Protocol):
     """A fetched resource that knows its own FHIR identity.
 
-    Every typed FHIR model exposes ``resource_type``/``resource_id``, which is all
-    :meth:`FetchLog.record_all` needs to log it. Structural typing keeps ``verification`` free of
-    a dependency on the concrete model classes. Declared as read-only properties so the frozen
-    Pydantic models (whose fields are read-only) satisfy it.
+    Every typed FHIR model exposes ``resource_type``/``resource_id`` (all
+    :meth:`FetchLog.record_all` needs to log it) plus a ``citation_identity`` naming the specific
+    record for the evidence card. Structural typing keeps ``verification`` free of a dependency on
+    the concrete model classes — it depends only on the shared ``ResourceIdentity`` value, not on
+    ``Problem``/``Medication``/etc. Declared as read-only properties so the frozen Pydantic models
+    (whose fields are read-only) satisfy it.
     """
 
     @property
@@ -21,6 +24,9 @@ class FhirRecordable(Protocol):
 
     @property
     def resource_id(self) -> str: ...
+
+    @property
+    def citation_identity(self) -> ResourceIdentity: ...
 
 
 @dataclass
@@ -85,6 +91,27 @@ class FetchLog:
             return None
         return str(value)
 
+    def identify(self, ref: SourceRef) -> ResourceIdentity | None:
+        """Return the identity (name + key date) of the resource a citation points at.
+
+        Independent of which field the claim grounds on: it names the *specific* fetched record so
+        the card can distinguish, say, the asthma Condition from any other active Condition. Like
+        :meth:`resolve`, it reads only the fetched typed object — the identity is code-derived from
+        the record, never model-authored.
+
+        Args:
+            ref: The claim's citation.
+
+        Returns:
+            The record's :class:`ResourceIdentity`, or None when the cited resource was not fetched
+            this turn (the same gate ``resolve`` applies).
+        """
+        resource = self._objects.get((ref.resource_type, ref.resource_id))
+        if resource is None:
+            return None
+        identity: ResourceIdentity = resource.citation_identity
+        return identity
+
 
 def _normalize_ws(text: str) -> str:
     """Collapse runs of whitespace so quote matching tolerates line breaks and reflowing."""
@@ -118,7 +145,9 @@ def resolve_claims(response: ChatResponse, fetched: FetchLog) -> tuple[ChatRespo
 
     For every claim, resolve its citation to the actual value in the record a tool returned.
     Grounded claims get that value stamped into ``source.value`` — code-populated, never
-    model-authored — so a reader can compare the claim to the exact record value. Claims that
+    model-authored — so a reader can compare the claim to the exact record value. The cited
+    record's identity (``label``/``date``/``date_label``) is stamped the same way, so the evidence
+    card names the *specific* record (e.g. "Asthma", onset date), not just its type. Claims that
     cannot be resolved are returned as offenders for the gate to reject.
 
     Args:
@@ -137,6 +166,12 @@ def resolve_claims(response: ChatResponse, fetched: FetchLog) -> tuple[ChatRespo
         if value is None:
             offenders.append(claim)
         else:
-            stamped_source = claim.source.model_copy(update={"value": value})
+            update: dict[str, str | None] = {"value": value}
+            identity = fetched.identify(claim.source)
+            if identity is not None:
+                update["label"] = identity.label
+                update["date"] = identity.date
+                update["date_label"] = identity.date_label
+            stamped_source = claim.source.model_copy(update=update)
             grounded.append(claim.model_copy(update={"source": stamped_source}))
     return response.model_copy(update={"claims": grounded}), offenders

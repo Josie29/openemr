@@ -444,6 +444,22 @@
         }
         cite.appendChild(resource);
 
+        // The record's own name ("Asthma") + key date, stamped from the cited record by the agent
+        // (never model-authored). This is what ties the proof to the *specific* record rather than
+        // just its type — three active Conditions are otherwise indistinguishable on the card.
+        if (source.label) {
+            var name = document.createElement('span');
+            name.className = 'ai-copilot__citation-name';
+            name.textContent = source.label;
+            cite.appendChild(name);
+        }
+        if (source.date) {
+            var when = document.createElement('span');
+            when.className = 'ai-copilot__citation-date';
+            when.textContent = source.date_label ? source.date_label + ' ' + source.date : source.date;
+            cite.appendChild(when);
+        }
+
         if (source.field) {
             var field = document.createElement('span');
             field.className = 'ai-copilot__citation-field';

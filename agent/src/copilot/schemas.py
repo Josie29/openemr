@@ -1,4 +1,3 @@
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -36,6 +35,21 @@ class SourceRef(BaseModel):
     value: str | None = Field(
         default=None,
         description="The actual record value. Leave empty — the system fills this from the record.",
+    )
+    label: str | None = Field(
+        default=None,
+        description=(
+            "The record's human-recognizable name (e.g. 'Asthma'). Leave empty — the system fills "
+            "it from the cited record so the card names the specific record, not just its type."
+        ),
+    )
+    date: str | None = Field(
+        default=None,
+        description="The cited record's key date (e.g. onset). Leave empty — the system fills it.",
+    )
+    date_label: str | None = Field(
+        default=None,
+        description="What `date` means for this record (e.g. 'Onset'). Leave empty — system-set.",
     )
 
 

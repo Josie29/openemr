@@ -97,3 +97,37 @@ def test_ungrounded_answer_is_refused_not_returned(settings: Settings) -> None:
     body = response.json()
     assert body["claims"] == []
     assert "attribute" in body["summary"].lower()
+
+
+def test_runaway_tool_loop_is_capped_and_refused(settings: Settings) -> None:
+    # Guards the cost/latency ceiling behind the prod "Failed to fetch": an agent that loops a tool
+    # (get_encounter_note was called ~48x on a 90+-encounter chart, hitting pydantic-ai's default
+    # request_limit of 50) must be stopped at the tool-call cap and degrade to a refusal — never a
+    # 500 the browser surfaces as "Failed to fetch". Without the cap + catch, this turn would 500.
+    capped = settings.model_copy(update={"agent_tool_calls_limit": 3})
+
+    def loop(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        # Never emit a final answer — keep calling a tool so the turn runs into the cap.
+        return ModelResponse(parts=[ToolCallPart(tool_name="get_encounters", args={})])
+
+    response = _post_chat(capped, FunctionModel(loop))()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["claims"] == []
+    assert "attribute" in body["summary"].lower()
+
+
+def test_unexpected_error_is_caught_not_leaked(settings: Settings) -> None:
+    # Guards the catch-all boundary: any unforeseen failure must return a controlled error response
+    # (never an uncaught exception the browser shows as a bare 500 / "Failed to fetch"), and must
+    # not leak internal detail into the user-facing body.
+    def boom(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise RuntimeError("internal detail that must not leak")
+
+    response = _post_chat(settings, FunctionModel(boom))()
+
+    assert response.status_code == 500
+    body = response.json()
+    assert "could not be completed" in body["error"]
+    assert "internal detail" not in str(body)  # the exception message never reaches the client

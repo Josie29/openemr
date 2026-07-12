@@ -408,10 +408,11 @@ body.ai-copilot-resizing {
 
 /*
  * The citation is the point of the verification design: every claim resolves to a real field of a
- * real resource the agent read. Keep it visually attached to its claim. It shows a human source
- * label ("Allergy intolerance"), the record's own name + key date ("Asthma", "Onset 2019-04-02")
- * that tie the proof to the specific record, and the grounded field value; the raw FHIR reference
- * lives in the element's title/data-resource-ref for hover + audit, so it needs no data look.
+ * real resource the agent read. Keep it visually attached to its claim. Coded citations (Condition,
+ * Encounter, …) use this base chip: a resource-type badge ("Condition"), the record's own name + key
+ * date ("Asthma", "Onset Apr 2, 2019") that tie the proof to the specific record, and the grounded
+ * field value. Document/note citations override the layout via `--note` (below). The raw FHIR
+ * reference lives in the element's title/data-resource-ref for hover + audit.
  */
 .ai-copilot__citation {
     display: flex;
@@ -427,13 +428,33 @@ body.ai-copilot-resizing {
     overflow-wrap: anywhere;
 }
 
+/*
+ * Document/note chips are evidence-forward: they drop the redundant type badge (it just repeats the
+ * note-type label) and stack a header row (name + date) over the verbatim quote, so the layout runs
+ * as a column rather than the coded chip's wrapping row.
+ */
+.ai-copilot__citation--note {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: var(--copilot-space-1);
+}
+
+/* Header row of a note chip: record name + date, wrapping together as one line. */
+.ai-copilot__citation-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--copilot-space-1) var(--copilot-space-2);
+}
+
+/* The resource-type badge on a coded chip ("Condition") — names the kind of record. */
 .ai-copilot__citation-resource {
     color: var(--copilot-accent);
     font-weight: 600;
 }
 
-/* The record's own name — the specific record the proof points at. Stronger than the muted
- * metadata around it, but not the accent colour reserved for the resource-type badge. */
+/* The record's own name — the specific record the proof points at. */
 .ai-copilot__citation-name {
     color: var(--copilot-text);
     font-weight: 600;
@@ -442,6 +463,26 @@ body.ai-copilot-resizing {
 .ai-copilot__citation-date,
 .ai-copilot__citation-field {
     color: var(--copilot-muted);
+}
+
+/* The verbatim note span the claim rests on — the record's own words. Set off as a quote so it
+ * reads as source text, not more metadata; the enclosing quotation marks make the boundary of the
+ * cited span explicit. `white-space: pre-line` preserves note line breaks without collapsing runs. */
+.ai-copilot__citation-quote {
+    margin: 0;
+    padding-left: var(--copilot-space-2);
+    border-left: 2px solid var(--copilot-border);
+    color: var(--copilot-text);
+    font-style: italic;
+    white-space: pre-line;
+}
+
+.ai-copilot__citation-quote::before {
+    content: '\201C';                 /* U+201C left double quotation mark */
+}
+
+.ai-copilot__citation-quote::after {
+    content: '\201D';                 /* U+201D right double quotation mark */
 }
 
 /*

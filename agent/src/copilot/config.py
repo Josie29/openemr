@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     fhir_timeout_seconds: float = 10.0
     fhir_max_retries: int = 2
 
+    # Hard ceiling on tool calls in a single agent turn. Bounds cost/latency: without it the agent
+    # can loop a tool (e.g. brute-forcing get_encounter_note across a patient with 90+ encounters)
+    # up to pydantic-ai's default request_limit of 50, spending 50 model calls on one question.
+    # A legitimate turn reads a handful of resources; hitting this cap means the turn ran away, and
+    # /chat degrades it to a refusal rather than letting the cost run.
+    agent_tool_calls_limit: int = 12
+
     # Browser origins allowed to call /chat directly (ARCHITECTURE.md §4: the chat XHR goes from the
     # physician's browser to this service, not proxied through PHP). Empty means no browser may call
     # us — fail closed rather than defaulting to "*", which would let any page spend a stolen token.

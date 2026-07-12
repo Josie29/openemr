@@ -6,10 +6,11 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.usage import UsageLimits
 
 from copilot.agent import SYSTEM_PROMPT, SYSTEM_PROMPT_NAME, CopilotDeps, build_agent
 from copilot.config import FhirClientMode, Settings, get_settings
@@ -42,6 +43,7 @@ def _configure_logging() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
     )
+
 
 _UNAVAILABLE_ANSWER = ChatResponse(
     summary="I could not produce an answer I can fully attribute to this patient's record.",
@@ -295,24 +297,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ) as turn:
                 try:
                     result = await request.app.state.agent.run(
-                        payload.message, message_history=session.messages, deps=deps
+                        payload.message,
+                        message_history=session.messages,
+                        deps=deps,
+                        # Hard ceiling on tool calls so a runaway loop (e.g. scanning every note on
+                        # a 90+-encounter chart) cannot spend up to pydantic-ai's default 50 model
+                        # calls on one turn. Hitting it degrades to a refusal below, not a 500.
+                        usage_limits=UsageLimits(tool_calls_limit=settings.agent_tool_calls_limit),
                     )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
                     session.messages = result.all_messages()
                     content = result.output.model_dump()
                     turn.output(content)
-                except UnexpectedModelBehavior:
-                    # The gate exhausted its retries without an attributable answer — degrade to a
-                    # refusal rather than ship an unverified claim (ARCHITECTURE.md §7).
-                    logger.info("verification gate refused", extra={"cid": correlation_id})
+                except (UnexpectedModelBehavior, UsageLimitExceeded):
+                    # Either the gate exhausted its retries without an attributable answer, or the
+                    # turn hit the tool-call ceiling (a runaway loop). Both mean "no verified answer
+                    # within limits" — degrade to a refusal rather than ship an unverified claim or
+                    # let the exception 500 (which the browser surfaces as "Failed to fetch").
+                    logger.info(
+                        "agent could not answer within limits", extra={"cid": correlation_id}
+                    )  # noqa: E501
                     turn.verified(passed=False)
                     content = _UNAVAILABLE_ANSWER.model_dump()
                 except ModelHTTPError as exc:
                     # LLM provider rejected the call (billing, rate limit, outage). Always logged;
                     # the specific reason is surfaced too, which aids debugging in this demo system.
                     # (A production PHI deployment would genericize this — see ARCHITECTURE.md §8.)
-                    logger.warning("LLM request failed", extra={"cid": correlation_id}, exc_info=True)  # noqa: E501
+                    logger.warning(
+                        "LLM request failed", extra={"cid": correlation_id}, exc_info=True
+                    )  # noqa: E501
                     turn.errored(tool_failure=False)
                     status_code = 502
                     content = {"error": str(exc), "correlation_id": correlation_id}

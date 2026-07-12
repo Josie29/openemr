@@ -336,6 +336,7 @@ defined, transparent behavior.
 | **Record shows *that* but not *why*** (UC-3) | State what's documented ("stopped 2023-04; the chart doesn't record the reason"); the gate rejects an invented cause. |
 | **RxNorm-less list meds** (UC-4) | Cross-reference falls back to text matching; the flag states which basis it used so the physician can weight it. |
 | **Malformed model output** | Pydantic validation on the structured response rejects it; `ModelRetry` forces a conforming answer; a hard failure surfaces a generic error, never a raw provider/exception message (audit: no internal detail in user-facing output). |
+| **Runaway tool loop** (rate limiting) | A per-turn ceiling on tool calls (`agent_tool_calls_limit`, default 12) bounds how many FHIR reads one question can trigger. A turn that would exceed it — e.g. brute-forcing notes across a 90+-encounter chart — is stopped and degraded to the same "couldn't attribute" refusal, **not** an unhandled 500 (which the browser surfaces as "Failed to fetch"). This tightens pydantic-ai's loose default of 50 model requests into a deliberate cost/latency bound. |
 | **Unauthorized patient** (UC-5) | Refuse at the module and audit; the agent is never invoked. |
 
 ---

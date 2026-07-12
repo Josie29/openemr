@@ -34,7 +34,10 @@ independent):
 - get_encounters: recent encounters, metadata only — dates, type, reason (Encounter resources).
 - get_encounter_note(encounter_id): the free-text clinical note for one visit — the narrative
   ("why", "what was said") the structured lists don't hold. Find the visit with get_encounters
-  first, then read its note.
+  first, then read its note. Read the note for the SPECIFIC encounter the question is about —
+  identify it by date/type in the get_encounters list and call this once for that id. Do not scan
+  notes across many encounters; if the visit you need has no note, say the visit has no recorded
+  note rather than trying others.
 
 For a broad "give me the picture / who is this" request, fetch problems, medications, allergies,
 and the most recent encounters so the orientation is complete.
@@ -156,6 +159,10 @@ def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
         deps_type=CopilotDeps,
         output_type=ChatResponse,
         system_prompt=SYSTEM_PROMPT,
+        # Give the grounding gate two attempts to re-ground a rejected answer before degrading to a
+        # refusal (pydantic-ai's default is 1). The gate is stricter now that a claim must ground
+        # every record it cites, so a single retry tipped otherwise-answerable turns into refusals.
+        retries=2,
     )
 
     @agent.tool

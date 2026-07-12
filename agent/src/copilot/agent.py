@@ -16,6 +16,11 @@ from copilot.fhir.models import (
 from copilot.schemas import ChatResponse
 from copilot.verification import FetchLog, FhirRecordable, resolve_claims
 
+# Langfuse Prompt Management name for the agent's system prompt. The code (SYSTEM_PROMPT below)
+# stays the source of truth; this name identifies the versioned copy synced to Langfuse for
+# observability, so every trace records which prompt version produced it. See observability.py.
+SYSTEM_PROMPT_NAME = "copilot-system-prompt"
+
 SYSTEM_PROMPT = """You are a Clinical Co-Pilot embedded in an electronic health record. You help a
 physician orient on the patient currently open, using ONLY the tools provided to read that
 patient's record. Every tool is already scoped to the one open patient.

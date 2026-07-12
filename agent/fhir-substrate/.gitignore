@@ -1,0 +1,4 @@
+# The working prod environment holds live credentials (client_secret, refresh_token)
+# and the runtime access_token the auth script writes back. Never committed.
+# Copy prod.example.bru -> prod.bru and fill it in (or run against your own OpenEMR).
+environments/prod.bru

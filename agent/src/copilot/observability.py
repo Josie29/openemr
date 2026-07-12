@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from langfuse import get_client, propagate_attributes
+from langfuse.api import NotFoundError
+from langfuse.model import TextPromptClient
 from pydantic_ai import Agent
 
 from copilot import __version__
@@ -63,6 +65,98 @@ def configure_observability(settings: Settings) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class PromptRef:
+    """Reference to a system-prompt version synced to Langfuse Prompt Management.
+
+    Stamped onto every turn's trace so each answer records which prompt version produced it.
+    """
+
+    name: str
+    version: int
+
+
+def _fetch_labeled_prompt(name: str, label: str) -> TextPromptClient | None:
+    """Fetch the prompt version currently carrying ``label``, or None if none exists yet.
+
+    Caching and retries are disabled so the startup sync always compares against the live server
+    state and fails fast rather than blocking boot. A genuine "no such prompt/label" is returned
+    as None (the caller creates the first version); any other fetch error propagates so the caller
+    skips the sync this boot rather than creating a redundant version on a transient failure.
+
+    Args:
+        name: The Langfuse prompt name.
+        label: The label whose current version to fetch (the tracing environment).
+
+    Returns:
+        The labeled :class:`TextPromptClient`, or None when the prompt/label does not exist yet.
+
+    Raises:
+        Exception: Any non-"not found" error fetching the prompt (network, auth, server).
+    """
+    try:
+        prompt = get_client().get_prompt(
+            name, label=label, type="text", cache_ttl_seconds=0, max_retries=0
+        )
+    except NotFoundError:
+        return None
+    # get_prompt is typed as returning the chat/text union; type="text" guarantees the text client.
+    assert isinstance(prompt, TextPromptClient)
+    return prompt
+
+
+def sync_system_prompt(
+    enabled: bool, name: str, prompt_text: str, label: str
+) -> PromptRef | None:
+    """Mirror the code's system prompt into Langfuse Prompt Management, idempotently.
+
+    The code (``agent.SYSTEM_PROMPT``) stays the source of truth — the service never fetches the
+    prompt back at runtime, so a Langfuse outage cannot affect a turn. This only registers the
+    current prompt in Langfuse for documentation/observability, and returns a reference that
+    :func:`observe_turn` stamps onto each trace so every turn records its prompt version.
+
+    Idempotent: the version currently carrying ``label`` is fetched and compared, and a new
+    version is created only when the prompt text actually changed — so restarting with unchanged
+    code does not churn versions. Like all observability wiring, any failure is swallowed and the
+    service runs without the sync rather than failing to start.
+
+    Args:
+        enabled: Whether Langfuse is configured (the return of :func:`configure_observability`).
+        name: The Langfuse prompt name (``agent.SYSTEM_PROMPT_NAME``).
+        prompt_text: The current system prompt text (``agent.SYSTEM_PROMPT``).
+        label: The label to move to the synced version — the tracing environment
+            (e.g. ``development``/``production``) so dev and prod track versions independently.
+
+    Returns:
+        A :class:`PromptRef` for the synced version, or None when tracing is disabled or the
+        sync failed.
+    """
+    if not enabled:
+        return None
+
+    try:
+        current = _fetch_labeled_prompt(name, label)
+        if current is not None and current.prompt == prompt_text:
+            return PromptRef(name=name, version=current.version)
+
+        created = get_client().create_prompt(
+            name=name,
+            prompt=prompt_text,
+            labels=[label],
+            type="text",
+            commit_message=f"Synced from copilot v{__version__}",
+        )
+        assert isinstance(created, TextPromptClient)
+        logger.info(
+            "Synced system prompt to Langfuse",
+            extra={"prompt_name": name, "version": created.version, "label": label},
+        )
+        return PromptRef(name=name, version=created.version)
+    except Exception:  # noqa: BLE001 - observability must never break startup
+        logger.warning("Langfuse system-prompt sync failed; running without it", exc_info=True)
+        return None
+
+
 @dataclass
 class TurnTrace:
     """Handle to one agent turn's Langfuse span; every method no-ops when tracing is disabled.
@@ -97,6 +191,20 @@ class TurnTrace:
             self._apply(lambda s: s.score_trace(name="tool_error", value=1.0))
         self._apply(lambda s: s.update(level="ERROR"))
 
+    def costed(self, *, usd: float) -> None:
+        """Record the turn's model cost (USD) as a ``turn_cost`` numeric score.
+
+        Cost is attached by the auto-instrumentation to the per-generation child spans, not the
+        ``chat-turn`` root, so a Langfuse Monitor (which reads observation-level cost) cannot
+        threshold per-turn cost there. This explicit score gives the cost-spike alert a per-turn
+        value to watch — the same monitorable mechanism :meth:`verified`/:meth:`errored` use. See
+        ``context/planning/alerting.md`` (A5).
+
+        Args:
+            usd: The turn's model cost in US dollars (see ``pricing.turn_cost_usd``).
+        """
+        self._apply(lambda s: s.score_trace(name="turn_cost", value=usd))
+
     def output(self, data: object) -> None:
         """Record the turn's response as the trace output."""
         self._apply(lambda s: s.update(output=data))
@@ -113,7 +221,12 @@ class TurnTrace:
 
 @contextmanager
 def observe_turn(
-    enabled: bool, correlation_id: str, conversation_id: str, patient_id: str, message: str
+    enabled: bool,
+    correlation_id: str,
+    conversation_id: str,
+    patient_id: str,
+    message: str,
+    prompt_ref: PromptRef | None = None,
 ) -> Iterator[TurnTrace]:
     """Open an active ``chat-turn`` span for one agent turn and yield a :class:`TurnTrace`.
 
@@ -129,6 +242,9 @@ def observe_turn(
             conversation group under a single session timeline.
         patient_id: The patient the turn is scoped to.
         message: The physician's question, recorded as the trace input.
+        prompt_ref: The system-prompt version synced to Langfuse (from :func:`sync_system_prompt`),
+            stamped onto the trace metadata so each turn records which prompt produced it. None
+            when the prompt was not synced (Langfuse unconfigured or the sync failed).
 
     Yields:
         A :class:`TurnTrace` wrapping the active span, or a no-op handle when disabled.
@@ -137,16 +253,21 @@ def observe_turn(
         yield TurnTrace(None)
         return
 
+    metadata = {
+        "correlation_id": correlation_id,
+        "conversation_id": conversation_id,
+        "patient_id": patient_id,
+    }
+    if prompt_ref is not None:
+        metadata["system_prompt_name"] = prompt_ref.name
+        metadata["system_prompt_version"] = str(prompt_ref.version)
+
     client = get_client()
     with (
         propagate_attributes(
             trace_name="chat-turn",
             session_id=conversation_id,
-            metadata={
-                "correlation_id": correlation_id,
-                "conversation_id": conversation_id,
-                "patient_id": patient_id,
-            },
+            metadata=metadata,
             tags=["clinical-copilot", "walking-skeleton"],
             version=__version__,
         ),

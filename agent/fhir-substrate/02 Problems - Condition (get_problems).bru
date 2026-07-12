@@ -1,0 +1,33 @@
+meta {
+  name: 02 Problems - Condition (get_problems)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/Condition?patient={{patient_id}}
+  body: none
+  auth: bearer
+}
+
+params:query {
+  patient: {{patient_id}}
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  Accept: application/fhir+json
+}
+
+docs {
+  Wraps the agent tool `get_problems`. A `patient`-scoped search returning a searchset
+  Bundle of Condition resources; the tool maps each entry through `Problem.from_fhir`.
+}
+
+assert {
+  res.status: eq 200
+  res.body.resourceType: eq Bundle
+}

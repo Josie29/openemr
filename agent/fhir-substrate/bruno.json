@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "FHIR Substrate (what the tools wrap)",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

@@ -107,6 +107,16 @@ tooling, evals). Integrate them on `qa/integration`, test locally, then promote 
 - **No OpenEMR needed** (agent tooling, evals — pure Python, run via `make agent`):
   a **raw `git worktree add`** off `qa/integration` is fine. These never touch the
   docker stack, so there is no openemr-cmd state to manage.
+  - **Bind the Claude Code session to it** so the status line and cwd track the
+    worktree: after `git worktree add -b <branch> <path> qa/integration`, call the
+    **`EnterWorktree` tool with `path: <path>`** (switch into an existing worktree;
+    do *not* use `name:`, whose base ref defaults to `origin/main` — wrong base for
+    agent components). Without this the session stays anchored in the primary
+    checkout, so `git worktree add` alone leaves the status line showing
+    `no worktree` and every Bash call resets cwd back to the primary (you'd drive
+    the worktree via absolute paths). It's cosmetic-plus-ergonomic, not a
+    correctness issue — skip it for quick unattended edits. Leave with
+    `ExitWorktree action: keep` (it won't remove a `path:`-entered worktree).
 - **OpenEMR needed** (frontend/PHP module — must render in a live OpenEMR): use
   **`openemr-cmd worktree add <name> -b --base qa/integration --start`**, never a
   raw worktree. A raw worktree plus a hand-started stack orphans docker resources

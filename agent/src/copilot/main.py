@@ -11,14 +11,20 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
-from copilot.agent import CopilotDeps, build_agent
+from copilot.agent import SYSTEM_PROMPT, SYSTEM_PROMPT_NAME, CopilotDeps, build_agent
 from copilot.config import FhirClientMode, Settings, get_settings
 from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.health import check_readiness
-from copilot.observability import configure_observability, observe_turn, shutdown_observability
+from copilot.observability import (
+    configure_observability,
+    observe_turn,
+    shutdown_observability,
+    sync_system_prompt,
+)
+from copilot.pricing import turn_cost_usd
 from copilot.schemas import ChatRequest, ChatResponse
 
 logger = logging.getLogger("copilot")
@@ -198,6 +204,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     # Enable Langfuse + Pydantic AI OTel instrumentation before any agent runs.
     app.state.observability_enabled = configure_observability(settings)
+    # Register the code's system prompt in Langfuse Prompt Management (documentation/observability
+    # only — the agent still runs the in-code SYSTEM_PROMPT, never a fetched copy). The returned
+    # ref is stamped onto each turn's trace so every answer records its prompt version.
+    app.state.system_prompt_ref = sync_system_prompt(
+        app.state.observability_enabled,
+        SYSTEM_PROMPT_NAME,
+        SYSTEM_PROMPT,
+        settings.tracing_environment,
+    )
     app.state.fhir = _build_readiness_client(settings)
     app.state.agent = build_agent(_build_model(settings))
     # Server-side conversation state so multi-turn history (which contains PHI) stays in the
@@ -271,13 +286,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
             with observe_turn(
-                enabled, correlation_id, conversation_id, payload.patient_id, payload.message
+                enabled,
+                correlation_id,
+                conversation_id,
+                payload.patient_id,
+                payload.message,
+                request.app.state.system_prompt_ref,
             ) as turn:
                 try:
                     result = await request.app.state.agent.run(
                         payload.message, message_history=session.messages, deps=deps
                     )
                     turn.verified(passed=True)
+                    turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
                     session.messages = result.all_messages()
                     content = result.output.model_dump()
                     turn.output(content)

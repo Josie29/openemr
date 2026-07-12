@@ -1,0 +1,48 @@
+meta {
+  name: 00 Auth - Refresh Token
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{oauth_url}}
+  body: formUrlEncoded
+  auth: none
+}
+
+body:form-urlencoded {
+  grant_type: refresh_token
+  refresh_token: {{refresh_token}}
+  client_id: {{client_id}}
+  client_secret: {{client_secret}}
+}
+
+docs {
+  Same patient-scoped (patient/*.read) refresh grant the agent collection uses. Run this
+  first each session; the post-response script stashes the access_token for the FHIR reads
+  below and persists the rotated refresh_token.
+
+  HEADS-UP — shared refresh token: this collection and agent/api-collection share ONE
+  refresh_token (both copied from the same mint). OpenEMR rotates it on every use, so
+  whichever collection you run auth in *last* holds the valid token; the other will 400
+  invalid_grant on its next refresh. If that happens, copy the current refresh_token from
+  the collection you used last, or re-mint (see agent/api-collection/README.md).
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const body = res.getBody();
+    if (body.access_token) {
+      bru.setEnvVar("access_token", body.access_token);
+    }
+    // Refresh tokens rotate on use; persist the new one or the next refresh 400s.
+    if (body.refresh_token) {
+      bru.setEnvVar("refresh_token", body.refresh_token);
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.access_token: isDefined
+}

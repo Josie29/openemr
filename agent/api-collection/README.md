@@ -51,14 +51,34 @@ boundary tests: they hold whether or not you have a valid token.
   deployment. Tokens are minted out-of-band with OpenEMR's CLI (below), never via a public
   self-service grant.
 
-## Re-minting a token (when the 3-month refresh token expires)
+## Re-minting a token
 
-The refresh token lasts 3 months; the access token 1 hour (request 04 refreshes it). To mint a
-fresh pair, run OpenEMR's token CLI on the prod `openemr` service as the `apache` web user.
-Enter the OpenEMR admin password at the hidden prompt (username defaults to `admin`):
+The refresh token lasts 3 months; the access token 1 hour (request 04 refreshes it). The
+refresh token is also **single-use** — OpenEMR rotates it on every refresh — so if you run
+Auth from two places, or a stale copy gets used, it can revoke. **If request 04 returns
+`401 "Token has been revoked"` (or `invalid_grant`), the saved refresh token is dead and you
+need to re-mint.**
+
+### The easy way — helper script
 
 ```bash
-railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=a234013f-932b-434c-8f21-9edc54ff3892 --scopes=openid,fhirUser,launch,patient/Patient.read,patient/Condition.read,patient/MedicationRequest.read,patient/AllergyIntolerance.read,patient/Encounter.read,offline_access'"
+agent/scripts/mint-fhir-token.sh          # updates api-collection + fhir-substrate (if present)
+agent/scripts/mint-fhir-token.sh --graded-only
+```
+
+It prompts for your OpenEMR username (default `admin`) and password, runs the mint on prod,
+then **auto-extracts** the fresh access + refresh tokens from the CLI's JSON output and writes
+both into `prod.bru` — no copy/paste. The scopes — including `patient/DocumentReference.read`,
+needed for clinical-note reads — live in one place at the top of the script. Override
+`CLIENT_ID` / `PATIENT_ID` via env vars to target a different client or patient.
+
+### The manual way — CLI directly
+
+Run OpenEMR's token CLI on the prod `openemr` service as the `apache` web user (enter the admin
+password at the hidden prompt; username defaults to `admin`):
+
+```bash
+railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=a234013f-932b-434c-8f21-9edc54ff3892 --scopes=openid,fhirUser,launch,patient/Patient.read,patient/Condition.read,patient/MedicationRequest.read,patient/AllergyIntolerance.read,patient/Encounter.read,patient/DocumentReference.read,offline_access'"
 ```
 
 - `--scopes` is a **comma-separated** list (the CLI splits on commas, not spaces).
@@ -68,3 +88,28 @@ railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/op
   also prints is optional — request 04 will mint a fresh one.
 - To target a different patient, swap `--patient` for another Patient UUID and update
   `patient_id` in `prod.bru`.
+
+> **Note:** the prod DB (and thus the OAuth token store) lives on a persistent Railway volume,
+> so tokens survive `railway redeploy -s openemr`. A revoked token is a lifecycle event (rotation
+> or a re-mint), not a deploy wiping state — so re-minting fixes it durably.
+
+## For maintainers — delivering a live token
+
+The refresh token is **single-use**: every `04 Auth` run (and the fhir-substrate `00 Auth`)
+consumes the current refresh token and issues a new one. Two consequences that bit us and are
+worth knowing before you hand this off:
+
+- **Bruno does not persist the rotated token to disk.** The post-response script calls
+  `bru.setEnvVar("refresh_token", …)`, which updates Bruno's *runtime* environment but does
+  **not** reliably rewrite `environments/prod.bru`. So after an auth run the *session* keeps
+  working, but the *file* still holds the old — now revoked — token. `mint-fhir-token.sh`
+  writes the file directly, which is why it's the reliable way to refresh what's on disk.
+- **Exercising auth repeatedly burns tokens.** Running `04` (or `00`) several times, or across
+  both collections, rotates the shared token out from under the delivered file and leaves stale
+  copies that return `401 "Token has been revoked"`.
+
+**Delivery protocol:** mint the token **fresh right before submission**
+(`agent/scripts/mint-fhir-token.sh`) and don't run auth against the delivered copy afterward.
+A grader making a single pass is fine — they run `04` once, get a 1-hour access token, run the
+reads, and finish before rotation matters. The delivered token only needs to be alive *at
+submission*.

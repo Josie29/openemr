@@ -3,10 +3,11 @@
 **Purpose:** Define the production alerts for the agent service and seed the PRD's
 **Alert definitions** engineering requirement (≥3 alerts; each documents what it means and the
 on-call response). The alerts below are specified against the signals the Langfuse
-instrumentation emits (ARCHITECTURE.md §10). **Wiring status:** the definitions were the
-Early-Submission deliverable; the code prerequisite (the `turn_error` / `tool_error` scores for
-A2/A3) is now **merged**, so all five alerts are wire-ready. Creating the monitors + Slack
-automation in the Langfuse UI is the remaining Final-push step — see §4.
+instrumentation emits (ARCHITECTURE.md §10). **Wiring status: live.** All five monitors are created
+in Langfuse Cloud and a Slack automation is attached to them. The code prerequisites — the
+`turn_error` / `tool_error` scores (A2/A3) and the `turn_cost` score (A5) — ship in the agent; A1
+and A4 already carry live production signal, and A2/A3/A5 populate as failing/costed turns occur in
+the deployed `copilot-agent` service. §5 is the as-built configuration.
 
 **Alerting philosophy:** three of these map to the PRD's named operational alerts (latency,
 error rate, tool failure); two more (A4, A5) map to *this* agent's specific failure modes —
@@ -32,6 +33,7 @@ Every `POST /chat` turn is one Langfuse `chat-turn` trace (`observability.py`), 
 | `verification_grounding` (0/1) | `observe_turn` → `score_trace` (`observability.py`) | Yes |
 | `turn_error` (=1 on any failed turn) | `TurnTrace.errored()` in `/chat` handlers | Yes |
 | `tool_error` (=1 on a FHIR read failure) | `TurnTrace.errored(tool_failure=True)` | Yes |
+| `turn_cost` (turn model cost, USD) | `TurnTrace.costed()` in `/chat`; priced by `pricing.turn_cost_usd` | Yes |
 
 **Signal note — why explicit error scores, not span status.** The `/chat` route catches
 `ModelHTTPError` / `FhirError` *inside* the `observe_turn` span, so the span closes cleanly and
@@ -39,15 +41,26 @@ would look successful; and a Langfuse Monitor can't filter observations down to 
 error level" (monitor filters are model / tags / user / environment). So failed turns emit
 explicit numeric scores — `turn_error` (every 502) and `tool_error` (the FHIR-read subset) — the
 same monitorable mechanism `verification_grounding` already uses. `errored()` also sets the span
-`level=ERROR` for trace-view/dashboard visibility. This closed the two gaps this doc previously
-listed; A2/A3 are now wire-ready with no further code.
+`level=ERROR` for trace-view/dashboard visibility. This closed the two signal gaps this doc
+previously listed, and the A2/A3 monitors run against these scores.
+
+**Signal note — why an explicit `turn_cost` score (A5).** Langfuse's auto-instrumentation attaches
+cost to each *generation* child span, not to the `chat-turn` root (root observation cost reads
+$0). A Monitor evaluates *observation-level* cost, so filtering to `name = chat-turn` would watch a
+constant 0 and never fire, and monitoring the generation spans instead measures per-*generation*
+cost, which a multi-generation turn (grounding retry, tool loop) splits — not per-turn cost. So the
+route computes each turn's dollar cost from its token usage (`pricing.turn_cost_usd`, priced by
+`ModelTier`) and emits it as the `turn_cost` numeric score, giving A5 a true per-turn value to
+threshold. Cost is emitted on the *answered* path only (a turn that errors before returning has no
+usage to price); those turns are already covered by A2/A3.
 
 ---
 
 ## 2. Alert definitions
 
-Each monitor evaluates over a rolling **1-hour window** (the shortest Langfuse Monitor window;
-options are 1h / 1d / 1w). Thresholds are **absolute counts, not rates** — Langfuse monitors one
+Each monitor evaluates over a rolling **1-hour window** (Langfuse's "Over the past" dropdown offers
+5 min → 1 week; we pick 1h — long enough that a count over the window is a stable signal at demo
+traffic, short enough to page promptly). Thresholds are **absolute counts, not rates** — Langfuse monitors one
 metric against a threshold and can't natively divide errors ÷ total, and at demo traffic a count
 over 1h is the less-noisy signal anyway (5% of 3 turns is noise). The count thresholds (A2/A3)
 need no baseline; A1/A5 are calibrated to live production data (§2 header) — revisit as traffic
@@ -99,12 +112,13 @@ grows.
   relax the gate to clear the alert.
 
 ### A5 — Cost-per-turn spike  *(agent-specific: cost)*
-- **Fires when:** p95 cost/turn > **$0.20**.
+- **Fires when:** p95 `turn_cost` > **$0.20** in 1h.
 - **Severity:** warning.
-- **Monitor:** Observations data source → p95 cost, filtered to `name = chat-turn`.
-- **Threshold basis:** observed p95 ≈ $0.092, max $0.13 (2026-07-10). $0.20 ≈ 2× the normal p95 —
-  a genuine spike (runaway tool-chaining / mis-routed Opus turn / retry storm), not routine
-  variance. Revisit if tier routing or the model mix changes.
+- **Monitor:** Numeric Scores data source → p95 of `turn_cost`, `>` operator. (Not the Observations
+  cost metric — see the §1 signal note: turn cost is $0 on the `chat-turn` root observation.)
+- **Threshold basis:** observed p95 ≈ $0.092, max $0.13 (2026-07-10, measured at trace level). $0.20
+  ≈ 2× the normal p95 — a genuine spike (runaway tool-chaining / mis-routed Opus turn / retry
+  storm), not routine variance. Revisit if tier routing or the model mix changes.
 - **What it means:** runaway tool-chaining, a tier-routing bug sending cheap turns to Opus, or a
   retry storm — each multiplies spend (ARCHITECTURE.md §12, `estimated-token-spend.md`).
 - **On-call response:** in Langfuse, compare token/tool-count distribution vs baseline; check
@@ -123,7 +137,7 @@ All monitors evaluate over a rolling **1-hour** window, filtered to `environment
 | A2 | Turn error count | Numeric score `turn_error` (count) | > 3 (page > 10) | warn → page | error rate |
 | A3 | Tool failure count | Numeric score `tool_error` (count) | > 3 | warn | tool failure rate |
 | A4 | Verification refusal spike | Numeric score `verification_grounding` (avg) | < 0.85 | page | (agent-specific) |
-| A5 | Cost-per-turn spike | Observations (p95 cost) | > $0.20 | warn | (agent-specific) |
+| A5 | Cost-per-turn spike | Numeric score `turn_cost` (p95) | > $0.20 | warn | (agent-specific) |
 
 Thresholds calibrated from 22 live production turns (2026-07-10); revisit as traffic grows.
 
@@ -135,8 +149,8 @@ All five alerts fire from **Langfuse Cloud → Monitors** against the trace/scor
 already emits — no Prometheus, Grafana, or `/metrics` endpoint needed. (An earlier draft weighed a
 Grafana path; it's unnecessary now that Langfuse Monitors cover latency, cost, and score
 thresholds natively. Monitors are Langfuse **Cloud-only** — fine, we're on Cloud.) The code
-prerequisite — explicit `turn_error` / `tool_error` scores for A2/A3 — is **already merged** (see
-§1); nothing else is blocking.
+prerequisites — the `turn_error` / `tool_error` scores (A2/A3) and the `turn_cost` score (A5) —
+ship in the agent (see §1).
 
 **Monitors/Automations are UI-only** — the Langfuse public API (verified via `langfuse-cli api
 __schema`, 2026-07-10) exposes no monitors/automations/alerts resource, so these can't be scripted;
@@ -145,7 +159,8 @@ create them by hand in the UI. Thresholds are already calibrated (§3), so setup
 **Per-alert setup** (Langfuse → *Monitors* → *New monitor*): configure each row of §3's table —
 data source, metric, the threshold value (and the optional Warning threshold where §2 lists a
 warn→page split), a **1-hour** window, and a filter of `environment = production` (this excludes
-the `sdk-experiment` eval traces). For A1/A5 also filter `name = chat-turn`.
+the `sdk-experiment` eval traces). For A1 also filter `name = chat-turn` (A5 is a numeric score,
+not an observation, so it needs no name filter).
 
 **Notification action** (Langfuse → *Automations* → *New automation* → **Slack**): create one
 Slack automation and attach it to all five monitors. Page-severity alerts (A2 page, A4) and
@@ -156,10 +171,70 @@ failures, re-enabled from the Automations page.
 
 **Dashboards (same tool, satisfies the PRD real-time dashboard requirement):** a Langfuse
 Dashboard renders total requests, error rate (`turn_error`), p50/p95 latency, tool-call counts,
-and verification pass/fail (`verification_grounding`) — build it alongside the monitors so the
-alert and the dashboard read from one source.
+and verification pass/fail (`verification_grounding`) — reading from the same source as the alerts.
+§5 records the as-built monitor, automation, and dashboard configuration.
 
-**Remaining (Final push):** (1) deploy the `turn_error`/`tool_error` scores to prod (promote
-`qa/integration → main`) so A2/A3 have live signal — A1/A4/A5 already have it; (2) create the five
-monitors + the Slack automation in the Langfuse UI (thresholds per §3, all pre-calibrated); (3)
-build the dashboard. No further code changes are required.
+---
+
+## 5. Execution runbook
+
+Langfuse project: `cmrc3jeu000w3ad0cigwzi04s` on `https://us.cloud.langfuse.com`. Everything below
+is UI work (monitors/automations have no API); the dashboard widgets are already created via API.
+
+### 5a. Dashboard — assemble from pre-built widgets
+
+Six widgets are already created (each URL opens the widget preview). In Langfuse → **Dashboards →
+New dashboard** (name it "Clinical Co-Pilot — Ops"), then **Add widget → Select existing** for each:
+
+| Widget | Signal | Alert |
+|---|---|---|
+| [Turn volume](https://us.cloud.langfuse.com/project/cmrc3jeu000w3ad0cigwzi04s/widgets/cmrgz5cmp0dhoad0cfbl6ai1q) | answered turns/interval | context |
+| [Turn latency p50/p95](https://us.cloud.langfuse.com/project/cmrc3jeu000w3ad0cigwzi04s/widgets/cmrgz5no80dhrad0c4z5u39w8) | `chat-turn` latency | A1 |
+| [Turn & tool errors](https://us.cloud.langfuse.com/project/cmrc3jeu000w3ad0cigwzi04s/widgets/cmrgz5pzz0dhuad0cmhj5y7gz) | `turn_error`/`tool_error` counts | A2/A3 |
+| [Verification grounding rate](https://us.cloud.langfuse.com/project/cmrc3jeu000w3ad0cigwzi04s/widgets/cmrgz5sw60dhzad0cb1crpmlp) | avg `verification_grounding` | A4 |
+| [Cost per turn p95](https://us.cloud.langfuse.com/project/cmrc3jeu000w3ad0cigwzi04s/widgets/cmrgz5v2a0d32ad0d2v5iud5c) | p95 `turn_cost` | A5 |
+| [Spend by model](https://us.cloud.langfuse.com/project/cmrc3jeu000w3ad0cigwzi04s/widgets/cmrgz5wy80cz3ad0dc1ufrrmt) | generation cost by model | A5 context |
+
+All six are already filtered to `environment = production`. Set the dashboard date picker to the
+range you want; widgets inherit it.
+
+### 5b. Monitors — one per row (Monitors → New monitor)
+
+For each, set the data source + metric, the threshold, the **Over the past** window, and filters.
+Every monitor gets `environment = production`; A1 additionally gets `name = chat-turn`. **Over the
+past** is the "Over the past" dropdown in Alert Conditions (options run 5 min → 1 week); all five
+use **1 hour**, matching the §2/§3 calibration.
+
+The **Data source** column names the view and, for the numeric-score monitors, the score to filter
+to. A numeric-score monitor counts/aggregates **every** score unless you filter it, so each of
+A2–A5 gets a `Score Name = <score>` filter (Filters → Column **Score Name**, `=`, the score name)
+*in addition to* `Environment = production`. That name filter — not the Measure — is what isolates
+`turn_error` from `tool_error`, `verification_grounding`, `turn_cost`, etc.
+
+| # | Name | Data source | Metric (agg) | Extra filter | Trigger / Threshold | Warn | Over the past | No-data |
+|---|---|---|---|---|---|---|---|---|
+| A1 | p95 latency | Observations | latency **p95** | `name = chat-turn` | above, > 60000 ms (page) | 45000 ms | 1 hour | Treat as 0 |
+| A2 | turn errors | Numeric Scores, `Score Name = turn_error` | count | — | above, > 10 (page) | 3 | 1 hour | Treat as 0 |
+| A3 | tool failures | Numeric Scores, `Score Name = tool_error` | count | — | above, > 3 | — | 1 hour | Treat as 0 |
+| A4 | grounding | Numeric Scores, `Score Name = verification_grounding` | **avg** | — | **below**, < 0.85 | — | 1 hour | **Show severity: NO DATA** |
+| A5 | cost/turn | Numeric Scores, `Score Name = turn_cost` | value **p95** | — | above, > 0.20 | — | 1 hour | Treat as 0 |
+
+Notes: latency is in **milliseconds** in Langfuse (45s = 45000). A1/A2 have a warn→page split — put
+the page value in ALERT Threshold and the warn value in WARNING Threshold; A3/A5 need only the ALERT
+row. A4 sets the "Trigger when the value is" selector to **below** (refusal *rises* as the average
+*falls*); the rest use **above**.
+
+**No-data handling (Advanced Options → "When there is no data").** This one is load-bearing for A4.
+Traffic is sparse and bursty, so most 1-hour windows contain no scores. For the four **above**
+monitors (A1/A2/A3/A5) leave the default **Treat missing data as 0** — an empty window reads 0,
+which is *below* their thresholds, so they correctly stay quiet. A4 triggers **below** 0.85, so
+"treat as 0" would fire on every empty hour (0 < 0.85) even when every real score is 1.0; set A4 to
+**Show severity: NO DATA** so silent windows are a distinct no-data state, not a false alert. (Only
+A4 needs this; do not change the other four.)
+
+### 5c. Slack automation (Automations → New automation → Slack)
+
+Authorize the Slack workspace, pick the channel (e.g. `#copilot-alerts`), then attach the one
+automation to all five monitors. Langfuse auto-disables an automation after 5 consecutive delivery
+failures — re-enable from the Automations page. Split page vs warn into separate channels later only
+if volume warrants.

@@ -1,0 +1,37 @@
+meta {
+  name: 06 Notes - DocumentReference (get_encounter_note)
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/DocumentReference?patient={{patient_id}}&category=clinical-note
+  body: none
+  auth: bearer
+}
+
+params:query {
+  patient: {{patient_id}}
+  category: clinical-note
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+headers {
+  Accept: application/fhir+json
+}
+
+docs {
+  Wraps the agent tool `get_encounter_note`. Searches clinical-note DocumentReferences for
+  the patient. The tool takes an `encounter_id` argument and filters this searchset *in
+  Python* to the matching encounter — the FHIR layer has no encounter filter here, so this
+  raw request returns notes across ALL encounters. Compare against an encounter id from
+  request 05 to see what the tool narrows to.
+}
+
+assert {
+  res.status: eq 200
+  res.body.resourceType: eq Bundle
+}

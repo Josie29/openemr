@@ -28,18 +28,19 @@ that fits the PRD's engineering requirements (Option B), and single-point author
 (Option C) — without any of their individual costs.
 
 **How it reads data.** FHIR R4 only, under a SMART `patient/*.read` token the module mints
-for the open patient. The agent holds **no database credentials**. It reads five resources
+for the open patient. The agent holds **no database credentials**. It reads six resources
 OpenEMR already ships — `Patient`, `Condition`, `MedicationRequest`, `AllergyIntolerance`,
-`Encounter` — plus one optional composite snapshot endpoint if per-resource round-trips
-threaten the latency budget.
+`Encounter`, and `DocumentReference` (the free-text clinical note for a visit) — all as
+stock FHIR reads; no custom endpoint was needed.
 
 **Key decisions.** Single agent, not multi-agent — every use case is one conversational
-agent over the five-tool set (derivation in [§6](#6-the-agent)). **Pydantic AI** for the
+agent over the six-tool set (derivation in [§6](#6-the-agent)). **Pydantic AI** for the
 framework, because the PRD's "every response passes through a verification layer" maps
 directly onto its `output_validator` + `ModelRetry` hook — the verification requirement
-*is* a first-class language feature, not bolted on. **Claude, tiered** (Sonnet 5 default,
-Haiku 4.5 for cheap checks, Opus 4.8 for the hardest cases), streamed over SSE.
-**Langfuse** for traces, token/cost, dashboards, and eval scores.
+*is* a first-class language feature, not bolted on. **Claude** — the deployed service runs
+**Sonnet 5**, a single tier per deploy; the Haiku 4.5 and Opus 4.8 tiers are declared in
+config (with pricing) so cost-tiered routing is a config-ready later increment, not a
+current per-call behavior. **Langfuse** for traces, token/cost, dashboards, and eval scores.
 
 **How the audit shaped it.** The audit's #1 finding — no patient-level authorization
 (IDOR) — is answered by construction: a patient-scoped token makes cross-patient reads
@@ -90,7 +91,7 @@ system, not the weak one.
 
 ## 3. System topology — Option D
 
-### 3.1 Current state (deployed today)
+### 3.1 Baseline (the OpenEMR fork, before the Co-Pilot)
 
 ```mermaid
 flowchart TB
@@ -106,7 +107,7 @@ flowchart TB
     physician(["Physician browser"]) -->|"HTTPS, TLS terminated at Railway edge"| openemr
 ```
 
-### 3.2 Target state (Option D)
+### 3.2 Current state — Option D (deployed today)
 
 ```mermaid
 flowchart TB
@@ -153,7 +154,7 @@ objects that guarantee their own validity.
 | `get_medications()` | `MedicationRequest` | `list[Medication]` (dedup + text-fallback inside) | UC-1–UC-4 |
 | `get_allergies()` | `AllergyIntolerance` | `list[Allergy]` | UC-1, UC-4 |
 | `get_encounters()` | `Encounter` | `list[Encounter]` (ordered, date-bounded, "last N") | UC-1, UC-2, UC-3 |
-| `get_patient_snapshot()` | *composite* | `PatientSnapshot` | latency-only; optional |
+| `get_encounter_note(id)` | `DocumentReference` | free-text clinical note (base64-decoded) | UC-3 |
 
 **The medication data-quality reality (verified against code + live seed DB).** The audit
 flags that meds are stored under two schemes and locations. We verified that FHIR
@@ -173,10 +174,11 @@ second-order issues are owned by the med tool, not pushed onto the agent's reaso
 OpenEMR's authorization inside the agent — reintroducing the IDOR problem in a second place
 — plus a second credential to secure. Custom purpose-built REST endpoints (Option C) would
 add real scope: design, version, and test new endpoints before the agent reads anything. We
-avoid both because the five resources we need **already exist** as FHIR reads with SMART
-scopes. At most we add *one* custom endpoint — the composite snapshot — and only if latency
-demands it. FHIR-only was also chosen over a FHIR-plus-SQL-fallback for meds, because we
-proved the fallback's premise (that FHIR hides meds) false.
+avoid both because the six resources we need **already exist** as FHIR reads with SMART
+scopes. In the end we added **no** custom endpoint — all six reads are stock FHIR; a
+composite snapshot remains an option only if latency later demands it. FHIR-only was also
+chosen over a FHIR-plus-SQL-fallback for meds, because we proved the fallback's premise
+(that FHIR hides meds) false.
 
 ---
 
@@ -233,10 +235,10 @@ tool calls, not a cheap validation model, not parallel fetches.
 | UC-4 Med↔problem reconciliation | 3 parallel reads → cross-reference | No |
 | UC-5 Cross-cover | upstream policy gate (non-LLM) → UC-1 synthesis | No |
 
-**Every use case is one conversational agent over the five-tool set, with a verification
+**Every use case is one conversational agent over the six-tool set, with a verification
 validator and multi-turn context.** The things that *look* like extra agents are all
 single-agent mechanics: parallel fetches (UC-1/UC-4), a deterministic diff (UC-2), multi-turn
-iteration (UC-3), an upstream policy gate (UC-5), and a Haiku validation pre-check (all).
+iteration (UC-3), an upstream policy gate (UC-5), and a deterministic grounding validator (all).
 UC-4 — the one candidate for a graph — is a single cross-referencing step producing one
 output contract (candidate mismatches for physician review); it does *not* adjudicate flags,
 so nothing hands off.
@@ -255,20 +257,21 @@ flowchart LR
     req["POST /chat\n{patient_id, message}"] --> cid["Correlation-ID\nmiddleware"]
     cid --> loop["Pydantic AI tool loop\n(fetch what's needed;\nparallel where independent)"]
     loop --> fhir["FHIR R4 reads\n(SMART token)"]
-    fhir --> llm["Claude\n(Sonnet 5 / Haiku / Opus)"]
-    llm --> gate["output_validator gate\n(source attribution +\ndomain constraints)"]
-    gate -->|pass| sse["Stream response (SSE)\nevery claim cites a row"]
+    fhir --> llm["Claude\n(Sonnet 5)"]
+    llm --> gate["output_validator gate\n(deterministic grounding +\ndomain constraints)"]
+    gate -->|pass| resp["Return response (JSON)\nevery claim cites a row"]
     gate -->|fail| retry["ModelRetry →\nforce correction"]
     retry --> llm
     loop -.->|steps, timings, tokens, cost| obs[("Langfuse")]
 ```
 
-**Model tiering.** Sonnet 5 is the workhorse; Haiku 4.5 runs cheap sub-tasks (query
-classification, the verification pre-check); Opus 4.8 is reserved for the hardest reasoning
-if evals show Sonnet short. This is one agent using different models per *call* — not
-multiple agents. Streaming (SSE) puts the first token inside the walk-between-rooms budget.
-The routing thresholds are what make the cost-at-scale projection defensible rather than flat
-token×N (see [§12](#12-scale--cost-trajectory)).
+**Model.** The deployed service runs a **single tier per deploy** — Sonnet 5 in production.
+The Haiku 4.5 and Opus 4.8 tiers are declared in config (`ModelTier`, with per-tier pricing),
+so cost-tiered routing — cheap sub-tasks to Haiku, Opus reserved for the hardest reasoning if
+evals show Sonnet short — is a config-ready later increment, **not** a current per-call
+behavior. Responses return as a single JSON payload (streaming is not implemented). Those
+routing thresholds are what *would* make the cost-at-scale projection defensible rather than
+flat token×N (see [§12](#12-scale--cost-trajectory)).
 
 ---
 
@@ -288,24 +291,27 @@ function that runs pre-return and can reject. Choosing a framework where verific
 first-class language feature (rather than a convention we hope every code path remembers)
 means the gate cannot be accidentally bypassed: there is one defensible place it lives.
 
-**What it catches — two guarantees with different trust levels** (be precise; a CTO will
-probe this):
+**What it catches** (be precise; a CTO will probe this) — the runtime gate is **deterministic
+only**; faithfulness is a separate, offline eval signal, not a request-time check:
 
-- **Grounding (deterministic, trustworthy).** The response is a structured model where each
-  claim carries a `source_ref`. The validator is *code*: it rejects any claim that lacks a
-  citation, or whose citation doesn't resolve to a resource a tool actually returned this
-  turn. This bulletproofs one class of hallucination — **fabrication from nothing** (the
-  model cannot state a lab value we never fetched; there is nothing to cite). Not an LLM,
+- **Grounding (deterministic, trustworthy — runtime).** The response is a structured model
+  where each claim carries a `source_ref`. The validator is *code*: it rejects any claim that
+  lacks a citation, or whose citation doesn't resolve to a resource a tool actually returned
+  this turn. A free-text claim must cite a **verbatim quote** checked as a substring of the
+  fetched note. This bulletproofs one class of hallucination — **fabrication from nothing**
+  (the model cannot state a lab value we never fetched; there is nothing to cite). Not an LLM,
   can't be fooled.
-- **Faithfulness (probabilistic, a mitigation not a proof).** Does the cited resource
-  actually *say* what the claim says? A cheap Haiku 4.5 judge inside the validator checks
-  entailment — but it is an LLM checking an LLM, so it *reduces* misattribution, it does not
-  eliminate it. Where a claim reduces to a lookup (this med is on the list; this problem is
-  active) we verify structurally against the typed tool output instead; free-text synthesis
-  we cannot.
-- **Domain constraints (deterministic).** UC-4 mismatch flags must be phrased as *candidates
-  for review*, never asserted interactions; nothing is answered from data the tools did not
-  return.
+- **Domain constraints (deterministic — runtime).** UC-4 mismatch flags must be phrased as
+  *candidates for review*, never asserted interactions; nothing is answered from data the
+  tools did not return.
+- **Faithfulness (probabilistic — measured offline, not enforced at runtime).** Does the cited
+  resource actually *say* what the claim says? The runtime validator does **not** judge this.
+  Faithfulness is instead measured in the **eval harness** ([§11](#11-evaluation-approach)) by
+  a Haiku 4.5 entailment judge over recorded turns — an LLM checking an LLM, so it *reduces*
+  misattribution as a quality signal, it does not eliminate it at request time. Where a claim
+  reduces to a lookup (this med is on the list; this problem is active) the runtime grounding
+  check already verifies it structurally against the typed tool output; free-text synthesis is
+  where the offline faithfulness signal matters.
 
 **Failure direction is refusal, not silent pass.** `ModelRetry` feeds the specific violation
 back into the prompt (not an identical re-roll) and is bounded; if the agent cannot produce
@@ -370,17 +376,26 @@ acceptance criteria.
   alive. `/ready` **actually pings** the FHIR base URL, the Claude API, and Langfuse, and
   returns 503 with a per-dependency breakdown if any is down (the LLM probe uses a cheap
   metadata call, not a full completion). It must not return 200 unconditionally.
-- **Three alerts** (PRD minimum): p95 latency over threshold, error rate over threshold,
-  tool-failure rate over threshold — each with a documented on-call response.
+- **Alerts** (PRD minimum plus one): p95 latency over threshold, error rate over threshold,
+  tool-failure rate over threshold, and per-turn cost (`turn_cost`) over threshold — each with
+  a documented on-call response. Cost is scored per turn from the model-tier pricing tables and
+  the alert threshold lives in Langfuse (see `context/planning/alerting.md`).
 
 ---
 
 ## 11. Evaluation approach
 
-Evals run in **Pydantic Evals + pytest**, scored to Langfuse. Because Pydantic AI ships
-`TestModel`/`FunctionModel`, the suite exercises the full agent flow **without real LLM
-calls** — deterministic and CI-friendly. Every case guards a named failure mode, framed as
-one of three:
+Two layers, both scored to Langfuse:
+
+- **Deterministic pytest suite** (`agent/tests/`) — exercises the full agent flow with fixtures
+  and Pydantic AI's `FunctionModel`, so it runs **without real LLM or FHIR calls**, CI-friendly.
+- **Langfuse-hosted eval experiment** (`agent/src/copilot/evals/`) — a dataset run invoked from
+  a report-only CI workflow (`.github/workflows/evals.yml`). The current suite is **7 cases
+  across 3 fixture patients**, scored by **4 evaluators**: two deterministic (`tool_correctness`,
+  `no_fabrication`) and two Haiku 4.5 LLM judges (`faithfulness`, `completeness`), with regression
+  thresholds. This is where the offline faithfulness signal ([§7](#7-verification-strategy)) lives.
+
+Every case guards a named failure mode, framed as one of three:
 
 - **Boundary** — missing data, empty patient record, sparse history, malformed input.
 - **Invariant** — "every claim cites a source"; "no possible-interaction stated as fact";
@@ -461,7 +476,7 @@ of scope until a use case justifies it.
 
 | Capability | Traces to (USERS.md) | PRD requirement |
 |---|---|---|
-| Five FHIR read tools + optional snapshot | UC-1–UC-5 | Tool design; capability↔use-case |
+| Six FHIR read tools (incl. free-text note) | UC-1–UC-5 | Tool design; capability↔use-case |
 | Parallel fan-out fetch | UC-1, UC-4 | Speed vs Completeness (<15s) |
 | Deterministic diff, model-filtered salience | UC-2 | "What changed is a judgment" |
 | Multi-turn tool loop + conversation state | UC-3 (+ follow-ups) | Agentic Chatbot (multi-turn) |
@@ -482,27 +497,26 @@ of scope until a use case justifies it.
   invented fact because it looks maximally trustworthy — the physician clicks, sees a real
   record, and the misread is one inferential step away. **(b) Subtly-wrong synthesis** —
   every clause traces to a real row, yet the aggregate narrative misleads (implies a causal
-  thread the encounters don't support). Mitigations: the probabilistic faithfulness check
-  ([§7](#7-verification-strategy)), structural verification for lookup-style claims,
+  thread the encounters don't support). Mitigations: the offline faithfulness eval signal
+  ([§7](#7-verification-strategy)/[§11](#11-evaluation-approach)), structural verification for lookup-style claims,
   conservative prompt framing ("state what's documented, not what's implied"), UC-3's
   explicit "the chart doesn't record the reason" behavior, and eval cases targeting both
   specifically. This is the honest limit of source-attribution as a verification strategy —
   which is why the physician stays the expert-in-the-loop — and the first thing to harden next.
-- **Free-text reasoning & the agent-vs-dashboard case (open).** The five scoped tools return
-  the *structured* record — coded lists and encounter metadata — which is the dashboard-able
-  subset. The capability a dashboard structurally cannot replicate is reasoning over
-  free-text notes ("what did cardiology say?", UC-3's *why*), and those live in note prose
-  (`DocumentReference` / encounter forms), not the five resources. As tooled, the agent
-  serves UC-1/UC-2 (which a dashboard could too) but only partially serves UC-3, the case
-  that most justifies the agent shape. Decision: keep structured-only as the verifiable MVP
-  and sequence a free-text tool as a distinct later increment — it reopens the retrieval
-  sub-agent question (§6 tripwires) and shifts verification load onto the *faithfulness* half
-  of the gate (§7). Full analysis in
+- **Free-text reasoning & the agent-vs-dashboard case (now addressed).** Five of the scoped
+  tools return the *structured* record — coded lists and encounter metadata — the dashboard-able
+  subset. The capability a dashboard structurally cannot replicate is reasoning over free-text
+  notes ("what did cardiology say?", UC-3's *why*), which live in note prose (`DocumentReference`
+  / encounter forms). The **`get_encounter_note` tool now reads that free-text note** (with
+  verbatim-quote citations checked as substrings of the note text), so the agent serves UC-3's
+  note drill-down directly rather than deferring it. This shifts verification load onto
+  faithfulness — measured **offline** in evals ([§11](#11-evaluation-approach)), not enforced at
+  runtime — which is the honest limit named in [§7](#7-verification-strategy). Full analysis in
   [`context/decisions/agent-workflow.md`](context/decisions/agent-workflow.md). The honest
-  defense position: the agent earns its shape on UC-3/UC-4, not on all five.
-- **Framework spike (open).** Prototype the verify-then-answer gate in Pydantic AI (and,
-  time permitting, LangGraph/ADK) to confirm which most cleanly expresses "unattributable
-  claim → force a retry." Low-stakes because the pick is reversible; worth 1 day.
+  defense position: the agent earns its shape on UC-3/UC-4.
+- **Framework spike (resolved).** Pydantic AI's `output_validator` + `ModelRetry` is what
+  shipped — "unattributable claim → force a retry" expressed as a first-class language feature.
+  The pick remains reversible (provider- and shape-neutral) if a §6 tripwire fires.
 - **Model-routing thresholds (open).** Which sub-tasks go to Haiku vs Sonnet — settle
   empirically once the eval suite exists, since it drives the cost-at-scale math.
 - **OpenEMR-side latency ceiling (dependency, not agent scope).** Audit-on-read amplification

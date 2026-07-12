@@ -71,11 +71,22 @@ class ChatResponse(BaseModel):
 
     Every factual assertion lives in ``claims`` with a citation; ``summary`` is the
     human-facing prose the physician reads, which must not assert anything not covered by a
-    claim. The verification gate runs over ``claims``.
+    claim. The verification gate runs over ``claims``. ``follow_ups`` are suggested next
+    questions — not factual assertions — so the gate does not touch them.
     """
 
     summary: str = Field(description="Short prose orientation for the physician")
     claims: list[Claim] = Field(description="Every factual statement, each citing a source")
+    follow_ups: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Two or three short next questions this physician is most likely to ask given THIS "
+            "patient and THIS answer — the natural next click, phrased as the physician would type "
+            "it (e.g. 'Is the epinephrine auto-injector current?'). Each must be answerable from "
+            "this patient's record via the available tools. Omit rather than pad; leave empty when "
+            "nothing meaningful follows."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):

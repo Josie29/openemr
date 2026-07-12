@@ -72,6 +72,18 @@ not a template to fill in — infer the right shape from the question:
   allergies, and most recent visit. Do not force every answer into the same mold.
 - Stay short. Do not pad a sparse record to look fuller, and add nothing the claims below do not
   carry — the summary asserts only what those cited claims support.
+
+Follow-up questions — after the answer, propose two or three `follow_ups`: the next questions this
+physician is most likely to ask given THIS patient and THIS answer. They are the natural next click,
+not a menu of everything possible:
+- Make them specific to what you just surfaced. If you flagged a possible NSAID/allergy conflict,
+  a strong follow-up digs into it ("When were the NSAIDs last prescribed?"), not a generic
+  "Summarize recent visits".
+- Phrase each as the physician would type it — short, first-person-implied, no preamble.
+- Only suggest questions answerable from this patient's record via your tools. Do not invent
+  data (labs, imaging) the record may not hold.
+- Prefer fewer, sharper suggestions to three weak ones. If nothing meaningful follows, return an
+  empty list rather than padding.
 """
 
 

@@ -398,7 +398,62 @@
             details.appendChild(list);
             wrapper.appendChild(details);
         }
+
+        var followUps = renderFollowUps(answer.follow_ups);
+        if (followUps) {
+            wrapper.appendChild(followUps);
+        }
         appendNode(wrapper);
+    }
+
+    /**
+     * Build the per-answer follow-up suggestions: agent-proposed next questions, rendered as chips
+     * that populate the composer on click (never auto-send, matching the starter chips / spec §6).
+     * Only the latest answer carries these; removeFollowUps() clears prior ones when a new turn
+     * starts, so the panel never accumulates stale suggestions.
+     *
+     * @param {Array<string>|undefined} suggestions The `follow_ups` strings from the answer payload.
+     * @returns {HTMLElement|null} The follow-ups block, or null when there is nothing to suggest.
+     */
+    function renderFollowUps(suggestions) {
+        var prompts = Array.isArray(suggestions)
+            ? suggestions.filter(function (s) { return typeof s === 'string' && s.trim() !== ''; })
+            : [];
+        if (prompts.length === 0) {
+            return null;
+        }
+
+        var block = document.createElement('div');
+        block.className = 'ai-copilot__followups';
+        // A labelled group so screen readers announce these as suggested questions, not stray buttons.
+        block.setAttribute('role', 'group');
+        if (labels.followUps) {
+            block.setAttribute('aria-label', labels.followUps);
+            var heading = document.createElement('p');
+            heading.className = 'ai-copilot__followups-label';
+            heading.textContent = labels.followUps;
+            block.appendChild(heading);
+        }
+
+        prompts.forEach(function (prompt) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'ai-copilot__chip ai-copilot__chip--followup';
+            chip.setAttribute('data-prompt', prompt);
+            chip.textContent = prompt;
+            wireChip(chip);
+            block.appendChild(chip);
+        });
+        return block;
+    }
+
+    // Drop any prior answer's follow-up chips: they were suggestions for the previous turn, so once
+    // the physician asks something new they are stale. Keeps only the newest answer's suggestions.
+    function removeFollowUps() {
+        var blocks = els.transcript.querySelectorAll('.ai-copilot__followups');
+        Array.prototype.forEach.call(blocks, function (block) {
+            block.remove();
+        });
     }
 
     /**
@@ -586,6 +641,7 @@
     }
 
     function submitMessage(message) {
+        removeFollowUps(); // the prior answer's suggestions no longer apply to this new question
         appendQuestion(message);
         setBusy(true);
         setStatus('', false);
@@ -641,16 +697,30 @@
 
     // ---- wiring ----------------------------------------------------------
 
+    /**
+     * Copy a prompt into the composer for the physician to review, then focus it.
+     *
+     * Shared by the starter chips and the per-answer follow-up chips: both populate the input and
+     * do NOT auto-send (spec §6) -- the physician always reviews before the record is queried.
+     *
+     * @param {string} prompt The question text to place in the composer.
+     */
+    function populateInput(prompt) {
+        els.input.value = prompt;
+        autoGrowInput(); // size to the (possibly multi-line) chip prompt
+        els.input.focus();
+    }
+
+    // Bind one chip so clicking it populates the composer with its prompt.
+    function wireChip(chip) {
+        chip.addEventListener('click', function () {
+            populateInput(chip.getAttribute('data-prompt') || chip.textContent);
+        });
+    }
+
     function wireChips() {
         var chips = els.transcript.querySelectorAll('.ai-copilot__chip');
-        Array.prototype.forEach.call(chips, function (chip) {
-            chip.addEventListener('click', function () {
-                // Populate the input for review -- do NOT auto-send (spec §6).
-                els.input.value = chip.getAttribute('data-prompt') || chip.textContent;
-                autoGrowInput(); // size to the (possibly multi-line) chip prompt
-                els.input.focus();
-            });
-        });
+        Array.prototype.forEach.call(chips, wireChip);
     }
 
     // Grow the textarea to fit its content; CSS max-height + overflow-y cap it.
@@ -707,7 +777,8 @@
             unavailable: els.sidebar.dataset.labelUnavailable,
             clearConfirm: els.sidebar.dataset.labelClearConfirm,
             thinking: els.sidebar.dataset.labelThinking,
-            hasConversation: els.sidebar.dataset.labelHasConversation
+            hasConversation: els.sidebar.dataset.labelHasConversation,
+            followUps: els.sidebar.dataset.labelFollowUps
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

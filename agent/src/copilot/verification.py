@@ -162,16 +162,42 @@ def resolve_claims(response: ChatResponse, fetched: FetchLog) -> tuple[ChatRespo
     grounded: list[Claim] = []
     offenders: list[Claim] = []
     for claim in response.claims:
-        value = fetched.resolve(claim.source)
-        if value is None:
+        stamped_source = _stamp(fetched, claim.source)
+        stamped_supporting = [_stamp(fetched, ref) for ref in claim.supporting]
+        # A claim is grounded only when its primary citation AND every supporting citation resolve —
+        # so a statement drawing on an uncited (or merely inferred) record is rejected, not shipped.
+        if stamped_source is None or None in stamped_supporting:
             offenders.append(claim)
         else:
-            update: dict[str, str | None] = {"value": value}
-            identity = fetched.identify(claim.source)
-            if identity is not None:
-                update["label"] = identity.label
-                update["date"] = identity.date
-                update["date_label"] = identity.date_label
-            stamped_source = claim.source.model_copy(update=update)
-            grounded.append(claim.model_copy(update={"source": stamped_source}))
+            grounded.append(
+                claim.model_copy(
+                    update={
+                        "source": stamped_source,
+                        "supporting": [ref for ref in stamped_supporting if ref is not None],
+                    }
+                )
+            )
     return response.model_copy(update={"claims": grounded}), offenders
+
+
+def _stamp(fetched: FetchLog, ref: SourceRef) -> SourceRef | None:
+    """Resolve one citation and stamp the record's real value and identity into it.
+
+    Args:
+        fetched: The registry of resources tools returned this turn.
+        ref: A single citation (primary or supporting).
+
+    Returns:
+        The citation with ``value`` and identity (``label``/``date``/``date_label``) stamped from
+        the fetched record, or None when the citation cannot be grounded.
+    """
+    value = fetched.resolve(ref)
+    if value is None:
+        return None
+    update: dict[str, str | None] = {"value": value}
+    identity = fetched.identify(ref)
+    if identity is not None:
+        update["label"] = identity.label
+        update["date"] = identity.date
+        update["date_label"] = identity.date_label
+    return ref.model_copy(update=update)

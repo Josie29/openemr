@@ -405,8 +405,13 @@ class Encounter(BaseModel):
 
     @property
     def citation_identity(self) -> ResourceIdentity:
-        """The visit type and its start date — what identifies this encounter."""
-        return ResourceIdentity(label=self.type, date=self.start_date, date_label="Date")
+        """The visit's real category and its date. OpenEMR hardcodes FHIR ``Encounter.type`` to a
+        generic 'Encounter for check up' for every visit, so it cannot identify a specific one; the
+        true category ('Emergency room admission', 'General examination') rides in the reason.
+        Prefer that, falling back to the type only when no reason is recorded."""
+        return ResourceIdentity(
+            label=self.reason or self.type, date=self.start_date, date_label="Date"
+        )
 
 
 def _encounter_ref_id(resource: dict[str, Any]) -> str | None:

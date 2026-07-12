@@ -510,16 +510,11 @@
         return spaced.charAt(0).toUpperCase() + spaced.slice(1);
     }
 
-    function renderClaim(claim) {
-        var item = document.createElement('li');
-        item.className = 'ai-copilot__claim';
-
-        var text = document.createElement('span');
-        text.className = 'ai-copilot__claim-text';
-        text.textContent = claim.text;
-        item.appendChild(text);
-
-        var source = claim.source || {};
+    // Render one citation as a <cite> chip: resource-type badge, the record's own name + key date,
+    // and the grounded field value. A claim can draw on more than one record, so this is called once
+    // per citation (the primary `source` and each `supporting` entry).
+    function renderCitation(source) {
+        source = source || {};
         var cite = document.createElement('cite');
         cite.className = 'ai-copilot__citation';
 
@@ -536,15 +531,16 @@
         cite.appendChild(resource);
 
         // The record's own name ("Asthma") + key date, stamped from the cited record by the agent
-        // (never model-authored). This is what ties the proof to the *specific* record rather than
-        // just its type — three active Conditions are otherwise indistinguishable on the card.
-        if (source.label) {
+        // (never model-authored). This ties the proof to the *specific* record, not just its type.
+        // Skip either when it merely repeats the cited field value (e.g. an encounter whose cited
+        // field IS its start date) so the chip doesn't say the same thing twice.
+        if (source.label && source.label !== source.value) {
             var name = document.createElement('span');
             name.className = 'ai-copilot__citation-name';
             name.textContent = source.label;
             cite.appendChild(name);
         }
-        if (source.date) {
+        if (source.date && source.date !== source.value) {
             var when = document.createElement('span');
             when.className = 'ai-copilot__citation-date';
             when.textContent = source.date_label ? source.date_label + ' ' + source.date : source.date;
@@ -560,7 +556,27 @@
             cite.appendChild(field);
         }
 
-        item.appendChild(cite);
+        return cite;
+    }
+
+    function renderClaim(claim) {
+        var item = document.createElement('li');
+        item.className = 'ai-copilot__claim';
+
+        var text = document.createElement('span');
+        text.className = 'ai-copilot__claim-text';
+        text.textContent = claim.text;
+        item.appendChild(text);
+
+        // Primary citation, then any supporting citations. A statement that draws on more than one
+        // record (a visit and a diagnosis) shows a chip for each, so the physician can see every
+        // record it rests on — and spot when two are unrelated (e.g. different dates).
+        item.appendChild(renderCitation(claim.source));
+        var supporting = claim.supporting || [];
+        for (var i = 0; i < supporting.length; i++) {
+            item.appendChild(renderCitation(supporting[i]));
+        }
+
         return item;
     }
 

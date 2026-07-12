@@ -63,7 +63,17 @@ class Claim(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     text: str = Field(description="The factual statement, phrased for the physician")
-    source: SourceRef = Field(description="The record this statement is traceable to")
+    source: SourceRef = Field(description="The primary record this statement is traceable to")
+    supporting: list[SourceRef] = Field(
+        default_factory=list,
+        description=(
+            "Any ADDITIONAL records this statement also draws on, beyond `source`. If a statement "
+            "mentions more than one record (say a visit and a diagnosis), cite the primary one in "
+            "`source` and every other one here; the gate verifies all of them, so an uncited or "
+            "merely-inferred record is rejected. Prefer atomic statements about one record; leave "
+            "this empty then."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):

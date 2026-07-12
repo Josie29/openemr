@@ -49,9 +49,11 @@ body.ai-copilot-resizing {
     --copilot-border: #d3d9df;
     --copilot-text: #1f2a33;
     --copilot-muted: #5b6770;
-    --copilot-accent: #0b5fa5;
-    /* Lighter accent tint used only for the assistant-avatar gradient's top stop. */
-    --copilot-accent-light: #1f7ac2;
+    /* Bootstrap $primary ($blue) — the exact blue OpenEMR uses for links, card headers and
+       .btn-primary (see interface/themes/default-variables.scss). Keep in lockstep with the site. */
+    --copilot-accent: #007bff;
+    /* Lighter tint of the accent, used only for the assistant-avatar gradient's top stop. */
+    --copilot-accent-light: #3395ff;
     --copilot-error: #a32020;
     --copilot-surface: #ffffff;
     --copilot-surface-alt: #f6f8fa;

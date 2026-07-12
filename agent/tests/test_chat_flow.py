@@ -116,3 +116,18 @@ def test_runaway_tool_loop_is_capped_and_refused(settings: Settings) -> None:
     body = response.json()
     assert body["claims"] == []
     assert "attribute" in body["summary"].lower()
+
+
+def test_unexpected_error_is_caught_not_leaked(settings: Settings) -> None:
+    # Guards the catch-all boundary: any unforeseen failure must return a controlled error response
+    # (never an uncaught exception the browser shows as a bare 500 / "Failed to fetch"), and must
+    # not leak internal detail into the user-facing body.
+    def boom(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise RuntimeError("internal detail that must not leak")
+
+    response = _post_chat(settings, FunctionModel(boom))()
+
+    assert response.status_code == 500
+    body = response.json()
+    assert "could not be completed" in body["error"]
+    assert "internal detail" not in str(body)  # the exception message never reaches the client

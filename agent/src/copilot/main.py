@@ -339,6 +339,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "error": "patient data is temporarily unavailable",
                         "correlation_id": correlation_id,
                     }
+                except Exception:
+                    # Catch-all boundary: any unforeseen failure must return a controlled,
+                    # CORS-headed response — never an uncaught exception (which reaches the browser
+                    # as a bare 500 or "Failed to fetch"). Log the full traceback so the bug stays
+                    # visible; surface only a generic message + correlation id, never internal
+                    # detail (audit, §8).
+                    logger.error(
+                        "unexpected error answering /chat",
+                        extra={"cid": correlation_id},
+                        exc_info=True,
+                    )
+                    turn.errored(tool_failure=False)
+                    status_code = 500
+                    content = {
+                        "error": "the request could not be completed",
+                        "correlation_id": correlation_id,
+                    }
         finally:
             # Close the per-request token-scoped client so its connection pool never leaks.
             if per_request_client is not None:

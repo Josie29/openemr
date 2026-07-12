@@ -155,13 +155,13 @@ final readonly class CopilotSidebarController
                 </div>
                 <form class="ai-copilot__composer" id="ai-copilot-form">
                     <label class="sr-only" for="ai-copilot-input">{$placeholder}</label>
-                    <input
+                    <textarea
                         class="ai-copilot__input form-control"
                         id="ai-copilot-input"
-                        type="text"
+                        rows="1"
                         autocomplete="off"
                         placeholder="{$placeholder}"
-                    >
+                    ></textarea>
                     <button class="ai-copilot__send btn btn-primary" id="ai-copilot-send" type="submit">
                         {$sendLabel}
                     </button>

@@ -196,6 +196,7 @@
             // storage unavailable -> just skip persistence
         }
         els.input.focus();
+        autoGrowInput(); // size a restored draft correctly on open
     }
 
     function closeSidebar() {
@@ -630,9 +631,32 @@
             chip.addEventListener('click', function () {
                 // Populate the input for review -- do NOT auto-send (spec §6).
                 els.input.value = chip.getAttribute('data-prompt') || chip.textContent;
+                autoGrowInput(); // size to the (possibly multi-line) chip prompt
                 els.input.focus();
             });
         });
+    }
+
+    // Grow the textarea to fit its content; CSS max-height + overflow-y cap it.
+    // Setting .value in JS does NOT fire 'input', so callers that assign the value
+    // (send-reset, chip populate, open) must invoke this explicitly.
+    function autoGrowInput() {
+        els.input.style.height = 'auto';
+        els.input.style.height = els.input.scrollHeight + 'px';
+    }
+
+    // Enter sends; Shift+Enter inserts a newline (textarea default).
+    function onInputKeydown(event) {
+        if (event.key !== 'Enter' || event.shiftKey) {
+            return;
+        }
+        // Don't hijack Enter while an IME candidate is being confirmed.
+        if (event.isComposing || event.keyCode === 229) {
+            return;
+        }
+        event.preventDefault();
+        // Reuse the form submit path (same validation/onSubmit; no-op while disabled).
+        els.form.requestSubmit(els.send);
     }
 
     function onSubmit(event) {
@@ -642,6 +666,7 @@
             return;
         }
         els.input.value = '';
+        autoGrowInput(); // collapse back to one row after send
         submitMessage(message);
     }
 
@@ -691,6 +716,8 @@
 
         // Events.
         els.form.addEventListener('submit', onSubmit);
+        els.input.addEventListener('input', autoGrowInput);
+        els.input.addEventListener('keydown', onInputKeydown);
         els.clear.addEventListener('click', onClear);
         els.close.addEventListener('click', closeSidebar);
         if (toggleBtn) {

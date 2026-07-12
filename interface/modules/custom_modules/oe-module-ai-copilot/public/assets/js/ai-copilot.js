@@ -510,30 +510,112 @@
         return spaced.charAt(0).toUpperCase() + spaced.slice(1);
     }
 
-    // Render one citation as a <cite> chip: resource-type badge, the record's own name + key date,
-    // and the grounded field value. A claim can draw on more than one record, so this is called once
-    // per citation (the primary `source` and each `supporting` entry).
-    function renderCitation(source) {
-        source = source || {};
-        var cite = document.createElement('cite');
-        cite.className = 'ai-copilot__citation';
+    /**
+     * Format a record's key date for display: "2026-06-03T00:00:00+00:00" -> "Jun 3, 2026".
+     *
+     * Always formats in UTC. A date-only or midnight-UTC FHIR value (…T00:00:00+00:00) would
+     * otherwise render as the *previous* calendar day for any browser west of UTC — the classic
+     * off-by-one. Clinical record dates are day-granular, so UTC day is the right unit.
+     *
+     * @param {string} raw the record's date string as stamped by the agent
+     * @returns {string} a human date, or the input verbatim if it isn't a parseable date
+     */
+    function formatCitationDate(raw) {
+        if (!raw) {
+            return '';
+        }
+        var ms = Date.parse(raw);
+        if (isNaN(ms)) {
+            return String(raw);                   // unrecognized format: show verbatim, never "Invalid Date"
+        }
+        try {
+            return new Intl.DateTimeFormat('en-US', {
+                year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
+            }).format(new Date(ms));
+        } catch (e) {
+            return String(raw);
+        }
+    }
 
-        // Show a human source label ("Allergy intolerance"), not the raw FHIR UUID, which is
-        // clinician-noise. Keep the full `Type/id` reference in attributes for hover + audit.
-        var resource = document.createElement('span');
-        resource.className = 'ai-copilot__citation-resource';
-        resource.textContent = humanizeToken(source.resource_type);
+    // Stamp the full `Type/id` reference onto a citation element for hover + audit (and, for
+    // documents, as the hook the deep-link click handler reads).
+    function tagResourceRef(cite, source) {
         if (source.resource_type && source.resource_id) {
             var ref = source.resource_type + '/' + source.resource_id;
             cite.title = ref;
             cite.setAttribute('data-resource-ref', ref);
         }
+    }
+
+    /**
+     * Render a document/note citation: an evidence-forward chip that leads with the record's own
+     * name ("Progress Note") and shows the verbatim note span (`quote`) that grounds the claim.
+     *
+     * The FHIR-type word ("Document reference") is clinician-noise here — it just duplicates the
+     * note-type label — so it lives only in title/data-resource-ref, not as a visible badge. The
+     * quote is the point: the gate already proved it is a real substring of the fetched note, so
+     * showing it lets the physician read the record's own words instead of trusting the paraphrase.
+     *
+     * @param {object} source the citation's SourceRef
+     * @returns {HTMLElement} a <cite> chip
+     */
+    function renderDocumentCitation(source) {
+        var cite = document.createElement('cite');
+        cite.className = 'ai-copilot__citation ai-copilot__citation--note';
+        tagResourceRef(cite, source);
+
+        // Header row: the record's own name + its key date.
+        var header = document.createElement('span');
+        header.className = 'ai-copilot__citation-header';
+
+        var name = document.createElement('span');
+        name.className = 'ai-copilot__citation-name';
+        name.textContent = (source.label && source.label !== source.value)
+            ? source.label
+            : humanizeToken(source.resource_type);
+        header.appendChild(name);
+
+        if (source.date && source.date !== source.value) {
+            var when = document.createElement('span');
+            when.className = 'ai-copilot__citation-date';
+            var pretty = formatCitationDate(source.date);
+            when.textContent = source.date_label ? source.date_label + ' ' + pretty : pretty;
+            header.appendChild(when);
+        }
+        cite.appendChild(header);
+
+        if (source.quote) {
+            var quote = document.createElement('blockquote');
+            quote.className = 'ai-copilot__citation-quote';
+            quote.textContent = source.quote;
+            cite.appendChild(quote);
+        }
+
+        return cite;
+    }
+
+    /**
+     * Render a coded (structured-resource) citation: a resource-type badge ("Condition"), the
+     * record's own name + key date ("Asthma", "Onset 2019-04-02"), and the grounded field value.
+     * Unlike a document, the type badge here is informative — it names the *kind* of record, which
+     * the record's own name does not — so it stays.
+     *
+     * @param {object} source the citation's SourceRef
+     * @returns {HTMLElement} a <cite> chip
+     */
+    function renderCodedCitation(source) {
+        var cite = document.createElement('cite');
+        cite.className = 'ai-copilot__citation';
+        tagResourceRef(cite, source);
+
+        var resource = document.createElement('span');
+        resource.className = 'ai-copilot__citation-resource';
+        resource.textContent = humanizeToken(source.resource_type);
         cite.appendChild(resource);
 
-        // The record's own name ("Asthma") + key date, stamped from the cited record by the agent
-        // (never model-authored). This ties the proof to the *specific* record, not just its type.
-        // Skip either when it merely repeats the cited field value (e.g. an encounter whose cited
-        // field IS its start date) so the chip doesn't say the same thing twice.
+        // The record's own name + key date, stamped from the cited record by the agent (never
+        // model-authored). Skip either when it merely repeats the cited field value (e.g. an
+        // encounter whose cited field IS its start date) so the chip doesn't say the same thing twice.
         if (source.label && source.label !== source.value) {
             var name = document.createElement('span');
             name.className = 'ai-copilot__citation-name';
@@ -543,7 +625,8 @@
         if (source.date && source.date !== source.value) {
             var when = document.createElement('span');
             when.className = 'ai-copilot__citation-date';
-            when.textContent = source.date_label ? source.date_label + ' ' + source.date : source.date;
+            var pretty = formatCitationDate(source.date);
+            when.textContent = source.date_label ? source.date_label + ' ' + pretty : pretty;
             cite.appendChild(when);
         }
 
@@ -557,6 +640,18 @@
         }
 
         return cite;
+    }
+
+    // Render one citation as a <cite> chip. Documents/notes get the evidence-forward treatment
+    // (name-led, verbatim quote); every other resource keeps the coded chip with its type badge. A
+    // claim can draw on more than one record, so this runs once per citation (primary `source` +
+    // each supporting).
+    function renderCitation(source) {
+        source = source || {};
+        if (source.resource_type === 'DocumentReference') {
+            return renderDocumentCitation(source);
+        }
+        return renderCodedCitation(source);
     }
 
     function renderClaim(claim) {

@@ -325,13 +325,47 @@
         appendNode(el);
     }
 
+    // The Co-Pilot spark, matching the banner toggle's icon. Built with the SVG namespace (not
+    // innerHTML) so it needs no HTML sanitising and satisfies the no-inner-html lint rule.
+    var AVATAR_PATH = 'M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z';
+
+    /**
+     * Build the small Co-Pilot avatar that leads every assistant turn (answer or pending), marking
+     * it as the assistant speaking — the counterpart to the physician's right-aligned question bubble.
+     *
+     * @returns {HTMLElement} A decorative avatar span (aria-hidden — the turn's text is the content).
+     */
+    function buildAvatar() {
+        var ns = 'http://www.w3.org/2000/svg';
+        var avatar = document.createElement('span');
+        avatar.className = 'ai-copilot__avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+
+        var svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        var path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', AVATAR_PATH);
+        svg.appendChild(path);
+        avatar.appendChild(svg);
+        return avatar;
+    }
+
+    // Wrap an assistant-side node (answer bubble or pending indicator) in an avatar-led row.
+    function assistantTurn(bubble) {
+        var row = document.createElement('div');
+        row.className = 'ai-copilot__turn';
+        row.appendChild(buildAvatar());
+        row.appendChild(bubble);
+        return row;
+    }
+
     /**
      * Show the in-flight indicator between the question and the answer (spec §5.3.1): an animated
-     * typing indicator plus an optional grounded caption. Returned so the caller can swap it for the
-     * answer (or an error) when the turn resolves. This node is the seam a future streaming increment
-     * fills token-by-token.
+     * typing indicator plus an optional grounded caption, led by the Co-Pilot avatar. The whole row
+     * is returned so the caller can swap it for the answer (or an error) when the turn resolves; the
+     * inner ``.ai-copilot__pending`` bubble is the seam a future streaming increment fills.
      *
-     * @returns {HTMLElement} The pending-turn node, already appended to the transcript.
+     * @returns {HTMLElement} The pending-turn row, already appended to the transcript.
      */
     function appendPending() {
         var pending = document.createElement('div');
@@ -354,8 +388,9 @@
             pending.appendChild(caption);
         }
 
-        appendNode(pending);
-        return pending;
+        var row = assistantTurn(pending);
+        appendNode(row);
+        return row;
     }
 
     function removePending(pending) {
@@ -403,7 +438,7 @@
         if (followUps) {
             wrapper.appendChild(followUps);
         }
-        appendNode(wrapper);
+        appendNode(assistantTurn(wrapper));
     }
 
     /**

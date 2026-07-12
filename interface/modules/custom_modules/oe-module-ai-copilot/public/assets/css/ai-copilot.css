@@ -45,10 +45,13 @@ body.ai-copilot-resizing {
     --copilot-space-4: 1rem;
 
     --copilot-radius: 0.25rem;
+    --copilot-radius-bubble: 0.75rem; /* rounder corner for chat bubbles; site radius stays 0.25rem */
     --copilot-border: #d3d9df;
     --copilot-text: #1f2a33;
     --copilot-muted: #5b6770;
     --copilot-accent: #0b5fa5;
+    /* Lighter accent tint used only for the assistant-avatar gradient's top stop. */
+    --copilot-accent-light: #1f7ac2;
     --copilot-error: #a32020;
     --copilot-surface: #ffffff;
     --copilot-surface-alt: #f6f8fa;
@@ -236,14 +239,53 @@ body.ai-copilot-resizing {
     opacity: 0.7;
 }
 
-/* ---- Turns ---- */
+/* ---- Turns (conversational layout) ----
+ *
+ * The transcript reads as a chat: the physician's question is a right-aligned bubble in the site
+ * accent; the assistant's answer sits left, led by a small Co-Pilot avatar, in a bordered bubble.
+ * All colours are the existing module tokens, so it still reads as part of OpenEMR.
+ */
 
 .ai-copilot__question {
+    align-self: flex-end;           /* physician's turn hugs the right, like a sent message */
+    max-width: 85%;
     margin: 0;
     padding: var(--copilot-space-2) var(--copilot-space-3);
-    background: var(--copilot-question-bg);
-    border-radius: var(--copilot-radius);
-    font-weight: 600;
+    background: var(--copilot-accent);
+    color: var(--copilot-surface);  /* white on the site blue */
+    /* Rounded, with a squared bottom-right "tail" toward the composer. */
+    border-radius: var(--copilot-radius-bubble) var(--copilot-radius-bubble)
+        var(--copilot-radius) var(--copilot-radius-bubble);
+    font-weight: 500;
+}
+
+/* Assistant turn: avatar + answer bubble on one row. Wraps the pending indicator and the answer. */
+.ai-copilot__turn {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--copilot-space-2);
+    align-self: stretch;
+}
+
+.ai-copilot__avatar {
+    flex: 0 0 1.5rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-top: 0.125rem; /* nudge down to sit against the first line of the bubble */
+    border-radius: 50%;
+    /* Site accent, lightened at the top for a subtle spherical sheen — no new hue. */
+    background: linear-gradient(140deg, var(--copilot-accent-light), var(--copilot-accent));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--copilot-surface);
+}
+
+.ai-copilot__avatar svg {
+    width: 0.8125rem;
+    height: 0.8125rem;
+    fill: currentColor;
+    display: block;
 }
 
 .ai-copilot__error {
@@ -262,12 +304,16 @@ body.ai-copilot-resizing {
     display: flex;
     align-items: center;
     gap: var(--copilot-space-3);
-    align-self: flex-start; /* hug content, like a chat bubble, rather than span the transcript */
+    /* Hug its content (dots + caption) inside the avatar row, not span it. */
+    flex: 0 1 auto;
     max-width: 100%;
     padding: var(--copilot-space-2) var(--copilot-space-3);
+    /* Surface-alt (a hair greyer than the finished white answer bubble) reads as "still working". */
     background: var(--copilot-surface-alt);
     border: 1px solid var(--copilot-border);
-    border-radius: var(--copilot-radius);
+    /* Match the answer bubble's avatar-side tail. */
+    border-radius: var(--copilot-radius) var(--copilot-radius-bubble)
+        var(--copilot-radius-bubble) var(--copilot-radius-bubble);
 }
 
 .ai-copilot__dots {
@@ -321,9 +367,17 @@ body.ai-copilot-resizing {
 }
 
 .ai-copilot__answer {
+    flex: 1 1 auto;
+    min-width: 0; /* let long words / citations wrap inside the flex row rather than overflow */
     display: flex;
     flex-direction: column;
     gap: var(--copilot-space-2);
+    padding: var(--copilot-space-3);
+    background: var(--copilot-surface);
+    border: 1px solid var(--copilot-border);
+    /* Squared top-left "tail" toward the avatar; rounded elsewhere. */
+    border-radius: var(--copilot-radius) var(--copilot-radius-bubble)
+        var(--copilot-radius-bubble) var(--copilot-radius-bubble);
 }
 
 .ai-copilot__summary {

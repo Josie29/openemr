@@ -6,6 +6,12 @@ Analysis** deliverable. These are **estimates from assumed token counts** — re
 the real per-turn tokens/cost the Langfuse instrumentation now records (ARCHITECTURE.md §10)
 once live turns exist.
 
+> **Measured (2026-07-12):** the JOS-18 load test recorded a real per-turn cost of
+> **$0.057 avg** ($0.046 p50 / $0.116 p95 / $0.141 p99) over ~152 live turns — higher than
+> the single-call estimates below because the agentic tool loop resends input across multiple
+> model calls per request. Use the measured figure for JOS-20. See
+> [`loadtest-results.md`](./loadtest-results.md).
+
 **Pricing source:** Anthropic model catalog, verified via the `claude-api` skill on
 2026-07-08. **Verify at build time — prices move.** Sonnet 5 is in an introductory-price
 window ($2/$10 per Mtok) **through 2026-08-31**; it reverts to $3/$15 after. Costs below ignore

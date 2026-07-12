@@ -10,7 +10,9 @@ once live turns exist.
 > **$0.057 avg** ($0.046 p50 / $0.116 p95 / $0.141 p99) over ~152 live turns — higher than
 > the single-call estimates below because the agentic tool loop resends input across multiple
 > model calls per request. Use the measured figure for JOS-20. See
-> [`loadtest-results.md`](./loadtest-results.md).
+> [`loadtest-results.md`](./loadtest-results.md). **Full reconciliation + scale projections:
+> [`cost-analysis.md`](./cost-analysis.md)** (JOS-20) — anchors on the $0.057 load-test base,
+> reconciles the organic Langfuse tail/tier-mix, and projects 100 → 100K users.
 
 **Pricing source:** Anthropic model catalog, verified via the `claude-api` skill on
 2026-07-08. **Verify at build time — prices move.** Sonnet 5 is in an introductory-price

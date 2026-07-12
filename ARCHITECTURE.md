@@ -412,7 +412,8 @@ deliberate design decisions documented alongside the suite.
 
 ## 12. Scale & cost trajectory
 
-*(Brief — the full numbers are the separate AI Cost Analysis deliverable; this is the
+*(Brief — the full numbers are the separate AI Cost Analysis deliverable
+([`context/planning/cost-analysis.md`](context/planning/cost-analysis.md)); this is the
 architectural view.)*
 
 The Interview asks how this scales to a 500-bed hospital with ~300 concurrent clinical

@@ -1,6 +1,6 @@
 from datetime import date
 
-from copilot.fhir.models import PatientDemographics
+from copilot.fhir.models import Allergy, NoteContent, PatientDemographics, Problem
 from copilot.schemas import ChatResponse, Claim, SourceRef
 from copilot.verification import FetchLog, resolve_claims
 
@@ -74,3 +74,108 @@ def test_claim_without_a_field_is_rejected() -> None:
     )
 
     assert len(offenders) == 1
+
+
+def test_grounded_claim_stamps_the_record_identity_for_the_card() -> None:
+    # Catches the provenance gap where every active Condition rendered an identical
+    # "Condition — Clinical status: active" card: the specific record's name and onset date must be
+    # stamped from the fetched record (never the model) so the asthma proof is distinguishable from
+    # any other active condition. If this breaks, proof cards stop naming the record they cite.
+    log = FetchLog()
+    log.record(
+        "Condition",
+        "c1",
+        Problem(
+            resource_id="c1",
+            display="Asthma",
+            code="195967001",
+            clinical_status="active",
+            onset_date="2019-04-02",
+        ),
+    )
+
+    grounded, offenders = resolve_claims(
+        ChatResponse(
+            summary="...",
+            claims=[
+                _claim(
+                    "Asthma is active",
+                    "clinical_status",
+                    resource_type="Condition",
+                    resource_id="c1",
+                )
+            ],
+        ),
+        log,
+    )
+
+    assert offenders == []
+    source = grounded.claims[0].source
+    assert source.label == "Asthma"
+    assert source.date == "2019-04-02"
+    assert source.date_label == "Onset"
+
+
+def test_identity_omits_a_date_for_records_with_no_single_defining_date() -> None:
+    # An AllergyIntolerance has no onset/authored date in our projection; the card must show the
+    # substance name without inventing a date. Guards against a stray "Date None" on the card or a
+    # crash when date/date_label are absent.
+    log = FetchLog()
+    log.record(
+        "AllergyIntolerance",
+        "a1",
+        Allergy(resource_id="a1", substance="Peanut", clinical_status="active"),
+    )
+
+    grounded, _ = resolve_claims(
+        ChatResponse(
+            summary="...",
+            claims=[
+                _claim(
+                    "Peanut allergy is active",
+                    "clinical_status",
+                    resource_type="AllergyIntolerance",
+                    resource_id="a1",
+                )
+            ],
+        ),
+        log,
+    )
+
+    source = grounded.claims[0].source
+    assert source.label == "Peanut"
+    assert source.date is None
+    assert source.date_label is None
+
+
+def test_note_quote_citation_is_stamped_with_the_note_identity() -> None:
+    # A free-text note citation grounds via the verbatim quote, not a field; the card still needs to
+    # name which note (type + date). Guards that identity stamping covers the quote-mode branch, not
+    # just structured-field citations.
+    log = FetchLog()
+    log.record(
+        "DocumentReference",
+        "d1",
+        NoteContent(
+            resource_id="d1",
+            type_display="Progress note",
+            date="2026-01-15",
+            text="Patient reports wheezing at night.",
+        ),
+    )
+    claim = Claim(
+        text="Patient reported nocturnal wheezing",
+        source=SourceRef(
+            resource_type="DocumentReference", resource_id="d1", quote="wheezing at night"
+        ),
+    )
+
+    grounded, offenders = resolve_claims(
+        ChatResponse(summary="...", claims=[claim]),
+        log,
+    )
+
+    assert offenders == []
+    source = grounded.claims[0].source
+    assert source.label == "Progress note"
+    assert source.date == "2026-01-15"

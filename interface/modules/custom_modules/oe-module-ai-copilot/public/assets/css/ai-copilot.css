@@ -207,6 +207,35 @@ body.ai-copilot-resizing {
     background: var(--copilot-question-bg);
 }
 
+/* ---- Per-answer follow-up suggestions ---- *
+ *
+ * Agent-proposed next questions, shown under an answer as tappable chips. Separated from the answer
+ * body by a hairline rule and a label so they read as "here's what to ask next", not part of the
+ * prose. Reuses the starter-chip shape; the leading arrow marks them as a forward action.
+ */
+
+.ai-copilot__followups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--copilot-space-2);
+    margin-top: var(--copilot-space-1);
+    padding-top: var(--copilot-space-3);
+    border-top: 1px solid var(--copilot-border);
+}
+
+.ai-copilot__followups-label {
+    flex-basis: 100%; /* force the chips onto the row below the heading */
+    margin: 0;
+    color: var(--copilot-muted);
+    font-size: var(--copilot-font-sm);
+    font-weight: 600;
+}
+
+.ai-copilot__chip--followup::before {
+    content: "\2192\00a0"; /* rightwards arrow + non-breaking space: signals "ask this next" */
+    opacity: 0.7;
+}
+
 /* ---- Turns ---- */
 
 .ai-copilot__question {

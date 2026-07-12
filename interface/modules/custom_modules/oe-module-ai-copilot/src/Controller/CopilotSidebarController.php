@@ -102,6 +102,8 @@ final readonly class CopilotSidebarController
             // Caption under the animated indicator while a turn is in flight (spec §5.3.1).
             'data-label-thinking="' . xla('Checking the record...') . '"',
             'data-label-has-conversation="' . xla('You have a saved conversation for this patient') . '"',
+            // Heading over the agent-proposed follow-up chips shown under each answer.
+            'data-label-follow-ups="' . xla('Ask next') . '"',
         ]);
 
         $chips = $this->renderStarterChips();

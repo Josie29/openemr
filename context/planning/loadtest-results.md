@@ -1,7 +1,8 @@
 # Load / Stress Test Results — Co-Pilot `/chat`
 
-**Issue:** JOS-18 (Load/stress tests: 10 & 50 concurrent users → p50/p95/p99 + error rate)
-**Feeds:** JOS-20 (AI cost analysis) and the PRD "baseline infrastructure profiles" requirement.
+**Issues:** JOS-18 (Load/stress tests: 10 & 50 concurrent users → p50/p95/p99 + error rate);
+JOS-19 (Baseline infrastructure profiles under load — see the profiles section below).
+**Feeds:** JOS-20 (AI cost analysis).
 **Run date:** 2026-07-12, ~09:38–09:44 CDT (14:38–14:44 UTC)
 **Target:** deployed prod agent `https://copilot-agent-production-eb24.up.railway.app` (`POST /chat`)
 **Patient:** Adrian Becker (`a234013f-932b-434c-8f21-9edc54ff3892`), SMART patient-scoped token.
@@ -42,22 +43,35 @@ histogram-approximated percentiles, hence the rounded values.
 
 (Request counts are final-flush totals; a few in-flight requests at shutdown are excluded.)
 
-## Baseline infrastructure profiles
+## Baseline infrastructure profiles (JOS-19)
 
-Railway service metrics over the run window (1h lookback, 60s samples). `copilot-agent`
-handled only the load and its numbers are clean; the `openemr` memory peak also reflects a
-pre-run redeploy/boot, so it overstates load-driven usage.
+Railway service metrics for all three services in the stack, 1h lookback at 60s samples,
+spanning the load-test window. **The test was the only sustained load in the window, so the
+`peak` column is the "under load" signal**; `avg` is diluted by idle minutes on either side.
+Together with the latency (p50/p95/p99) and throughput (req/s) in the Results table above,
+this covers all four dimensions the requirement names (CPU, memory, latency, throughput).
 
-| Service        | CPU avg / peak (vCPU) | Memory avg / peak (GB) | Network TX peak |
-|----------------|-----------------------|------------------------|-----------------|
-| copilot-agent  | 0.009 / **0.31**      | 0.15 / **0.26**        | 0.054 GB/min    |
-| openemr        | 0.059 / 0.93          | 1.32 / 5.73*           | —               |
+| Service        | CPU avg / peak (vCPU) | Memory avg / peak (GB) | Net RX peak (GB/min) | Net TX peak (GB/min) |
+|----------------|-----------------------|------------------------|----------------------|----------------------|
+| copilot-agent  | 0.009 / **0.31**      | 0.16 / **0.26**        | 0.015                | 0.054                |
+| openemr        | 0.059 / **0.93**      | 1.58 / 5.73\*          | 0.434                | 0.009                |
+| MySQL          | 0.022 / **0.80**      | 0.93 / 1.08            | —                    | —                    |
 
-\* openemr peak memory includes the redeploy that preceded the run, not purely load.
+\* openemr's 5.73 GB memory peak includes a redeploy/boot that preceded the run; load-driven
+memory sat in the ~1–3 GB range. copilot-agent and MySQL figures are clean of that.
 
-**Reading:** at 50 concurrent users the agent used ~1/3 of a single vCPU and ~260 MB. The
-compute bottleneck is not the agent process — it is LLM provider latency/concurrency and the
-downstream OpenEMR FHIR calls. A single Railway replica absorbed the load without autoscaling.
+**Reading:**
+- **The agent process is the cheapest tier under load** — 0.31 vCPU / 0.26 GB at 50 concurrent
+  users. It spends each request waiting on the LLM, not computing.
+- **The load lands hardest on the FHIR data path.** openemr peaked at 0.93 vCPU and MySQL at
+  0.80 vCPU because each `/chat` fans out to multiple FHIR reads. This — not the agent — is the
+  infra pressure point and the first thing to scale for more concurrency.
+- A single Railway replica per service absorbed 50 concurrent users without autoscaling.
+
+**Using this as a comparison baseline:** re-run `agent/loadtest/run.sh` after any agent or
+infra change and diff the new numbers against this table plus the latency/throughput results
+above. A regression shows up as higher peak CPU/memory at equal concurrency, or degraded
+p95/p99 latency and throughput.
 
 ## Cost (measured)
 

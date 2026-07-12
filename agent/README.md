@@ -1,9 +1,10 @@
 # AgentForge Clinical Co-Pilot — agent service
 
-The standalone Python agent service from `ARCHITECTURE.md` (Option D). This is the **walking
-skeleton** (implementation prompt `context/execution/implementation-prompt-01-walking-skeleton.md`): one
-end-to-end turn — `POST /chat` → correlation ID → one FHIR tool → Claude → verification gate →
-grounded structured answer → Langfuse trace — plus real `/health` and `/ready` probes.
+The standalone Python agent service from `ARCHITECTURE.md` (Option D). It grew out of a **walking
+skeleton** (implementation prompt `context/execution/implementation-prompt-01-walking-skeleton.md`)
+and now runs the full turn: `POST /chat` → correlation ID → FHIR tools → Claude → deterministic
+verification gate → grounded structured answer with follow-ups → Langfuse trace (tokens, cost,
+verification score) — plus real `/health` and `/ready` probes and a Langfuse eval harness.
 
 Six FHIR read tools are wired — `get_patient` (`Patient`), `get_problems` (`Condition`),
 `get_medications` (`MedicationRequest`, deduplicated), `get_allergies` (`AllergyIntolerance`),
@@ -12,11 +13,14 @@ free-text clinical note for one visit, base64-decoded) — covering UC-1 orienta
 cross-referencing, and UC-3 note drill-down. Reads run under a **per-request patient-scoped token**
 (the `Authorization: Bearer` header the PHP module sends; see
 [Chat API contract](#chat-api-contract)), and **multi-turn conversations** are supported with
-server-side history (also in the contract). The verification gate grounds every claim
+server-side history (also in the contract). Answers carry **follow-up suggestions**, and every
+turn is **cost-scored** to Langfuse. The runtime verification gate grounds every claim
 **deterministically**: a structured claim cites a fetched field; a note claim cites a **verbatim
-quote** checked as a substring of the note text. Faithfulness (a Haiku entailment judge), domain
-constraints, SSE streaming, model tiering, and evals are follow-up increments. See
-`context/decisions/agent-workflow.md`.
+quote** checked as a substring of the note text — plus domain constraints (UC-4 flags are
+candidates for review, never asserted). **Faithfulness** (a Haiku 4.5 entailment judge) runs in
+the **eval harness** (`src/copilot/evals/`), *not* the runtime path. SSE streaming and dynamic
+model-tier routing remain follow-up increments — the service runs a single tier (Sonnet 5) per
+deploy. See `context/decisions/agent-workflow.md`.
 
 ## How a turn flows
 
@@ -54,13 +58,16 @@ flowchart TD
 src/copilot/
   main.py          FastAPI app, routes, middleware wiring
   config.py        pydantic-settings; all config/secrets from env (COPILOT_ prefix)
-  schemas.py       ChatRequest / ChatResponse / Claim / SourceRef contracts
-  agent.py         Pydantic AI agent: get_patient tool + output_validator gate
+  schemas.py       ChatRequest / ChatResponse / Claim / SourceRef contracts (+ follow_ups)
+  agent.py         Pydantic AI agent: six FHIR tools + deterministic output_validator gate
   verification.py  FetchLog + field-level grounding & value stamping (ARCHITECTURE.md §7)
+  conversation.py  in-memory multi-turn ConversationStore (per user+patient; TTL + LRU bounded)
+  pricing.py       model-tier pricing tables + per-turn cost (turn_cost_usd)
   correlation.py   X-Correlation-ID middleware
-  observability.py Langfuse + Pydantic AI instrumentation; chat-turn span + verification score
+  observability.py Langfuse + Pydantic AI instrumentation; chat-turn span + verification & cost scores
   health.py        /health + /ready dependency probes
   fhir/            FhirClient protocol, httpx impl, fixture impl, PatientDemographics
+  evals/           Langfuse-hosted eval dataset, cases, deterministic + Haiku-judge evaluators
 tests/             deterministic tests (fixtures + FunctionModel; no live LLM/FHIR)
 ```
 
@@ -148,8 +155,8 @@ Content-Type: application/json
   expired id → **`404`** (start a new conversation).
 - In `fixture` mode the header is ignored (no token exists) and the bundled seed patient is served,
   so local dev needs no token.
-- Response: `200` with `{summary, claims[], conversation_id}` (each claim carries a code-stamped
-  `source`), or a refusal / `401` / `403` / `404` / `502` per ARCHITECTURE.md §8.
+- Response: `200` with `{summary, claims[], follow_ups[], conversation_id}` (each claim carries a
+  code-stamped `source`), or a refusal / `401` / `403` / `404` / `502` per ARCHITECTURE.md §8.
 
 ## Demo without the module (fixture toggle)
 
@@ -165,7 +172,7 @@ curl -X POST https://<agent-domain>/chat -H 'content-type: application/json' \
 railway variables --set COPILOT_FHIR_CLIENT_MODE=http --service copilot-agent      # flip back to real FHIR
 ```
 
-Fixture mode exercises the full pipeline (Claude · 5 tools · grounding gate · Langfuse trace) on
+Fixture mode exercises the full pipeline (Claude · 6 tools · grounding gate · Langfuse trace) on
 seed data; it does **not** hit live FHIR or the auth path. Default the deployed service to `http`.
 
 ## Deploy (Railway)
@@ -221,6 +228,7 @@ traces. Repeat until working fully.
   that touch contracts, the authorization gate, or anything security-relevant — an autonomous
   loop should harden the agent, not quietly rewrite its trust boundary.
 
-**Status:** planned — pending the Langfuse MCP wiring and an eval suite (`-02`) to anchor the
-exit signal. The observability half (traces, scores, correlation IDs) is already in place, so
-the loop has real signal to consume the moment it's turned on.
+**Status:** planned — pending the Langfuse MCP wiring and the `/loop` driver. The two pieces
+this loop needs as its exit signal are **already in place**: the observability half (traces,
+scores, correlation IDs) and the eval suite (`src/copilot/evals/`, run in CI). So the loop has
+real signal to consume the moment it's turned on.

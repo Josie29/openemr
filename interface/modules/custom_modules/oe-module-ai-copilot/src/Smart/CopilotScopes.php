@@ -45,6 +45,7 @@ final readonly class CopilotScopes
         'patient/MedicationRequest.read',
         'patient/AllergyIntolerance.read',
         'patient/Encounter.read',
+        'patient/DocumentReference.read',
     ];
 
     /** The space-delimited form used in the `scope` query parameter and the client registration. */

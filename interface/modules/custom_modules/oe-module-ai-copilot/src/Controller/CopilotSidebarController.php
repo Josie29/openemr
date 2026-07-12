@@ -86,7 +86,7 @@ final readonly class CopilotSidebarController
         $title = xlt('Clinical Co-Pilot');
         $toggleLabel = xlt('Co-Pilot');
         $placeholder = xla('Ask about this patient...');
-        $sendLabel = xlt('Send');
+        $sendLabel = xlt('Ask');
         $clearLabel = xlt('Clear');
         $closeLabel = xla('Close Co-Pilot');
         $resizeLabel = xla('Resize Co-Pilot');
@@ -102,9 +102,16 @@ final readonly class CopilotSidebarController
             // Caption under the animated indicator while a turn is in flight (spec §5.3.1).
             'data-label-thinking="' . xla('Checking the record...') . '"',
             'data-label-has-conversation="' . xla('You have a saved conversation for this patient') . '"',
+            // Heading over the agent-proposed follow-up chips shown under each answer.
+            'data-label-follow-ups="' . xla('Ask next') . '"',
         ]);
 
         $chips = $this->renderStarterChips();
+
+        // The Co-Pilot spark, matching the banner toggle and the JS-built answer avatars. Static
+        // markup (no user data), so it is safe to inline into the heredoc.
+        $spark = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+            . '<path d="M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z"/></svg>';
 
         return <<<HTML
             <aside
@@ -147,21 +154,26 @@ final readonly class CopilotSidebarController
                 </header>
                 <div class="ai-copilot__transcript" id="ai-copilot-transcript">
                     <div class="ai-copilot__empty" id="ai-copilot-empty">
-                        <p class="ai-copilot__intro">{$introLabel}</p>
-                        <ul class="ai-copilot__chips" id="ai-copilot-chips">
-                            {$chips}
-                        </ul>
+                        <div class="ai-copilot__turn">
+                            <span class="ai-copilot__avatar" aria-hidden="true">{$spark}</span>
+                            <div class="ai-copilot__answer ai-copilot__welcome">
+                                <p class="ai-copilot__intro">{$introLabel}</p>
+                                <ul class="ai-copilot__chips" id="ai-copilot-chips">
+                                    {$chips}
+                                </ul>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <form class="ai-copilot__composer" id="ai-copilot-form">
                     <label class="sr-only" for="ai-copilot-input">{$placeholder}</label>
-                    <input
+                    <textarea
                         class="ai-copilot__input form-control"
                         id="ai-copilot-input"
-                        type="text"
+                        rows="1"
                         autocomplete="off"
                         placeholder="{$placeholder}"
-                    >
+                    ></textarea>
                     <button class="ai-copilot__send btn btn-primary" id="ai-copilot-send" type="submit">
                         {$sendLabel}
                     </button>

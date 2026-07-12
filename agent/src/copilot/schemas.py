@@ -1,4 +1,3 @@
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -37,6 +36,21 @@ class SourceRef(BaseModel):
         default=None,
         description="The actual record value. Leave empty — the system fills this from the record.",
     )
+    label: str | None = Field(
+        default=None,
+        description=(
+            "The record's human-recognizable name (e.g. 'Asthma'). Leave empty — the system fills "
+            "it from the cited record so the card names the specific record, not just its type."
+        ),
+    )
+    date: str | None = Field(
+        default=None,
+        description="The cited record's key date (e.g. onset). Leave empty — the system fills it.",
+    )
+    date_label: str | None = Field(
+        default=None,
+        description="What `date` means for this record (e.g. 'Onset'). Leave empty — system-set.",
+    )
 
 
 class Claim(BaseModel):
@@ -49,7 +63,17 @@ class Claim(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     text: str = Field(description="The factual statement, phrased for the physician")
-    source: SourceRef = Field(description="The record this statement is traceable to")
+    source: SourceRef = Field(description="The primary record this statement is traceable to")
+    supporting: list[SourceRef] = Field(
+        default_factory=list,
+        description=(
+            "Any ADDITIONAL records this statement also draws on, beyond `source`. If a statement "
+            "mentions more than one record (say a visit and a diagnosis), cite the primary one in "
+            "`source` and every other one here; the gate verifies all of them, so an uncited or "
+            "merely-inferred record is rejected. Prefer atomic statements about one record; leave "
+            "this empty then."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):
@@ -57,11 +81,22 @@ class ChatResponse(BaseModel):
 
     Every factual assertion lives in ``claims`` with a citation; ``summary`` is the
     human-facing prose the physician reads, which must not assert anything not covered by a
-    claim. The verification gate runs over ``claims``.
+    claim. The verification gate runs over ``claims``. ``follow_ups`` are suggested next
+    questions — not factual assertions — so the gate does not touch them.
     """
 
     summary: str = Field(description="Short prose orientation for the physician")
     claims: list[Claim] = Field(description="Every factual statement, each citing a source")
+    follow_ups: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Two or three short next questions this physician is most likely to ask given THIS "
+            "patient and THIS answer — the natural next click, phrased as the physician would type "
+            "it (e.g. 'Is the epinephrine auto-injector current?'). Each must be answerable from "
+            "this patient's record via the available tools. Omit rather than pad; leave empty when "
+            "nothing meaningful follows."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):

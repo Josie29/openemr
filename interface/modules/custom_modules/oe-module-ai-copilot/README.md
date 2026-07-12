@@ -95,7 +95,7 @@ Administration → Config → **Connectors**, or `interface/smart/register-app.p
   ```
   openid fhirUser online_access launch
   patient/Patient.read patient/Condition.read patient/MedicationRequest.read
-  patient/AllergyIntolerance.read patient/Encounter.read
+  patient/AllergyIntolerance.read patient/Encounter.read patient/DocumentReference.read
   ```
 
 > **`launch`, never `launch/patient`.** Two independent reasons, both verified against core:

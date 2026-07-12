@@ -196,6 +196,7 @@
             // storage unavailable -> just skip persistence
         }
         els.input.focus();
+        autoGrowInput(); // size a restored draft correctly on open
     }
 
     function closeSidebar() {
@@ -324,13 +325,47 @@
         appendNode(el);
     }
 
+    // The Co-Pilot spark, matching the banner toggle's icon. Built with the SVG namespace (not
+    // innerHTML) so it needs no HTML sanitising and satisfies the no-inner-html lint rule.
+    var AVATAR_PATH = 'M12 2c.5 4 1 6.5 10 10-9 3.5-9.5 6-10 10-.5-4-1-6.5-10-10 9-3.5 9.5-6 10-10z';
+
+    /**
+     * Build the small Co-Pilot avatar that leads every assistant turn (answer or pending), marking
+     * it as the assistant speaking — the counterpart to the physician's right-aligned question bubble.
+     *
+     * @returns {HTMLElement} A decorative avatar span (aria-hidden — the turn's text is the content).
+     */
+    function buildAvatar() {
+        var ns = 'http://www.w3.org/2000/svg';
+        var avatar = document.createElement('span');
+        avatar.className = 'ai-copilot__avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+
+        var svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        var path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', AVATAR_PATH);
+        svg.appendChild(path);
+        avatar.appendChild(svg);
+        return avatar;
+    }
+
+    // Wrap an assistant-side node (answer bubble or pending indicator) in an avatar-led row.
+    function assistantTurn(bubble) {
+        var row = document.createElement('div');
+        row.className = 'ai-copilot__turn';
+        row.appendChild(buildAvatar());
+        row.appendChild(bubble);
+        return row;
+    }
+
     /**
      * Show the in-flight indicator between the question and the answer (spec §5.3.1): an animated
-     * typing indicator plus an optional grounded caption. Returned so the caller can swap it for the
-     * answer (or an error) when the turn resolves. This node is the seam a future streaming increment
-     * fills token-by-token.
+     * typing indicator plus an optional grounded caption, led by the Co-Pilot avatar. The whole row
+     * is returned so the caller can swap it for the answer (or an error) when the turn resolves; the
+     * inner ``.ai-copilot__pending`` bubble is the seam a future streaming increment fills.
      *
-     * @returns {HTMLElement} The pending-turn node, already appended to the transcript.
+     * @returns {HTMLElement} The pending-turn row, already appended to the transcript.
      */
     function appendPending() {
         var pending = document.createElement('div');
@@ -353,8 +388,9 @@
             pending.appendChild(caption);
         }
 
-        appendNode(pending);
-        return pending;
+        var row = assistantTurn(pending);
+        appendNode(row);
+        return row;
     }
 
     function removePending(pending) {
@@ -397,7 +433,62 @@
             details.appendChild(list);
             wrapper.appendChild(details);
         }
-        appendNode(wrapper);
+
+        var followUps = renderFollowUps(answer.follow_ups);
+        if (followUps) {
+            wrapper.appendChild(followUps);
+        }
+        appendNode(assistantTurn(wrapper));
+    }
+
+    /**
+     * Build the per-answer follow-up suggestions: agent-proposed next questions, rendered as chips
+     * that populate the composer on click (never auto-send, matching the starter chips / spec §6).
+     * Only the latest answer carries these; removeFollowUps() clears prior ones when a new turn
+     * starts, so the panel never accumulates stale suggestions.
+     *
+     * @param {Array<string>|undefined} suggestions The `follow_ups` strings from the answer payload.
+     * @returns {HTMLElement|null} The follow-ups block, or null when there is nothing to suggest.
+     */
+    function renderFollowUps(suggestions) {
+        var prompts = Array.isArray(suggestions)
+            ? suggestions.filter(function (s) { return typeof s === 'string' && s.trim() !== ''; })
+            : [];
+        if (prompts.length === 0) {
+            return null;
+        }
+
+        var block = document.createElement('div');
+        block.className = 'ai-copilot__followups';
+        // A labelled group so screen readers announce these as suggested questions, not stray buttons.
+        block.setAttribute('role', 'group');
+        if (labels.followUps) {
+            block.setAttribute('aria-label', labels.followUps);
+            var heading = document.createElement('p');
+            heading.className = 'ai-copilot__followups-label';
+            heading.textContent = labels.followUps;
+            block.appendChild(heading);
+        }
+
+        prompts.forEach(function (prompt) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'ai-copilot__chip ai-copilot__chip--followup';
+            chip.setAttribute('data-prompt', prompt);
+            chip.textContent = prompt;
+            wireChip(chip);
+            block.appendChild(chip);
+        });
+        return block;
+    }
+
+    // Drop any prior answer's follow-up chips: they were suggestions for the previous turn, so once
+    // the physician asks something new they are stale. Keeps only the newest answer's suggestions.
+    function removeFollowUps() {
+        var blocks = els.transcript.querySelectorAll('.ai-copilot__followups');
+        Array.prototype.forEach.call(blocks, function (block) {
+            block.remove();
+        });
     }
 
     /**
@@ -419,16 +510,11 @@
         return spaced.charAt(0).toUpperCase() + spaced.slice(1);
     }
 
-    function renderClaim(claim) {
-        var item = document.createElement('li');
-        item.className = 'ai-copilot__claim';
-
-        var text = document.createElement('span');
-        text.className = 'ai-copilot__claim-text';
-        text.textContent = claim.text;
-        item.appendChild(text);
-
-        var source = claim.source || {};
+    // Render one citation as a <cite> chip: resource-type badge, the record's own name + key date,
+    // and the grounded field value. A claim can draw on more than one record, so this is called once
+    // per citation (the primary `source` and each `supporting` entry).
+    function renderCitation(source) {
+        source = source || {};
         var cite = document.createElement('cite');
         cite.className = 'ai-copilot__citation';
 
@@ -444,6 +530,23 @@
         }
         cite.appendChild(resource);
 
+        // The record's own name ("Asthma") + key date, stamped from the cited record by the agent
+        // (never model-authored). This ties the proof to the *specific* record, not just its type.
+        // Skip either when it merely repeats the cited field value (e.g. an encounter whose cited
+        // field IS its start date) so the chip doesn't say the same thing twice.
+        if (source.label && source.label !== source.value) {
+            var name = document.createElement('span');
+            name.className = 'ai-copilot__citation-name';
+            name.textContent = source.label;
+            cite.appendChild(name);
+        }
+        if (source.date && source.date !== source.value) {
+            var when = document.createElement('span');
+            when.className = 'ai-copilot__citation-date';
+            when.textContent = source.date_label ? source.date_label + ' ' + source.date : source.date;
+            cite.appendChild(when);
+        }
+
         if (source.field) {
             var field = document.createElement('span');
             field.className = 'ai-copilot__citation-field';
@@ -453,7 +556,27 @@
             cite.appendChild(field);
         }
 
-        item.appendChild(cite);
+        return cite;
+    }
+
+    function renderClaim(claim) {
+        var item = document.createElement('li');
+        item.className = 'ai-copilot__claim';
+
+        var text = document.createElement('span');
+        text.className = 'ai-copilot__claim-text';
+        text.textContent = claim.text;
+        item.appendChild(text);
+
+        // Primary citation, then any supporting citations. A statement that draws on more than one
+        // record (a visit and a diagnosis) shows a chip for each, so the physician can see every
+        // record it rests on — and spot when two are unrelated (e.g. different dates).
+        item.appendChild(renderCitation(claim.source));
+        var supporting = claim.supporting || [];
+        for (var i = 0; i < supporting.length; i++) {
+            item.appendChild(renderCitation(supporting[i]));
+        }
+
         return item;
     }
 
@@ -569,6 +692,7 @@
     }
 
     function submitMessage(message) {
+        removeFollowUps(); // the prior answer's suggestions no longer apply to this new question
         appendQuestion(message);
         setBusy(true);
         setStatus('', false);
@@ -624,15 +748,52 @@
 
     // ---- wiring ----------------------------------------------------------
 
+    /**
+     * Copy a prompt into the composer for the physician to review, then focus it.
+     *
+     * Shared by the starter chips and the per-answer follow-up chips: both populate the input and
+     * do NOT auto-send (spec §6) -- the physician always reviews before the record is queried.
+     *
+     * @param {string} prompt The question text to place in the composer.
+     */
+    function populateInput(prompt) {
+        els.input.value = prompt;
+        autoGrowInput(); // size to the (possibly multi-line) chip prompt
+        els.input.focus();
+    }
+
+    // Bind one chip so clicking it populates the composer with its prompt.
+    function wireChip(chip) {
+        chip.addEventListener('click', function () {
+            populateInput(chip.getAttribute('data-prompt') || chip.textContent);
+        });
+    }
+
     function wireChips() {
         var chips = els.transcript.querySelectorAll('.ai-copilot__chip');
-        Array.prototype.forEach.call(chips, function (chip) {
-            chip.addEventListener('click', function () {
-                // Populate the input for review -- do NOT auto-send (spec §6).
-                els.input.value = chip.getAttribute('data-prompt') || chip.textContent;
-                els.input.focus();
-            });
-        });
+        Array.prototype.forEach.call(chips, wireChip);
+    }
+
+    // Grow the textarea to fit its content; CSS max-height + overflow-y cap it.
+    // Setting .value in JS does NOT fire 'input', so callers that assign the value
+    // (send-reset, chip populate, open) must invoke this explicitly.
+    function autoGrowInput() {
+        els.input.style.height = 'auto';
+        els.input.style.height = els.input.scrollHeight + 'px';
+    }
+
+    // Enter sends; Shift+Enter inserts a newline (textarea default).
+    function onInputKeydown(event) {
+        if (event.key !== 'Enter' || event.shiftKey) {
+            return;
+        }
+        // Don't hijack Enter while an IME candidate is being confirmed.
+        if (event.isComposing || event.keyCode === 229) {
+            return;
+        }
+        event.preventDefault();
+        // Reuse the form submit path (same validation/onSubmit; no-op while disabled).
+        els.form.requestSubmit(els.send);
     }
 
     function onSubmit(event) {
@@ -642,6 +803,7 @@
             return;
         }
         els.input.value = '';
+        autoGrowInput(); // collapse back to one row after send
         submitMessage(message);
     }
 
@@ -666,7 +828,8 @@
             unavailable: els.sidebar.dataset.labelUnavailable,
             clearConfirm: els.sidebar.dataset.labelClearConfirm,
             thinking: els.sidebar.dataset.labelThinking,
-            hasConversation: els.sidebar.dataset.labelHasConversation
+            hasConversation: els.sidebar.dataset.labelHasConversation,
+            followUps: els.sidebar.dataset.labelFollowUps
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');
@@ -691,6 +854,8 @@
 
         // Events.
         els.form.addEventListener('submit', onSubmit);
+        els.input.addEventListener('input', autoGrowInput);
+        els.input.addEventListener('keydown', onInputKeydown);
         els.clear.addEventListener('click', onClear);
         els.close.addEventListener('click', closeSidebar);
         if (toggleBtn) {

@@ -124,6 +124,27 @@ def _require_id(resource: dict[str, Any], resource_type: str) -> str:
     return resource_id
 
 
+class ResourceIdentity(BaseModel):
+    """The human-recognizable identity of a fetched resource, for a citation's provenance chip.
+
+    Derived by code from the fetched typed record (never model-authored, same trust rule as a
+    citation's stamped ``value``), this is what lets a reader tie a proof card to the *specific*
+    record it cites — the display name plus the record's key date — rather than only its resource
+    type and one field. Every typed model exposes its own via ``citation_identity``; the
+    verification gate stamps it onto the citation and the sidebar renders it on the evidence card.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    label: str | None = Field(
+        default=None, description="Human-recognizable record name, e.g. 'Asthma'"
+    )
+    date: str | None = Field(default=None, description="The record's key date (ISO), if any")
+    date_label: str | None = Field(
+        default=None, description="What `date` means for this record, e.g. 'Onset'"
+    )
+
+
 class PatientDemographics(BaseModel):
     """Typed projection of a FHIR R4 ``Patient`` resource (ARCHITECTURE.md §4 tool table).
 
@@ -165,6 +186,11 @@ class PatientDemographics(BaseModel):
             birth_date=birth_date,
             gender=resource.get("gender"),
         )
+
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The patient's name — a Patient carries no clinically-relevant 'record date'."""
+        return ResourceIdentity(label=self.full_name)
 
 
 class Problem(BaseModel):
@@ -212,6 +238,11 @@ class Problem(BaseModel):
             clinical_status=_status_code(resource.get("clinicalStatus")),
             onset_date=onset if isinstance(onset, str) else None,
         )
+
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The problem name and its onset date — what identifies this problem-list entry."""
+        return ResourceIdentity(label=self.display, date=self.onset_date, date_label="Onset")
 
 
 class Medication(BaseModel):
@@ -268,6 +299,11 @@ class Medication(BaseModel):
             else None,
         )
 
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The drug name and when it was authored — what identifies this prescription."""
+        return ResourceIdentity(label=self.name, date=self.authored_on, date_label="Authored")
+
 
 class Allergy(BaseModel):
     """Typed projection of a FHIR R4 ``AllergyIntolerance`` (UC-1, UC-4)."""
@@ -308,6 +344,11 @@ class Allergy(BaseModel):
             clinical_status=_status_code(resource.get("clinicalStatus")),
             reactions=_render_reactions(resource.get("reaction")),
         )
+
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The allergen substance — an AllergyIntolerance carries no single defining date."""
+        return ResourceIdentity(label=self.substance)
 
 
 class Encounter(BaseModel):
@@ -360,6 +401,16 @@ class Encounter(BaseModel):
             start_date=period.get("start") if isinstance(period.get("start"), str) else None,
             end_date=period.get("end") if isinstance(period.get("end"), str) else None,
             status=resource.get("status") if isinstance(resource.get("status"), str) else None,
+        )
+
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The visit's real category and its date. OpenEMR hardcodes FHIR ``Encounter.type`` to a
+        generic 'Encounter for check up' for every visit, so it cannot identify a specific one; the
+        true category ('Emergency room admission', 'General examination') rides in the reason.
+        Prefer that, falling back to the type only when no reason is recorded."""
+        return ResourceIdentity(
+            label=self.reason or self.type, date=self.start_date, date_label="Date"
         )
 
 
@@ -461,6 +512,11 @@ class NoteContent(BaseModel):
             status=resource.get("status") if isinstance(resource.get("status"), str) else None,
             text=_decode_note_text(resource.get("content")),
         )
+
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The note type and date. The quote grounds the claim; this just names which note it is."""
+        return ResourceIdentity(label=self.type_display, date=self.date, date_label="Date")
 
 
 def dedup_medications(medications: list[Medication]) -> list[Medication]:

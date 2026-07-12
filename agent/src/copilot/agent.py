@@ -48,6 +48,17 @@ Rules you must follow without exception:
   `field` the statement draws from (e.g. display, name, substance, birth_date, onset_date). If you
   cannot cite a fetched field for a statement, do not make the statement. Leave SourceRef.value
   empty — the system fills it from the record.
+- Cite EVERY record a statement draws on. If a statement mentions more than one record — a visit
+  and a diagnosis, a medication and the problem it treats — put the primary record in `source` and
+  each additional record in `supporting`. The gate verifies all of them, so a record you mention
+  but do not cite (or only inferred) is rejected. Prefer atomic statements about a single record;
+  reach for `supporting` only when one record genuinely cannot be stated without another.
+- Do not assert a RELATIONSHIP between two records — that a visit was *for* a diagnosis, that one
+  problem caused another, that two events are connected — unless a single record's own field states
+  it. Two records that merely share a chart (an emergency visit in January, a diagnosis recorded in
+  July) are separate facts: state each on its own, with its own citation, and let the physician draw
+  the link. Inventing the connective tissue between records is the most common way to slip in a
+  fact the record does not support.
 - For a clinical note (DocumentReference from get_encounter_note), instead of `field` set `quote`
   to the EXACT verbatim text from the note that supports your statement — copy it word-for-word. A
   paraphrase will be rejected, so quote precisely.
@@ -72,6 +83,22 @@ not a template to fill in — infer the right shape from the question:
   allergies, and most recent visit. Do not force every answer into the same mold.
 - Stay short. Do not pad a sparse record to look fuller, and add nothing the claims below do not
   carry — the summary asserts only what those cited claims support.
+
+Follow-up questions — after the answer, propose two or three `follow_ups`: the next questions this
+physician is most likely to ask given THIS patient and THIS answer. They are the natural next click,
+not a menu of everything possible:
+- Make them specific to what you just surfaced. If you flagged a possible NSAID/allergy conflict,
+  a strong follow-up digs into it ("When were the NSAIDs last prescribed?"), not a generic
+  "Summarize recent visits".
+- Phrase each as the physician would type it — short, first-person-implied, no preamble.
+- Only suggest questions answerable from this patient's record via your tools. Do not invent
+  data (labs, imaging) the record may not hold.
+- Prefer fewer, sharper suggestions to three weak ones — but always offer at least one.
+- Even when you could NOT answer this turn (a note was inaccessible, the data is missing), still
+  propose follow-ups: pivot to a nearby question this patient's record CAN answer, so the physician
+  always has a next step (e.g. after "I can't see what precipitated that reaction", suggest
+  "What other visits are documented?" or "Summarize his allergy history"). Only return an empty
+  list in the rare case that the record is so sparse no useful question remains.
 """
 
 
@@ -196,14 +223,18 @@ def build_agent(model: Model | str) -> Agent[CopilotDeps, ChatResponse]:
         grounded, offenders = resolve_claims(output, ctx.deps.fetched)
         if offenders:
             detail = "; ".join(
-                f"claim {c.text!r} cites {c.source.resource_type}/{c.source.resource_id}"
-                f".{c.source.field} which has no value in the data read this turn"
+                f"claim {c.text!r} cites "
+                + ", ".join(
+                    f"{ref.resource_type}/{ref.resource_id}.{ref.field or 'quote'}"
+                    for ref in [c.source, *c.supporting]
+                )
+                + " — one of these was not read this turn or has no value"
                 for c in offenders
             )
             raise ModelRetry(
-                "Every claim must cite a field you actually read via a tool this turn. These do "
-                f"not: {detail}. Re-ground them to a real field, or state the information is not "
-                "available."
+                "Every claim must cite — in `source` and every `supporting` entry — a field you "
+                f"actually read via a tool this turn. These do not: {detail}. Re-ground each to a "
+                "real field, drop the uncited record, or state the information is not available."
             )
         return grounded
 

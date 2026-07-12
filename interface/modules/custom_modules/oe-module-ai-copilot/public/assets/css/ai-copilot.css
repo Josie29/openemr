@@ -45,9 +45,17 @@ body.ai-copilot-resizing {
     --copilot-space-4: 1rem;
 
     --copilot-radius: 0.25rem;
+    --copilot-radius-bubble: 0.75rem; /* rounder corner for chat bubbles; site radius stays 0.25rem */
     --copilot-border: #d3d9df;
+    --copilot-text: #1f2a33;
     --copilot-muted: #5b6770;
-    --copilot-accent: #0b5fa5;
+    /* Co-Pilot panel accent — a deeper royal blue chosen for the assistant surface (distinct from
+       OpenEMR's lighter $primary #007bff). Every panel blue flows from this one token. */
+    --copilot-accent: #1e4ed8;
+    /* Darker shade for accent-button hover/active states. */
+    --copilot-accent-strong: #1a42b8;
+    /* Lighter tint of the accent, used only for the assistant-avatar gradient's top stop. */
+    --copilot-accent-light: #4b71e0;
     --copilot-error: #a32020;
     --copilot-surface: #ffffff;
     --copilot-surface-alt: #f6f8fa;
@@ -174,8 +182,10 @@ body.ai-copilot-resizing {
     overflow-y: auto;
 }
 
+/* The welcome bubble's opening line. Sits inside an answer bubble (flex column with gap), so it
+   carries no margin of its own — the bubble's gap spaces it from the starter chips below. */
 .ai-copilot__intro {
-    margin: 0 0 var(--copilot-space-3);
+    margin: 0;
     color: var(--copilot-muted);
     font-size: var(--copilot-font-sm);
 }
@@ -193,7 +203,9 @@ body.ai-copilot-resizing {
 
 .ai-copilot__chip {
     border: 1px solid var(--copilot-accent);
-    background: var(--copilot-surface-alt);
+    /* Transparent (blue-on-white), like Bootstrap's .btn-outline-primary — so the accent sits on
+       the same white ground as the dashboard's blue headers and reads as the identical blue. */
+    background: transparent;
     color: var(--copilot-accent);
     border-radius: 1rem;
     padding: var(--copilot-space-1) var(--copilot-space-3);
@@ -206,14 +218,82 @@ body.ai-copilot-resizing {
     background: var(--copilot-question-bg);
 }
 
-/* ---- Turns ---- */
+/* ---- Per-answer follow-up suggestions ---- *
+ *
+ * Agent-proposed next questions, shown under an answer as tappable chips. Separated from the answer
+ * body by a hairline rule and a label so they read as "here's what to ask next", not part of the
+ * prose. Reuses the starter-chip shape; the leading arrow marks them as a forward action.
+ */
+
+.ai-copilot__followups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--copilot-space-2);
+    margin-top: var(--copilot-space-1);
+    padding-top: var(--copilot-space-3);
+    border-top: 1px solid var(--copilot-border);
+}
+
+.ai-copilot__followups-label {
+    flex-basis: 100%; /* force the chips onto the row below the heading */
+    margin: 0;
+    color: var(--copilot-muted);
+    font-size: var(--copilot-font-sm);
+    font-weight: 600;
+}
+
+.ai-copilot__chip--followup::before {
+    content: "\2192\00a0"; /* rightwards arrow + non-breaking space: signals "ask this next" */
+    opacity: 0.7;
+}
+
+/* ---- Turns (conversational layout) ----
+ *
+ * The transcript reads as a chat: the physician's question is a right-aligned bubble in the site
+ * accent; the assistant's answer sits left, led by a small Co-Pilot avatar, in a bordered bubble.
+ * All colours are the existing module tokens, so it still reads as part of OpenEMR.
+ */
 
 .ai-copilot__question {
+    align-self: flex-end;           /* physician's turn hugs the right, like a sent message */
+    max-width: 85%;
     margin: 0;
     padding: var(--copilot-space-2) var(--copilot-space-3);
-    background: var(--copilot-question-bg);
-    border-radius: var(--copilot-radius);
-    font-weight: 600;
+    background: var(--copilot-accent);
+    color: var(--copilot-surface);  /* white on the site blue */
+    /* Rounded, with a squared bottom-right "tail" toward the composer. */
+    border-radius: var(--copilot-radius-bubble) var(--copilot-radius-bubble)
+        var(--copilot-radius) var(--copilot-radius-bubble);
+    font-weight: 500;
+}
+
+/* Assistant turn: avatar + answer bubble on one row. Wraps the pending indicator and the answer. */
+.ai-copilot__turn {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--copilot-space-2);
+    align-self: stretch;
+}
+
+.ai-copilot__avatar {
+    flex: 0 0 1.5rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-top: 0.125rem; /* nudge down to sit against the first line of the bubble */
+    border-radius: 50%;
+    /* Site accent, lightened at the top for a subtle spherical sheen — no new hue. */
+    background: linear-gradient(140deg, var(--copilot-accent-light), var(--copilot-accent));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--copilot-surface);
+}
+
+.ai-copilot__avatar svg {
+    width: 0.8125rem;
+    height: 0.8125rem;
+    fill: currentColor;
+    display: block;
 }
 
 .ai-copilot__error {
@@ -232,12 +312,16 @@ body.ai-copilot-resizing {
     display: flex;
     align-items: center;
     gap: var(--copilot-space-3);
-    align-self: flex-start; /* hug content, like a chat bubble, rather than span the transcript */
+    /* Hug its content (dots + caption) inside the avatar row, not span it. */
+    flex: 0 1 auto;
     max-width: 100%;
     padding: var(--copilot-space-2) var(--copilot-space-3);
+    /* Surface-alt (a hair greyer than the finished white answer bubble) reads as "still working". */
     background: var(--copilot-surface-alt);
     border: 1px solid var(--copilot-border);
-    border-radius: var(--copilot-radius);
+    /* Match the answer bubble's avatar-side tail. */
+    border-radius: var(--copilot-radius) var(--copilot-radius-bubble)
+        var(--copilot-radius-bubble) var(--copilot-radius-bubble);
 }
 
 .ai-copilot__dots {
@@ -291,9 +375,17 @@ body.ai-copilot-resizing {
 }
 
 .ai-copilot__answer {
+    flex: 1 1 auto;
+    min-width: 0; /* let long words / citations wrap inside the flex row rather than overflow */
     display: flex;
     flex-direction: column;
     gap: var(--copilot-space-2);
+    padding: var(--copilot-space-3);
+    background: var(--copilot-surface);
+    border: 1px solid var(--copilot-border);
+    /* Squared top-left "tail" toward the avatar; rounded elsewhere. */
+    border-radius: var(--copilot-radius) var(--copilot-radius-bubble)
+        var(--copilot-radius-bubble) var(--copilot-radius-bubble);
 }
 
 .ai-copilot__summary {
@@ -316,9 +408,10 @@ body.ai-copilot-resizing {
 
 /*
  * The citation is the point of the verification design: every claim resolves to a real field of a
- * real resource the agent read. Keep it visually attached to its claim. It now shows a human
- * source label ("Allergy intolerance") plus the record value; the raw FHIR reference lives in the
- * element's title/data-resource-ref for hover + audit, so it no longer needs a monospace/data look.
+ * real resource the agent read. Keep it visually attached to its claim. It shows a human source
+ * label ("Allergy intolerance"), the record's own name + key date ("Asthma", "Onset 2019-04-02")
+ * that tie the proof to the specific record, and the grounded field value; the raw FHIR reference
+ * lives in the element's title/data-resource-ref for hover + audit, so it needs no data look.
  */
 .ai-copilot__citation {
     display: flex;
@@ -339,6 +432,14 @@ body.ai-copilot-resizing {
     font-weight: 600;
 }
 
+/* The record's own name — the specific record the proof points at. Stronger than the muted
+ * metadata around it, but not the accent colour reserved for the resource-type badge. */
+.ai-copilot__citation-name {
+    color: var(--copilot-text);
+    font-weight: 600;
+}
+
+.ai-copilot__citation-date,
 .ai-copilot__citation-field {
     color: var(--copilot-muted);
 }
@@ -379,6 +480,9 @@ body.ai-copilot-resizing {
 
 .ai-copilot__composer {
     display: flex;
+    /* Bottom-align so the send button stays one line tall next to the last line
+       of the input as the textarea auto-grows (default stretch would tall-ify it). */
+    align-items: flex-end;
     gap: var(--copilot-space-2);
     padding: var(--copilot-space-3);
     border-top: 1px solid var(--copilot-border);
@@ -387,10 +491,35 @@ body.ai-copilot-resizing {
 .ai-copilot__input {
     flex: 1 1 auto;
     min-width: 0;
+    resize: none;                 /* auto-grown from JS; no manual drag handle */
+    line-height: 1.4rem;          /* one text line; JS scrollHeight math keys off this */
+    min-height: 2.25rem;          /* ~1 line + padding; matches the prior single-line height */
+    max-height: 7.25rem;          /* ~5 lines before internal scroll kicks in */
+    overflow-y: auto;             /* scrollbar only appears past max-height */
+    box-sizing: border-box;       /* scrollHeight (JS) includes padding, so cap stays honest */
 }
 
 .ai-copilot__send {
     flex: 0 0 auto;
+}
+
+/* Unify the composer button with the panel accent. The button carries Bootstrap's .btn-primary
+   (site #007bff); these two-class rules out-specify it so the button matches the panel's blue
+   bubbles and chips rather than the lighter site blue. */
+.ai-copilot__send.btn-primary {
+    background-color: var(--copilot-accent);
+    border-color: var(--copilot-accent);
+}
+
+.ai-copilot__send.btn-primary:hover,
+.ai-copilot__send.btn-primary:active {
+    background-color: var(--copilot-accent-strong);
+    border-color: var(--copilot-accent-strong);
+}
+
+.ai-copilot__send.btn-primary:focus {
+    /* Accent-tinted focus ring instead of Bootstrap's #007bff-based one. */
+    box-shadow: 0 0 0 0.2rem rgba(30, 78, 216, 0.5);
 }
 
 /* ---- Co-Pilot Launcher (banner pill; spec §4.4) ----

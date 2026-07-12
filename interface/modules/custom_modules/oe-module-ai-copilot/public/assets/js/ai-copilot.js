@@ -796,9 +796,22 @@
 
         sendTurn(message)
             .then(function (response) {
-                return response.json().then(function (body) {
+                // Read the body defensively: a proxy 5xx (or a crashed agent) can return HTML or an
+                // empty body, which response.json() would reject with a raw SyntaxError. Parse what
+                // we can and treat anything unparseable as an empty body.
+                return response.text().then(function (text) {
+                    var body = {};
+                    try {
+                        body = text ? JSON.parse(text) : {};
+                    } catch (parseErr) {
+                        body = {};
+                    }
                     if (!response.ok) {
-                        throw new Error(body.error || labels.unavailable);
+                        // Errors the agent authored (its {error} contract) are safe to show; flag
+                        // them so the catch below can tell them from raw browser failures.
+                        var httpErr = new Error(body.error || labels.unavailable);
+                        httpErr.controlled = true;
+                        throw httpErr;
                     }
                     return body;
                 });
@@ -815,7 +828,11 @@
                     appendError(labels.authFailed);
                     return;
                 }
-                appendError(err.message || labels.unavailable);
+                // Only surface a message we authored (the agent's {error} body). Raw browser
+                // failures — "Failed to fetch" (network/timeout/CORS), JSON parse errors from a
+                // proxy error page — get the friendly fallback, never the raw text in front of a
+                // clinician.
+                appendError(err.controlled ? err.message : labels.unavailable);
             })
             .finally(function () {
                 setBusy(false);

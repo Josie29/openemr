@@ -21,6 +21,11 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
 ]
+# Load/stress testing the deployed /chat endpoint (agent/loadtest/, JOS-18).
+# Installed into an isolated venv by run.sh; recorded here for provenance.
+loadtest = [
+    "locust>=2.30",
+]
 
 [build-system]
 requires = ["hatchling"]

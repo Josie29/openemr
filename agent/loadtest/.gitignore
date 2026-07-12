@@ -1,0 +1,3 @@
+# Bootstrapped locust venv and captured run artifacts — never commit these.
+.venv/
+results/

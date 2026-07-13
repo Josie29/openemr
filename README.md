@@ -4,7 +4,7 @@ An AI Clinical Co-Pilot built on OpenEMR (Gauntlet AI case study).
 
 **▶ Live app:** https://openemr-production-7ee5.up.railway.app/
 
-Project docs: [PRD.md](PRD.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [USERS.md](USERS.md) · [AUDIT.md](AUDIT.md)
+Project docs: [PRD — Week 1](PRD-week-1.md) · [PRD — Week 2](PRD-week-2.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [USERS.md](USERS.md) · [AUDIT.md](AUDIT.md)
 
 > The live deployment runs on Railway with synthetic demo data. The upstream OpenEMR README follows below.
 

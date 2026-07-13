@@ -2,8 +2,9 @@
 
 ## Project Context — AgentForge Clinical Co-Pilot
 
-This fork is being extended with an AI Clinical Co-Pilot per `./PRD.md` (Gauntlet AI
-case study — read it before making any architectural or scope decision). Deliverables
+This fork is being extended with an AI Clinical Co-Pilot per `./PRD-week-1.md`
+and `./PRD-week-2.md` (Gauntlet AI case study — read the relevant week's PRD
+before making any architectural or scope decision). Deliverables
 required by the PRD: `./AUDIT.md`, `./USERS.md`, `./ARCHITECTURE.md`.
 
 ### Our docs live in `/context/`, not `/docs/`

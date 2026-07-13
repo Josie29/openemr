@@ -2,7 +2,7 @@
 
 **Purpose:** Survey of project-management tools that support the "assign a ticket to an
 AI coding agent" pattern, evaluated against this project's actual shape — a one-week,
-GitHub-native sprint (per `../PRD.md`, deadline 2026-07-12), already running Claude Code
+GitHub-native sprint (per `../PRD-week-1.md`, deadline 2026-07-12), already running Claude Code
 against a git-worktree-per-branch workflow (`../CLAUDE.md` § Working in a git worktree),
 with a real near-term need: parallel work on the PHP frontend module and the Python
 `agent/` backend. Not decision evidence for a PRD deliverable — this is tooling choice for

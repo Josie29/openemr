@@ -5,7 +5,7 @@ fills the standalone Python agent service that `deployment-strategy.md` (Option 
 selected. Decision evidence for the architecture defense, not a deliverable;
 `ARCHITECTURE.md` is the source of truth.
 
-**Grounding:** `PRD.md` (agent / verification / observability / eval + engineering
+**Grounding:** `PRD-week-1.md` (agent / verification / observability / eval + engineering
 requirements), `deployment-strategy.md` (Option D), `../AUDIT.md` (PHI boundary),
 `../USERS.md` (<15s latency budget). Framework/tool landscape verified against 2026
 sources (linked at the end); model facts against the current Anthropic model catalog.

@@ -23,12 +23,11 @@ open questions are at the bottom.
 | 6 | 05 · Decision 1 | Pydantic AI over LangGraph — concretely | 🟢 Decided (JOS-45) |
 | 7 | 06 · Decision 2 | See the document without inventing facts | 🔵 Partial (JOS-47) |
 | 8 | 07 · Decision 3 | Ground the answer in guideline evidence | 🟢 Decided (JOS-46) |
-| 9 | 08 · Decision 4 | What runs where on Railway | 🔵 Partial (JOS-48) |
-| 10 | 09 · Decision 5 | One source of truth per data type | 🔵 Partial (JOS-49) |
+| 9 | 08 · RAG strategy | Match the strategy to the problem | 🟢 Decided scope |
+| 10 | 09 · Decision 4 | Infrastructure & data ownership | 🔵 Partial (JOS-48/49) |
 | 11 | 10 · Eval gate | CI that can actually block a regression | 🔴 Hard gate (JOS-50) |
 | 12 | 11 · Observability | Trace the whole graph; watch the new cost | 🟢 Extend existing |
-| 13 | 12 · Risks | Where this fails, and the mitigation | — |
-| 14 | 13 · What we defend | The decided-vs-open map | — |
+| 13 | 12 · What we defend | The decided-vs-open map | — |
 
 ---
 
@@ -128,25 +127,38 @@ open questions are at the bottom.
   - **Reranker** — Cohere `rerank-v4.0-fast`, the PRD-named default (~$2/1k, negligible on a small corpus).
 - **When we'd switch to LanceDB** (embedded): if a second always-on service isn't worth it for a few-hundred-chunk static corpus.
 
-## Slide 9 — Decision 4: Deployment topology (08) 🔵 Partial · JOS-48
+## Slide 9 — RAG strategy: match complexity to the problem (08) 🟢 Decided scope
 
-- **Headline:** What runs where on Railway
-- **Today:** OpenEMR (Apache/PHP + module) · Python/FastAPI agent · MySQL.
-- **Week 2 adds:** **Qdrant** service (private networking) · **Cohere Rerank** API · document storage. Agent stays one Pydantic AI service — no new agent service.
-- **Points:**
-  - **`/ready` becomes dependency-aware** — validates document storage, vector index, and reranker reachability; returns *degraded*, not binary up/down.
-  - **No orphaned state** — new services follow the same deploy/redeploy discipline as `main` → prod.
+- **Headline:** Match the RAG strategy to the problem
+- **Principle (cite Gallant):** pair solution complexity with problem complexity — don't default to the fanciest RAG.
+- **The ladder** (✓ = where we sit):
 
-## Slide 10 — Decision 5: Data authority & lineage (09) 🔵 Partial · JOS-49
+  | Rung | Us |
+  |---|---|
+  | Naive vector search | baseline |
+  | Metadata filtering (scope to guideline / source / section) | ✓ |
+  | Hybrid: vector + BM25 keyword, RRF-fused | ✓ |
+  | Rerank the fused candidates (Cohere) | ✓ |
+  | Query rewriting / multi-hop | defer — PRD-optional; add if evals show misses |
+  | Graph RAG (entity-relationship maps) | not needed — small, flat corpus |
+  | Agentic RAG (supervisor routes to retrieval tools) | ✓ earned from the multi-agent decision |
 
-- **Headline:** One source of truth per data type
-- **Lede:** Four new data types enter the system. Each needs an owner, lineage, access control, and validation — no silent overwrites.
-- **Types:**
-  - **Extracted lab observations** — derived → FHIR Observation, round-tripped.
+- **Landing:** hybrid + metadata + rerank, exposed as tools the supervisor routes to — that routing *is* the Agentic-RAG rung. We stop short of Graph RAG / multi-hop on purpose (cost / latency / determinism vs. no payoff on a small corpus).
+- **Terminology note:** "graph" here = the agent orchestration graph (supervisor → workers), **not** Graph RAG (a knowledge graph). Our retrieval is hybrid, not entity-graph.
+
+## Slide 10 — Decision 4: Infrastructure & data ownership (09) 🔵 Partial · JOS-48 / JOS-49
+
+- **Headline:** One new service, four data types — each with a home
+- **On Railway:**
+  - **Today:** OpenEMR (Apache/PHP + module) · Python/FastAPI agent · MySQL.
+  - **Week 2 adds:** **Qdrant** service (private networking) · **Cohere Rerank** API · document storage. Agent stays one Pydantic AI service — no new agent service.
+  - **`/ready` becomes dependency-aware** — validates document storage, vector index, reranker reachability; returns *degraded*, not binary.
+- **Data authority (one source of truth each, no silent overwrites):**
+  - **Extracted lab observations** → FHIR Observation, round-tripped.
   - **Intake facts** — demographics, meds, allergies, family history.
-  - **Guideline chunks** — corpus, versioned, reproducible from repo.
+  - **Guideline chunks** — versioned corpus, reproducible from the repo.
   - **Citation records** — link every claim back to a source.
-- **Callout:** Uploaded documents and derived observations must round-trip through OpenEMR **without creating duplicate or untraceable records.**
+- **Callout:** Documents + derived observations round-trip through OpenEMR **without creating duplicate or untraceable records.**
 
 ## Slide 11 — The eval gate (10) 🔴 Hard gate · JOS-50
 
@@ -168,20 +180,13 @@ open questions are at the bottom.
   - **The lever** — tiered routing (Haiku / Sonnet / Opus) keeps the <15s budget and the cost curve defensible.
   - **PHI-free** — no raw document text or identifiers in traces, evals, or cost reports.
 
-## Slide 13 — Risks & tradeoffs (12)
+> **Risks slide cut** (was slide 13) — risk detail lives in `W2_ARCHITECTURE.md`; keep these as verbal talking points: VLM field-label hallucination (schema + citation + confidence make it visible), supervisor-as-black-box (logged handoffs), 5-doc-type scope creep (ship 2 first), multi-agent latency vs. <15s (routing discipline + streaming), and PHI-leakage-into-observability as the disqualifier (scrubbing + CI PHI check).
 
-- **Headline:** Where this fails, and the mitigation
-- **VLM invents field labels** → schema + citation + confidence make unsupported extracted facts *visible*, not silent.
-- **Supervisor becomes a black box** → every routing decision and handoff is logged and explainable.
-- **Scope creep — 5 doc types** → ship **two** reliably before adding a third. Narrower is stronger.
-- **Multi-agent latency vs. <15s** → routing discipline + streaming; tiered models on cheap sub-tasks.
-- **Callout (disqualifier):** PHI leakage into SaaS observability is the disqualifier — scrubbing + a CI PHI-detection check guard it.
-
-## Slide 14 — What we defend / next (13)
+## Slide 13 — What we defend / next (12)
 
 - **Headline:** The decided-vs-open map
-- **🟢 Decided:** Framework (Pydantic AI) · vector DB (Qdrant + Cohere) · verification gate · Pydantic contracts · Langfuse · Claude tiers · eval direction · citation shape
-- **🔵 Partial:** Architecture shape · ingestion & VLM · data authority · deployment topology
+- **🟢 Decided:** Framework (Pydantic AI) · vector DB (Qdrant + Cohere) · RAG scope (hybrid, restrained) · verification gate · Pydantic contracts · Langfuse · Claude tiers · eval direction · citation shape
+- **🔵 Partial:** Architecture shape · ingestion & VLM · infrastructure & data ownership
 - **🟠 Pending:** VLM model · data-model spec · eval-gate build
 - **Points:**
   - **Working method** — this deck is the skeleton; each pending slide becomes a task under **JOS-43**; decisions flow back into these slides and `W2_ARCHITECTURE.md`.
@@ -193,11 +198,11 @@ open questions are at the bottom.
 
 Concrete things to weigh before we lock the structure:
 
-1. **14 slides is a lot for 3–5 min** (~13–20s each). If the defense is time-boxed, target ~10–11. Candidate trims below.
-2. **Merge Decisions 4 + 5 (slides 9 + 10)?** Deployment topology and data authority are both "supporting infrastructure" and both 🔵 Partial. One combined "Infrastructure & data ownership" slide would save a slide and read as one thought.
-3. **Slide 13 (Risks) may be cuttable** for a *live* defense — risks are strong in the written `W2_ARCHITECTURE.md`, and a spoken defense often lands better ending on the decided/open map (slide 14). Keep it only if graders explicitly grade risk awareness in the room.
+1. **13 slides** (was 14) for a 3–5 min defense. Still on the higher side — target ~10–11 if strictly time-boxed; the intro run (slides 2–4) is the next place to compress.
+2. ~~Merge Decisions 4 + 5~~ — **DONE.** Merged into slide 10, "Infrastructure & data ownership."
+3. ~~Cut the Risks slide~~ — **DONE.** Risk detail lives in `W2_ARCHITECTURE.md`; kept as verbal talking points (see note above slide 13).
 4. **Slides 4 (tripwire) + 5 (architecture)** are the spine — consider making the architecture diagram the single longest-dwell slide and compressing others around it.
 5. **Ordering question:** should the **eval hard-gate (slide 11)** move earlier / get more prominence? It's the PRD's explicit hard gate and the thing graders actively try to break — burying it at #11 undersells it. Option: promote it to right after the architecture (become slide 6), so "how we prove quality" is framed before the individual tech decisions.
-6. **Decision slides are asymmetric** — 6 and 8 are 🟢 fully argued; 7, 9, 10 are 🔵 skeletons. Once JOS-47/49/50 resolve, those slides need the same head-to-head rigor as slide 6, or they'll look thin next to it.
+6. **Decision slides are asymmetric** — 6, 8, and now 9 (RAG) are 🟢 fully argued; 7 (ingestion) and 10 (infra + data) are still 🔵 skeletons. Once JOS-47/49/50 resolve, those two need the same rigor as slide 6, or they'll look thin next to it.
 
 Tell me which of these to act on (or your own changes) and I'll revise the content here, then re-render the artifact.

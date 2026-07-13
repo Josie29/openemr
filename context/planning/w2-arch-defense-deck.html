@@ -248,6 +248,7 @@
   .cmp td { color: var(--ink-soft); }
   .cmp .win { color: var(--ink); background: color-mix(in srgb, var(--decided) 9%, transparent); box-shadow: inset 2px 0 0 var(--decided); }
   .footnote { font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-faint); margin: 0.6rem 0 0; }
+  .cmp.wrap tbody th { white-space: normal; }
 
   .task-line {
     margin-top: 1.3rem;
@@ -551,47 +552,57 @@
     </div>
   </section>
 
-  <!-- 9 · DECISION 4 · DEPLOYMENT -->
+  <!-- 9 · RAG STRATEGY -->
   <section class="slide" id="s9">
     <div class="slide__inner">
-      <div class="eyebrow"><span class="num">08</span> · Decision 4 — Deployment topology <span class="chip chip--partial">Partial · Qdrant service confirmed</span></div>
-      <h2>What runs where on Railway</h2>
-      <div class="grid2">
-        <div class="card">
-          <span class="lbl">Today</span>
-          <p style="margin-top:0.5rem">OpenEMR (Apache/PHP + module) · Python/FastAPI agent · MySQL.</p>
-        </div>
-        <div class="card">
-          <span class="lbl">Week 2 adds</span>
-          <p style="margin-top:0.5rem"><strong>Qdrant</strong> service (private networking) · <strong>Cohere Rerank</strong> API · document storage. Agent stays one Pydantic AI service — no new agent service.</p>
-        </div>
+      <div class="eyebrow"><span class="num">08</span> · RAG strategy <span class="chip chip--decided">Decided scope</span></div>
+      <h2>Match the RAG strategy to the problem</h2>
+      <p class="lede">Pair solution complexity with problem complexity — don't default to the fanciest RAG. <span style="color:var(--ink-faint)">— Gallant</span></p>
+      <div style="overflow-x:auto">
+        <table class="cmp wrap">
+          <thead><tr><th>Rung</th><th>Us</th></tr></thead>
+          <tbody>
+            <tr><th>Naive vector search</th><td>baseline</td></tr>
+            <tr><th>Metadata filtering</th><td class="win">✓ scope to guideline / source / section</td></tr>
+            <tr><th>Hybrid: vector + BM25 keyword, RRF-fused</th><td class="win">✓</td></tr>
+            <tr><th>Rerank the fused candidates</th><td class="win">✓ Cohere</td></tr>
+            <tr><th>Query rewriting / multi-hop</th><td>defer — PRD-optional; add if evals show misses</td></tr>
+            <tr><th>Graph RAG (entity-relationship maps)</th><td>not needed — small, flat corpus</td></tr>
+            <tr><th>Agentic RAG (route to retrieval tools)</th><td class="win">✓ earned from the multi-agent decision</td></tr>
+          </tbody>
+        </table>
       </div>
-      <ul class="clean" style="margin-top:1.2rem">
-        <li><strong><code>/ready</code> becomes dependency-aware</strong> — validates document storage, vector index, and reranker reachability; returns <em>degraded</em>, not binary up/down.</li>
-        <li><strong>No orphaned state</strong> — new services follow the same deploy/redeploy discipline as <code>main</code> → prod.</li>
-      </ul>
-      <div class="task-line"><span class="chip chip--task">JOS-48</span> Framework + vector DB landed — finalize document storage + <code>/ready</code> dependency checks.</div>
+      <div class="callout">We land at <strong>hybrid + metadata + rerank</strong>, exposed as tools the supervisor routes to — that routing <em>is</em> the Agentic-RAG rung. We stop short of Graph RAG / multi-hop on purpose: cost, latency, and reduced determinism with no payoff on a small corpus.</div>
+      <p class="footnote">"Graph" here = the agent orchestration graph (supervisor → workers), not Graph RAG (a knowledge graph). Our retrieval is hybrid, not entity-graph.</p>
     </div>
   </section>
 
-  <!-- 10 · DECISION 5 · DATA AUTHORITY -->
+  <!-- 10 · INFRASTRUCTURE & DATA OWNERSHIP -->
   <section class="slide" id="s10">
     <div class="slide__inner">
-      <div class="eyebrow"><span class="num">09</span> · Decision 5 — Data authority &amp; lineage <span class="chip chip--partial">Partial</span></div>
-      <h2>One source of truth per data type</h2>
-      <p class="lede">Four new data types enter the system. Each needs an owner, lineage, access control, and validation — no silent overwrites.</p>
+      <div class="eyebrow"><span class="num">09</span> · Decision 4 — Infrastructure &amp; data ownership <span class="chip chip--partial">Partial</span></div>
+      <h2>One new service, four data types — each with a home</h2>
       <div class="grid2">
-        <ul class="clean">
-          <li><strong>Extracted lab observations</strong> — derived → FHIR Observation, round-tripped.</li>
-          <li><strong>Intake facts</strong> — demographics, meds, allergies, family history.</li>
-        </ul>
-        <ul class="clean">
-          <li><strong>Guideline chunks</strong> — corpus, versioned, reproducible from repo.</li>
-          <li><strong>Citation records</strong> — link every claim back to a source.</li>
-        </ul>
+        <div>
+          <span style="font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)">On Railway</span>
+          <ul class="clean" style="margin-top:0.6rem">
+            <li><strong>Today</strong> — OpenEMR (PHP) · Python/FastAPI agent · MySQL.</li>
+            <li><strong>Adds</strong> — Qdrant service (private net) · Cohere Rerank API · document storage. Agent stays one Pydantic AI service.</li>
+            <li><strong><code>/ready</code> dependency-aware</strong> — doc storage, vector index, reranker → <em>degraded</em>, not binary.</li>
+          </ul>
+        </div>
+        <div>
+          <span style="font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)">Data authority — one source of truth each</span>
+          <ul class="clean" style="margin-top:0.6rem">
+            <li><strong>Lab observations</strong> → FHIR Observation, round-tripped.</li>
+            <li><strong>Intake facts</strong> — demographics, meds, allergies, family history.</li>
+            <li><strong>Guideline chunks</strong> — versioned corpus, reproducible from repo.</li>
+            <li><strong>Citation records</strong> — every claim → a source.</li>
+          </ul>
+        </div>
       </div>
-      <div class="callout" style="margin-top:1.3rem">Uploaded documents and derived observations must round-trip through OpenEMR <strong>without creating duplicate or untraceable records.</strong></div>
-      <div class="task-line"><span class="chip chip--task">→ Task</span> Data-model + lineage + access-control spec.</div>
+      <div class="callout" style="margin-top:1.2rem">No silent overwrites — documents + derived observations round-trip through OpenEMR <strong>without duplicate or untraceable records.</strong></div>
+      <div class="task-line"><span class="chip chip--task">JOS-48 · JOS-49</span> Finalize storage + <code>/ready</code> checks; data-model + lineage + access-control spec.</div>
     </div>
   </section>
 
@@ -645,29 +656,14 @@
     </div>
   </section>
 
-  <!-- 13 · RISKS -->
-  <section class="slide" id="s13">
-    <div class="slide__inner">
-      <div class="eyebrow"><span class="num">12</span> · Risks &amp; tradeoffs</div>
-      <h2>Where this fails, and the mitigation</h2>
-      <div class="grid2" style="gap:1rem">
-        <div class="card"><h3>VLM invents field labels</h3><p>Schema + citation + confidence make unsupported extracted facts <em>visible</em>, not silent.</p></div>
-        <div class="card"><h3>Supervisor becomes a black box</h3><p>Every routing decision and handoff is logged and explainable.</p></div>
-        <div class="card"><h3>Scope creep — 5 doc types</h3><p>Ship <strong>two</strong> reliably before adding a third. Narrower is stronger.</p></div>
-        <div class="card"><h3>Multi-agent latency vs. &lt;15s</h3><p>Routing discipline + streaming; tiered models on cheap sub-tasks.</p></div>
-      </div>
-      <div class="callout gate" style="margin-top:1.3rem">PHI leakage into SaaS observability is the disqualifier — scrubbing + a CI PHI-detection check guard it.</div>
-    </div>
-  </section>
-
-  <!-- 14 · WHAT WE DEFEND / NEXT -->
+  <!-- 13 · WHAT WE DEFEND / NEXT -->
   <section class="slide" id="s14">
     <div class="slide__inner">
-      <div class="eyebrow"><span class="num">13</span> · What we'll defend</div>
+      <div class="eyebrow"><span class="num">12</span> · What we'll defend</div>
       <h2>The decided-vs-open map</h2>
       <div class="grid3" style="margin-bottom:1.4rem">
-        <div class="card"><h3><span class="chip chip--decided">Decided</span></h3><p style="margin-top:.5rem">Framework (Pydantic AI) · vector DB (Qdrant + Cohere) · verification gate · Pydantic contracts · Langfuse · Claude tiers · eval direction · citation shape</p></div>
-        <div class="card"><h3><span class="chip chip--partial">Partial</span></h3><p style="margin-top:.5rem">Architecture shape · ingestion &amp; VLM · data authority · deployment topology</p></div>
+        <div class="card"><h3><span class="chip chip--decided">Decided</span></h3><p style="margin-top:.5rem">Framework (Pydantic AI) · vector DB (Qdrant + Cohere) · RAG scope (hybrid, restrained) · verification gate · Pydantic contracts · Langfuse · Claude tiers · eval direction · citation shape</p></div>
+        <div class="card"><h3><span class="chip chip--partial">Partial</span></h3><p style="margin-top:.5rem">Architecture shape · ingestion &amp; VLM · infrastructure &amp; data ownership</p></div>
         <div class="card"><h3><span class="chip chip--pending">Pending</span></h3><p style="margin-top:.5rem">VLM model · data-model spec · eval-gate build</p></div>
       </div>
       <ul class="clean">

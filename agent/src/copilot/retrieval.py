@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from copilot.fhir.models import ResourceIdentity
 from copilot.rag.models import EvidenceSnippet
 from copilot.schemas import CitationSourceType, SourceRef
-from copilot.verification import quote_in_text
+from copilot.verification import Resolution, quote_in_text
 
 # The resource-type tag a guideline citation carries on its SourceRef, so a corpus claim flows
 # through the SAME SourceRef/gate machinery as a FHIR-record claim: the claim cites
@@ -38,54 +38,31 @@ class ChunkRegistry:
         for snippet in snippets:
             self._snippets[snippet.citation.field_or_chunk_id] = snippet
 
-    def get(self, chunk_id: str) -> EvidenceSnippet | None:
-        """Return the snippet a chunk id was retrieved as this turn, or None.
+    def resolve(self, ref: SourceRef) -> Resolution | None:
+        """Ground a guideline citation and identify its chunk in one lookup.
 
-        Lets the wire-citation builder (``copilot.citations``) recover a guideline claim's citation
-        from the chunk it grounded on — the ``SourceRef`` only carries the chunk id.
-
-        Args:
-            chunk_id: The chunk id (a guideline citation's ``resource_id``).
-
-        Returns:
-            The retrieved :class:`EvidenceSnippet`, or None when it was not retrieved this turn.
-        """
-        return self._snippets.get(chunk_id)
-
-    def resolve(self, ref: SourceRef) -> str | None:
-        """Ground a guideline citation: its quote must appear verbatim in the cited chunk.
+        The claim's quote must appear verbatim in the cited chunk; the identity (guideline source
+        as the label, section in the date slot) is read from the same snippet.
 
         Args:
             ref: The claim's citation (expected to name a guideline chunk and carry a quote).
 
         Returns:
-            The matched quote when the chunk was retrieved this turn and its text contains the
-            quote; otherwise None (wrong resource type, chunk not retrieved, or no/absent quote).
+            The :class:`Resolution` (matched quote + chunk identity) when the chunk was retrieved
+            this turn and its text contains the quote; otherwise None (wrong resource type, chunk
+            not retrieved, or no/absent quote).
         """
         if ref.resource_type != GUIDELINE_RESOURCE_TYPE:
             return None
         snippet = self._snippets.get(ref.resource_id)
         if snippet is None or ref.quote is None:
             return None
-        return quote_in_text(ref.quote, snippet.text)
-
-    def identify(self, ref: SourceRef) -> ResourceIdentity | None:
-        """Name the guideline (and section) a citation points at, for the evidence card.
-
-        Args:
-            ref: The claim's citation.
-
-        Returns:
-            The chunk's :class:`ResourceIdentity` (source id as the label, section in the date
-            slot), or None when it names a non-guideline resource or a chunk not retrieved.
-        """
-        if ref.resource_type != GUIDELINE_RESOURCE_TYPE:
+        value = quote_in_text(ref.quote, snippet.text)
+        if value is None:
             return None
-        snippet = self._snippets.get(ref.resource_id)
-        if snippet is None:
-            return None
-        return ResourceIdentity(
+        identity = ResourceIdentity(
             label=snippet.citation.source_id,
             date=snippet.citation.page_or_section,
             date_label="Section",
         )
+        return Resolution(value=value, identity=identity)

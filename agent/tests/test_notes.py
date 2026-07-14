@@ -76,7 +76,8 @@ def test_quote_grounding_matches_verbatim_and_rejects_absent(
     good = SourceRef(
         resource_type="DocumentReference", resource_id="n1", quote="Metformin continued today."
     )
-    assert log.resolve(good) == "Metformin continued today."
+    resolution = log.resolve(good)
+    assert resolution is not None and resolution.value == "Metformin continued today."
 
     fabricated = SourceRef(
         resource_type="DocumentReference", resource_id="n1", quote="Metformin stopped."

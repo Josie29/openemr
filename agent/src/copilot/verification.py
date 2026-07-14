@@ -8,11 +8,26 @@ from copilot.schemas import ChatResponse, Claim, SourceRef
 _MISSING = object()
 
 
+@dataclass(frozen=True)
+class Resolution:
+    """What resolving a citation against its source yields: the verified value and record identity.
+
+    Resolving and identifying a citation are the same lookup, so one ``resolve`` returns both — the
+    gate stamps the grounded ``value`` and the record ``identity`` (name + key date) from this. The
+    wire :class:`~copilot.schemas.Citation` is a further *pure* projection of the stamped
+    ``SourceRef`` (see :meth:`~copilot.schemas.SourceRef.to_citation`), so it is derived at the
+    response boundary rather than carried here.
+    """
+
+    value: str
+    identity: ResourceIdentity | None
+
+
 class CitationResolver(Protocol):
     """A source of ground truth a claim's citation can be resolved against.
 
-    The grounding gate (:func:`resolve_claims`) depends only on this two-method surface, not on
-    where the evidence came from. :class:`FetchLog` is the FHIR-record implementation (the Week-1
+    The grounding gate (:func:`resolve_claims`) depends only on this single ``resolve`` method, not
+    on where the evidence came from. :class:`FetchLog` is the FHIR-record implementation (the Week-1
     gate); the Week-2 guideline-evidence registry implements the same protocol, so the one gate
     attaches unchanged to each worker and the final answer (the "crown jewel survives the port"
     requirement — ``context/decisions/agent-framework-week2.md``). A composite resolver over
@@ -20,12 +35,8 @@ class CitationResolver(Protocol):
     chunks in a single pass.
     """
 
-    def resolve(self, ref: SourceRef) -> str | None:
-        """Resolve a citation to the real value it grounds on, or None when it cannot ground."""
-        ...
-
-    def identify(self, ref: SourceRef) -> ResourceIdentity | None:
-        """Name the specific record a citation points at, or None when it was not seen this turn."""
+    def resolve(self, ref: SourceRef) -> Resolution | None:
+        """Resolve a citation to its verified value and identity, or None when it cannot ground."""
         ...
 
 
@@ -41,20 +52,12 @@ class CompositeResolver:
 
     resolvers: tuple[CitationResolver, ...]
 
-    def resolve(self, ref: SourceRef) -> str | None:
+    def resolve(self, ref: SourceRef) -> Resolution | None:
         """Resolve against the first sub-resolver that grounds the citation, else None."""
         for resolver in self.resolvers:
-            value = resolver.resolve(ref)
-            if value is not None:
-                return value
-        return None
-
-    def identify(self, ref: SourceRef) -> ResourceIdentity | None:
-        """Identify against the first sub-resolver that recognises the citation, else None."""
-        for resolver in self.resolvers:
-            identity = resolver.identify(ref)
-            if identity is not None:
-                return identity
+            resolution = resolver.resolve(ref)
+            if resolution is not None:
+                return resolution
         return None
 
 
@@ -114,53 +117,36 @@ class FetchLog:
         for resource in items:
             self.record(resource.resource_type, resource.resource_id, resource)
 
-    def resolve(self, ref: SourceRef) -> str | None:
-        """Resolve a citation to the real value in the fetched resource.
+    def resolve(self, ref: SourceRef) -> Resolution | None:
+        """Resolve a citation to the real value and identity of the fetched resource.
 
-        Two modes, both deterministic: a ``quote`` citation (free-text note) is grounded when the
-        quote appears verbatim in the fetched note's text; otherwise a ``field`` citation
-        (structured resource) resolves to that field's value.
+        Two grounding modes, both deterministic: a ``quote`` citation (free-text note) is grounded
+        when the quote appears verbatim in the fetched note's text; otherwise a ``field`` citation
+        (structured resource) resolves to that field's value. The record's identity (name + key
+        date) is read from the same fetched object — code-derived, never model-authored.
 
         Args:
             ref: The claim's citation.
 
         Returns:
-            The stringified record value (or the matched quote), or None when the claim cannot be
-            grounded — the resource was not fetched, neither quote nor field is cited, the field or
-            note text is missing, or the quote is not found in the note.
+            The :class:`Resolution` (value + identity), or None when the claim cannot be grounded —
+            the resource was not fetched, neither quote nor field is cited, the field or note text
+            is missing, or the quote is not found in the note.
         """
         resource = self._objects.get((ref.resource_type, ref.resource_id))
         if resource is None:
             return None
         if ref.quote is not None:
-            return _resolve_quote(resource, ref.quote)
-        if ref.field is None:
-            return None
-        value = getattr(resource, ref.field, _MISSING)
-        if value is _MISSING or value is None:
-            return None
-        return str(value)
-
-    def identify(self, ref: SourceRef) -> ResourceIdentity | None:
-        """Return the identity (name + key date) of the resource a citation points at.
-
-        Independent of which field the claim grounds on: it names the *specific* fetched record so
-        the card can distinguish, say, the asthma Condition from any other active Condition. Like
-        :meth:`resolve`, it reads only the fetched typed object — the identity is code-derived from
-        the record, never model-authored.
-
-        Args:
-            ref: The claim's citation.
-
-        Returns:
-            The record's :class:`ResourceIdentity`, or None when the cited resource was not fetched
-            this turn (the same gate ``resolve`` applies).
-        """
-        resource = self._objects.get((ref.resource_type, ref.resource_id))
-        if resource is None:
+            value = _resolve_quote(resource, ref.quote)
+        elif ref.field is not None:
+            raw = getattr(resource, ref.field, _MISSING)
+            value = None if raw is _MISSING or raw is None else str(raw)
+        else:
+            value = None
+        if value is None:
             return None
         identity: ResourceIdentity = resource.citation_identity
-        return identity
+        return Resolution(value=value, identity=identity)
 
 
 def _normalize_ws(text: str) -> str:
@@ -282,13 +268,12 @@ def _stamp(resolver: CitationResolver, ref: SourceRef) -> SourceRef | None:
         The citation with ``value`` and identity (``label``/``date``/``date_label``) stamped from
         the resolved source, or None when the citation cannot be grounded.
     """
-    value = resolver.resolve(ref)
-    if value is None:
+    resolution = resolver.resolve(ref)
+    if resolution is None:
         return None
-    update: dict[str, str | None] = {"value": value}
-    identity = resolver.identify(ref)
-    if identity is not None:
-        update["label"] = identity.label
-        update["date"] = identity.date
-        update["date_label"] = identity.date_label
+    update: dict[str, str | None] = {"value": resolution.value}
+    if resolution.identity is not None:
+        update["label"] = resolution.identity.label
+        update["date"] = resolution.identity.date
+        update["date_label"] = resolution.identity.date_label
     return ref.model_copy(update=update)

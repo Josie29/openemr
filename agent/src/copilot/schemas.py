@@ -55,6 +55,34 @@ class SourceRef(BaseModel):
         description="What `date` means for this record (e.g. 'Onset'). Leave empty — system-set.",
     )
 
+    def to_citation(self) -> "Citation":
+        """Project this grounded citation onto the canonical wire ``Citation`` (§3.3).
+
+        A *pure* projection of the **stamped** ``SourceRef`` (``value``/``label``/``date`` already
+        filled by the grounding gate), so the sidebar's click-to-source (JOS-57) gets the
+        machine-readable contract with no second lookup: a guideline reference reads the stamped
+        ``label`` (the guideline source id) and ``date`` (the section); a FHIR reference reads its
+        resource type/id and field. Kept off :class:`Claim` so it never enters an LLM output schema.
+
+        Returns:
+            The :class:`GuidelineCitation` or :class:`FhirCitation` for this reference, carrying the
+            claim's specific grounded value/quote.
+        """
+        quote_or_value = self.value or self.quote or ""
+        if self.resource_type == CitationSourceType.GUIDELINE.value:
+            return GuidelineCitation(
+                source_id=self.label or self.resource_id,
+                page_or_section=self.date or self.resource_id,
+                field_or_chunk_id=self.resource_id,
+                quote_or_value=quote_or_value,
+            )
+        return FhirCitation(
+            source_id=f"{self.resource_type}/{self.resource_id}",
+            page_or_section=self.resource_type,
+            field_or_chunk_id=self.field or "(none)",
+            quote_or_value=quote_or_value,
+        )
+
 
 class Claim(BaseModel):
     """A single factual statement in the agent's answer, with its supporting citation.

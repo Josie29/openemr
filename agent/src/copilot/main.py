@@ -12,7 +12,6 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.usage import UsageLimits
 
-from copilot.citations import build_claim_citations
 from copilot.config import FhirClientMode, Settings, get_settings
 from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
@@ -30,7 +29,6 @@ from copilot.observability import (
 )
 from copilot.pricing import turn_cost_usd
 from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
-from copilot.retrieval import ChunkRegistry
 from copilot.schemas import ChatRequest, ChatResponse
 
 logger = logging.getLogger("copilot")
@@ -56,16 +54,17 @@ _UNAVAILABLE_ANSWER = ChatResponse(
 )
 
 
-def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, Any]:
+def _answer_payload(answer: ChatResponse) -> dict[str, Any]:
     """Serialize the final answer and attach the canonical wire citation to each claim.
 
     The response keeps the answer's own ``claims`` (with their gate-stamped ``source``) and adds,
-    per claim, the project-wide :data:`~copilot.schemas.Citation` list the sidebar's
-    click-to-source (JOS-57) consumes — additive, so nothing the current sidebar reads is removed.
+    per claim, the project-wide :data:`~copilot.schemas.Citation` list the sidebar's click-to-source
+    (JOS-57) consumes — each a pure projection of a grounded ``SourceRef`` via
+    :meth:`~copilot.schemas.SourceRef.to_citation`. Additive, so nothing the current sidebar reads
+    is removed, and the citations stay off the LLM-facing ``Claim`` model.
 
     Args:
         answer: The grounded final answer from the graph.
-        chunks: The turn's chunk registry, used to enrich guideline citations with real provenance.
 
     Returns:
         The JSON-serializable response body, each claim carrying a ``citations`` list.
@@ -73,7 +72,7 @@ def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, An
     content: dict[str, Any] = answer.model_dump()
     for claim_dict, claim in zip(content["claims"], answer.claims, strict=True):
         claim_dict["citations"] = [
-            citation.model_dump(mode="json") for citation in build_claim_citations(claim, chunks)
+            ref.to_citation().model_dump(mode="json") for ref in [claim.source, *claim.supporting]
         ]
     return content
 
@@ -354,7 +353,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
-                    content = _answer_payload(result.answer, session.chunks)
+                    content = _answer_payload(result.answer)
                     turn.output(content)
                 except (UnexpectedModelBehavior, UsageLimitExceeded):
                     # Either the gate exhausted its retries without an attributable answer, or the

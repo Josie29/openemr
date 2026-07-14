@@ -209,6 +209,29 @@ class TurnTrace:
         """Record the turn's response as the trace output."""
         self._apply(lambda s: s.update(output=data))
 
+    def routed(self, route: str, reason: str) -> None:
+        """Emit one supervisor hand-off as a child span under the turn (JOS-56 logged handoffs).
+
+        The Week-2 multi-agent surface routes procedurally, so each route decision is recorded as
+        its own short child span carrying the chosen route and the reason. Nested under the active
+        ``chat-turn`` span (and thus the turn's correlation id), the ordered hand-off chain is
+        reconstructable from the trace alone — the acceptance criterion. Like every trace op here,
+        a failure is swallowed so routing is never blocked by observability.
+
+        Args:
+            route: The chosen route (e.g. ``"extract_intake"``).
+            reason: The supervisor's one-line justification for the hand-off.
+        """
+        if self._span is None:
+            return
+        try:
+            with get_client().start_as_current_observation(
+                name=f"route:{route}", as_type="span"
+            ) as span:
+                span.update(input={"route": route, "reason": reason}, metadata={"route": route})
+        except Exception:  # noqa: BLE001 - a tracing failure must not affect routing
+            logger.warning("Langfuse route span failed", exc_info=True)
+
     def _apply(self, op: Callable[[Any], None]) -> None:
         """Run a span operation, demoting any failure to a warning (tracing never breaks a turn)."""
         if self._span is None:

@@ -12,12 +12,14 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.usage import UsageLimits
 
-from copilot.agent import SYSTEM_PROMPT, SYSTEM_PROMPT_NAME, CopilotDeps, build_agent
 from copilot.config import FhirClientMode, Settings, get_settings
 from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
+from copilot.graph.deps import GraphDeps
+from copilot.graph.supervisor import build_graph, run_graph
+from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
 from copilot.health import check_readiness
 from copilot.observability import (
     configure_observability,
@@ -26,6 +28,7 @@ from copilot.observability import (
     sync_system_prompt,
 )
 from copilot.pricing import turn_cost_usd
+from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
 from copilot.schemas import ChatRequest, ChatResponse
 
 logger = logging.getLogger("copilot")
@@ -49,6 +52,29 @@ _UNAVAILABLE_ANSWER = ChatResponse(
     summary="I could not produce an answer I can fully attribute to this patient's record.",
     claims=[],
 )
+
+
+def _answer_payload(answer: ChatResponse) -> dict[str, Any]:
+    """Serialize the final answer and attach the canonical wire citation to each claim.
+
+    The response keeps the answer's own ``claims`` (with their gate-stamped ``source``) and adds,
+    per claim, the project-wide :data:`~copilot.schemas.Citation` list the sidebar's click-to-source
+    (JOS-57) consumes — each a pure projection of a grounded ``SourceRef`` via
+    :meth:`~copilot.schemas.SourceRef.to_citation`. Additive, so nothing the current sidebar reads
+    is removed, and the citations stay off the LLM-facing ``Claim`` model.
+
+    Args:
+        answer: The grounded final answer from the graph.
+
+    Returns:
+        The JSON-serializable response body, each claim carrying a ``citations`` list.
+    """
+    content: dict[str, Any] = answer.model_dump()
+    for claim_dict, claim in zip(content["claims"], answer.claims, strict=True):
+        claim_dict["citations"] = [
+            ref.to_citation().model_dump(mode="json") for ref in [claim.source, *claim.supporting]
+        ]
+    return content
 
 
 def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirClient:
@@ -185,6 +211,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
         shutdown_observability(app.state.observability_enabled)
+        # Close the evidence retriever (the Qdrant client, when live; a no-op for the fixture).
+        await app.state.retriever.aclose()
         client = app.state.fhir
         if isinstance(client, HttpFhirClient):
             await client.aclose()
@@ -211,12 +239,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ref is stamped onto each turn's trace so every answer records its prompt version.
     app.state.system_prompt_ref = sync_system_prompt(
         app.state.observability_enabled,
-        SYSTEM_PROMPT_NAME,
-        SYSTEM_PROMPT,
+        ANSWERER_PROMPT_NAME,
+        ANSWERER_PROMPT,
         settings.tracing_environment,
     )
     app.state.fhir = _build_readiness_client(settings)
-    app.state.agent = build_agent(_build_model(settings))
+    # The evidence retriever (JOS-53): the live Qdrant+Cohere hybrid pipeline in QDRANT mode, or an
+    # in-process keyword retriever over the in-repo corpus in FIXTURE mode. build_retriever returns
+    # None only when QDRANT is selected but unconfigured — degrade to the fixture (real corpus,
+    # lower-quality ranking) so /chat still grounds on guidelines rather than failing, and log it;
+    # /ready separately surfaces the degraded dependency.
+    retriever = build_retriever(settings)
+    if retriever is None:
+        logger.warning("evidence retriever unconfigured for QDRANT mode; using fixture fallback")
+        retriever = FixtureEvidenceRetriever.from_corpus(settings.rerank_top_n)
+    app.state.retriever = retriever
+    # The Week-2 supervisor graph is the only /chat behavior: supervisor routes to the
+    # intake-extractor and evidence-retriever, and the grounding gate is enforced on each worker and
+    # the final answer (context/decisions/agent-framework-week2.md).
+    app.state.graph = build_graph(_build_model(settings))
     # Server-side conversation state so multi-turn history (which contains PHI) stays in the
     # service rather than round-tripping through the client. TTL-evicted; single-instance.
     app.state.conversation_store = ConversationStore(ttl_seconds=1800, max_sessions=1000)
@@ -279,12 +320,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 conversation_id, session = store.create(payload.patient_id)
 
-            deps = CopilotDeps(
+            deps = GraphDeps(
                 fhir=fhir,
                 patient_id=payload.patient_id,
                 correlation_id=correlation_id,
-                # Accumulated across the conversation so a follow-up can cite earlier turns' reads.
+                retriever=request.app.state.retriever,
+                # Both registries accumulate across the conversation so a follow-up can cite a
+                # record read — or a guideline chunk retrieved — in an earlier turn.
                 fetched=session.fetched,
+                chunks=session.chunks,
             )
 
             with observe_turn(
@@ -296,19 +340,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.app.state.system_prompt_ref,
             ) as turn:
                 try:
-                    result = await request.app.state.agent.run(
+                    result = await run_graph(
+                        request.app.state.graph,
                         payload.message,
-                        message_history=session.messages,
-                        deps=deps,
-                        # Hard ceiling on tool calls so a runaway loop (e.g. scanning every note on
-                        # a 90+-encounter chart) cannot spend up to pydantic-ai's default 50 model
-                        # calls on one turn. Hitting it degrades to a refusal below, not a 500.
+                        deps,
+                        turn,
+                        max_hops=settings.agent_max_hops,
+                        # Hard ceiling on tool calls per agent run so a runaway loop (e.g. scanning
+                        # every note on a 90+-encounter chart) cannot spend up to pydantic-ai's
+                        # default. Hitting it degrades to a refusal below, not a 500.
                         usage_limits=UsageLimits(tool_calls_limit=settings.agent_tool_calls_limit),
                     )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
-                    session.messages = result.all_messages()
-                    content = result.output.model_dump()
+                    content = _answer_payload(result.answer)
                     turn.output(content)
                 except (UnexpectedModelBehavior, UsageLimitExceeded):
                     # Either the gate exhausted its retries without an attributable answer, or the

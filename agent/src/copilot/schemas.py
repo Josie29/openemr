@@ -55,6 +55,34 @@ class SourceRef(BaseModel):
         description="What `date` means for this record (e.g. 'Onset'). Leave empty — system-set.",
     )
 
+    def to_citation(self) -> "Citation":
+        """Project this grounded citation onto the canonical wire ``Citation`` (§3.3).
+
+        A *pure* projection of the **stamped** ``SourceRef`` (``value``/``label``/``date`` already
+        filled by the grounding gate), so the sidebar's click-to-source (JOS-57) gets the
+        machine-readable contract with no second lookup: a guideline reference reads the stamped
+        ``label`` (the guideline source id) and ``date`` (the section); a FHIR reference reads its
+        resource type/id and field. Kept off :class:`Claim` so it never enters an LLM output schema.
+
+        Returns:
+            The :class:`GuidelineCitation` or :class:`FhirCitation` for this reference, carrying the
+            claim's specific grounded value/quote.
+        """
+        quote_or_value = self.value or self.quote or ""
+        if self.resource_type == CitationSourceType.GUIDELINE.value:
+            return GuidelineCitation(
+                source_id=self.label or self.resource_id,
+                page_or_section=self.date or self.resource_id,
+                field_or_chunk_id=self.resource_id,
+                quote_or_value=quote_or_value,
+            )
+        return FhirCitation(
+            source_id=f"{self.resource_type}/{self.resource_id}",
+            page_or_section=self.resource_type,
+            field_or_chunk_id=self.field or "(none)",
+            quote_or_value=quote_or_value,
+        )
+
 
 class Claim(BaseModel):
     """A single factual statement in the agent's answer, with its supporting citation.
@@ -132,7 +160,8 @@ class ChatRequest(BaseModel):
 class CitationSourceType(StrEnum):
     """The kind of source a :class:`Citation` points at (W2_ARCHITECTURE.md §3.3).
 
-    ``GUIDELINE`` is produced this increment. ``LAB_PDF`` / ``INTAKE_FORM`` are reserved for
+    ``GUIDELINE`` (evidence) and ``FHIR`` (patient-record claims) are produced today — the
+    supervisor graph's final answer emits both. ``LAB_PDF`` / ``INTAKE_FORM`` are reserved for
     the document-extraction increment: their variants are declared so the union is extensible,
     but nothing produces them yet.
     """
@@ -140,6 +169,7 @@ class CitationSourceType(StrEnum):
     GUIDELINE = "guideline"
     LAB_PDF = "lab_pdf"
     INTAKE_FORM = "intake_form"
+    FHIR = "fhir"
 
 
 class CitationBase(BaseModel):
@@ -200,9 +230,24 @@ class IntakeFormCitation(CitationBase):
     source_type: Literal[CitationSourceType.INTAKE_FORM] = CitationSourceType.INTAKE_FORM
 
 
-# The general citation-contract type (for the eventual final-answer gate). The retriever
-# narrows to GuidelineCitation — it only ever emits guideline citations this increment.
+class FhirCitation(CitationBase):
+    """A citation to a patient-record claim read from a FHIR resource (the Week-1 read path).
+
+    The converged form of the Week-1 :class:`SourceRef` on the shared five-field contract, so the
+    supervisor's final answer emits patient-record and guideline claims in one machine-readable
+    shape. Field mapping from a resolved ``SourceRef``: ``source_id`` <- ``resource_type/id``,
+    ``page_or_section`` <- the resource type, ``field_or_chunk_id`` <- the cited field, and
+    ``quote_or_value`` <- the gate-stamped record value. ``SourceRef`` remains the gate's internal
+    grounding shape; this is its wire/UI projection (routing the grounding gate by ``source_type``
+    is still the tracked follow-up).
+    """
+
+    source_type: Literal[CitationSourceType.FHIR] = CitationSourceType.FHIR
+
+
+# The general citation-contract type. Today the retriever narrows to GuidelineCitation and the
+# final-answer response emits GuidelineCitation (evidence) + FhirCitation (record) per claim.
 Citation = Annotated[
-    GuidelineCitation | LabPdfCitation | IntakeFormCitation,
+    GuidelineCitation | LabPdfCitation | IntakeFormCitation | FhirCitation,
     Field(discriminator="source_type"),
 ]

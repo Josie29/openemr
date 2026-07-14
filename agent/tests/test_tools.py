@@ -1,14 +1,12 @@
-from collections.abc import Callable
-
-import httpx
 from fastapi.testclient import TestClient
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from copilot.config import FhirClientMode, Settings
 from copilot.fhir.fixtures import FixtureFhirClient
+from copilot.graph.outputs import ExtractorOutput
+from copilot.graph.routing import Route
 from copilot.main import create_app
 from copilot.schemas import ChatResponse, Claim, SourceRef
+from graph_script import override_graph, route_model, worker_model
 
 
 async def test_medications_are_deduplicated(seed_client: FixtureFhirClient) -> None:
@@ -53,75 +51,37 @@ async def test_encounters_expose_date_and_reason(seed_client: FixtureFhirClient)
     assert all(e.start_date is not None for e in encounters)
 
 
-def _final_tool_name(info: AgentInfo) -> str:
-    tools = getattr(info, "output_tools", None) or getattr(info, "result_tools", None) or []
-    return tools[0].name if tools else "final_result"
-
-
-def _scripted_orientation(tool_names: list[str], final: ChatResponse) -> FunctionModel:
-    """A model that calls a sequence of tools, then returns a fixed structured answer.
-
-    Args:
-        tool_names: The tools to call, in order, before answering.
-        final: The ``ChatResponse`` to return once the tools have run.
-
-    Returns:
-        A ``FunctionModel`` scripting that sequence.
-    """
-    state = {"step": 0}
-
-    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        step = state["step"]
-        state["step"] += 1
-        if step < len(tool_names):
-            return ModelResponse(parts=[ToolCallPart(tool_name=tool_names[step], args={})])
-        return ModelResponse(
-            parts=[
-                ToolCallPart(tool_name=_final_tool_name(info), args=final.model_dump(mode="json"))
-            ]
-        )
-
-    return FunctionModel(respond)
-
-
-def _post_chat(settings: Settings, model: FunctionModel) -> Callable[[], httpx.Response]:
-    app = create_app(settings)
-    client = TestClient(app)
-
-    def call() -> httpx.Response:
-        with app.state.agent.override(model=model):
-            # Starlette's TestClient returns its vendored httpx Response (not importable here).
-            return client.post(  # type: ignore[return-value]
-                "/chat", json={"patient_id": "1", "message": "Give me the picture."}
-            )
-
-    return call
-
-
 def test_uc1_orientation_grounds_across_problem_and_medication(settings: Settings) -> None:
     # Guards UC-1 end-to-end across multiple resource types: an orientation that fetches problems
     # and meds and cites one of each must pass the gate with the REAL record values stamped in.
     # If cross-resource grounding regresses, multi-tool answers would be wrongly refused.
-    orientation = ChatResponse(
-        summary="68F with type 2 diabetes; on metformin.",
-        claims=[
-            Claim(
-                text="Active problem: type 2 diabetes mellitus.",
-                source=SourceRef(
-                    resource_type="Condition", resource_id="cond-dm2", field="display"
-                ),
+    claims = [
+        Claim(
+            text="Active problem: type 2 diabetes mellitus.",
+            source=SourceRef(resource_type="Condition", resource_id="cond-dm2", field="display"),
+        ),
+        Claim(
+            text="Currently on metformin 500 mg.",
+            source=SourceRef(
+                resource_type="MedicationRequest", resource_id="med-metformin", field="name"
             ),
-            Claim(
-                text="Currently on metformin 500 mg.",
-                source=SourceRef(
-                    resource_type="MedicationRequest", resource_id="med-metformin", field="name"
-                ),
-            ),
-        ],
-    )
-    response = _post_chat(
-        settings, _scripted_orientation(["get_problems", "get_medications"], orientation)
-    )()
+        ),
+    ]
+    app = create_app(settings)
+    with override_graph(
+        app.state.graph,
+        router=route_model([Route.EXTRACT_INTAKE, Route.ANSWER]),
+        extractor=worker_model(
+            [("get_problems", {}), ("get_medications", {})],
+            ExtractorOutput(summary="DM on metformin.", claims=claims),
+        ),
+        answerer=worker_model(
+            [], ChatResponse(summary="68F with type 2 diabetes; on metformin.", claims=claims)
+        ),
+    ):
+        response = TestClient(app).post(
+            "/chat", json={"patient_id": "1", "message": "Give me the picture."}
+        )
 
     assert response.status_code == 200
     body = response.json()

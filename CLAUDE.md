@@ -128,6 +128,11 @@ tooling, evals). Integrate them on `qa/integration`, test locally, then promote 
   and openemr-cmd state (ports, `.env`, `.worktrees.json`) that the tooling can no
   longer tear down — see the next section for why.
 
+**New worktrees auto-inherit `agent/.env`.** A machine-local `post-checkout` hook
+symlinks the gitignored `agent/.env` (API keys) from `git config agentforge.envsource`
+(the main checkout's copy) into any worktree lacking one — never clobbers a local `.env`.
+Not committed, so re-establish per machine: write the hook + set that config key.
+
 ## Working in a git worktree
 
 OpenEMR supports concurrent development across branches via git worktrees

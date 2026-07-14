@@ -34,7 +34,8 @@ OpenEMR already ships — `Patient`, `Condition`, `MedicationRequest`, `AllergyI
 stock FHIR reads; no custom endpoint was needed.
 
 **Key decisions.** Single agent, not multi-agent — every use case is one conversational
-agent over the six-tool set (derivation in [§6](#6-the-agent)). **Pydantic AI** for the
+agent over the six-tool set (derivation in [§6](#6-the-agent)) (Week-1 /chat; superseded by
+the Week-2 supervisor graph — see [`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §4). **Pydantic AI** for the
 framework, because the PRD's "every response passes through a verification layer" maps
 directly onto its `output_validator` + `ModelRetry` hook — the verification requirement
 *is* a first-class language feature, not bolted on. **Claude** — the deployed service runs
@@ -219,6 +220,11 @@ model, rather than being re-implemented (and drifting) inside the agent.
 
 ## 6. The agent
 
+> **Superseded for /chat (Week 2).** As of Week 2, the supervisor graph (see
+> [`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §4) is the **only** /chat behavior; the single
+> agent described below survives solely as the eval-harness target
+> (`agent/src/copilot/evals/runner.py`; migration tracked under JOS-50).
+
 ### 6.1 Single agent — the verdict, derived not assumed
 
 The PRD warns that "every agent capability must trace to a specific user problem." So the
@@ -265,6 +271,10 @@ flowchart LR
     loop -.->|steps, timings, tokens, cost| obs[("Langfuse")]
 ```
 
+*This diagram depicts the **Week-1 single-agent path**, which now runs only as the
+eval-harness target; the live /chat turn is the Week-2 supervisor graph
+([`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §4.1).*
+
 **Model.** The deployed service runs a **single tier per deploy** — Sonnet 5 in production.
 The Haiku 4.5 and Opus 4.8 tiers are declared in config (`ModelTier`, with per-tier pricing),
 so cost-tiered routing — cheap sub-tasks to Haiku, Opus reserved for the hardest reasoning if
@@ -283,7 +293,9 @@ stated hallucination in a clinical setting can harm a patient.
 **Where it sits.** The gate is Pydantic AI's `@agent.output_validator`, which runs **after
 the model produces a candidate response and before anything reaches the physician.** On
 failure it raises `ModelRetry`, feeding the violation back to the model to force a
-correction. One seam, all five use cases pass through it.
+correction. One seam, all five use cases pass through it. *(Week 2: the same gate is now
+applied at all three graph stages — intake-extractor, evidence-retriever, and final answer —
+via one shared `CitationResolver`; see [`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §4.3.)*
 
 **Why designed this way.** The PRD requirement — "every response must pass through a
 verification layer before reaching the user" — maps *exactly* onto this hook. It is a
@@ -364,7 +376,9 @@ auditable place rather than scattering PHI egress across a monolith (Option A's 
 ## 10. Observability & operations
 
 Wired in from the first commit, not bolted on — the PRD engineering requirements are
-acceptance criteria.
+acceptance criteria. *(This describes the Week-1 seam; the Week-2 graph extends it — per-route
+child spans under the chat-turn root and the answerer-prompt sync are covered in
+[`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §9.)*
 
 - **Correlation IDs across every boundary.** Each `/chat` invocation gets a unique ID
   (accepted from an inbound `X-Correlation-ID` header, generated if absent) that appears in
@@ -386,6 +400,10 @@ acceptance criteria.
 ---
 
 ## 11. Evaluation approach
+
+*(Week-1 harness. As of Week 2 the single agent is removed from the /chat request path and the
+eval harness is its **only** remaining role — evals migrate onto the supervisor graph under
+JOS-50; see [`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §§7–8.)*
 
 Two layers, both scored to Langfuse:
 
@@ -475,7 +493,9 @@ per-seat billing) were the runners-up.
 ## 14. Traceability matrix
 
 Every capability maps to a use case and a PRD requirement. Anything not on this table is out
-of scope until a use case justifies it.
+of scope until a use case justifies it. *(Week-1 capability map; the single-agent architecture
+row now describes the eval-harness target only — the live /chat path is the Week-2 supervisor
+graph, [`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §4.)*
 
 | Capability | Traces to (USERS.md) | PRD requirement |
 |---|---|---|

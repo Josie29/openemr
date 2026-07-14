@@ -1,24 +1,36 @@
 # AgentForge Clinical Co-Pilot — agent service
 
-The standalone Python agent service from `ARCHITECTURE.md` (Option D). It grew out of a **walking
-skeleton** (implementation prompt `context/execution/implementation-prompt-01-walking-skeleton.md`)
-and now runs the full turn: `POST /chat` → correlation ID → FHIR tools → Claude → deterministic
-verification gate → grounded structured answer with follow-ups → Langfuse trace (tokens, cost,
-verification score) — plus real `/health` and `/ready` probes and a Langfuse eval harness.
+The standalone Python agent service from `ARCHITECTURE.md` (Option D), extended for Week 2 per
+`W2_ARCHITECTURE.md`. It grew out of a **walking skeleton** (implementation prompt
+`context/execution/implementation-prompt-01-walking-skeleton.md`) and now runs the Week-2
+**supervisor + 2-worker graph**: `POST /chat` → correlation ID → supervisor/router loop →
+intake-extractor + evidence-retriever → final answerer → deterministic grounding gate on every
+claim → grounded structured answer with follow-ups → Langfuse trace (tokens, cost, verification
+score) — plus real `/health` and `/ready` probes and a Langfuse eval harness. **The Week-1 single
+agent survives only as the eval-harness target** (migration under JOS-50); it is no longer on the
+`/chat` path.
 
-Six FHIR read tools are wired — `get_patient` (`Patient`), `get_problems` (`Condition`),
-`get_medications` (`MedicationRequest`, deduplicated), `get_allergies` (`AllergyIntolerance`),
-`get_encounters` (`Encounter`, metadata), and `get_encounter_note` (`DocumentReference` — the
-free-text clinical note for one visit, base64-decoded) — covering UC-1 orientation, UC-4
-cross-referencing, and UC-3 note drill-down. Reads run under a **per-request patient-scoped token**
-(the `Authorization: Bearer` header the PHP module sends; see
-[Chat API contract](#chat-api-contract)), and **multi-turn conversations** are supported with
-server-side history (also in the contract). Answers carry **follow-up suggestions**, and every
-turn is **cost-scored** to Langfuse. The runtime verification gate grounds every claim
-**deterministically**: a structured claim cites a fetched field; a note claim cites a **verbatim
-quote** checked as a substring of the note text — plus domain constraints (UC-4 flags are
-candidates for review, never asserted). **Faithfulness** (a Haiku 4.5 entailment judge) runs in
-the **eval harness** (`src/copilot/evals/`), *not* the runtime path. SSE streaming and dynamic
+The graph has three roles. The **supervisor/router** runs a *procedural* loop, emitting a typed
+`RouteDecision` per hop that dispatches the next worker (each decision logged as a structured
+event / Langfuse child span). The **intake-extractor** owns the six FHIR read tools — `get_patient`
+(`Patient`), `get_problems` (`Condition`), `get_medications` (`MedicationRequest`, deduplicated),
+`get_allergies` (`AllergyIntolerance`), `get_encounters` (`Encounter`, metadata), and
+`get_encounter_note` (`DocumentReference` — the free-text clinical note for one visit,
+base64-decoded) — covering UC-1 orientation, UC-4 cross-referencing, and UC-3 note drill-down. The
+**evidence-retriever** runs **hybrid RAG** over a 55-chunk in-repo clinical-guideline corpus (see
+[Retrieval](#retrieval)). The **answerer** synthesizes the workers' outputs into the final grounded
+response.
+
+Reads run under a **per-request patient-scoped token** (the `Authorization: Bearer` header the PHP
+module sends; see [Chat API contract](#chat-api-contract)), and **multi-turn conversations** are
+supported with server-side history (also in the contract). Answers carry **follow-up suggestions**,
+and every turn is **cost-scored** to Langfuse. The **grounding gate** runs on each worker *and* the
+final answer, grounding every claim **deterministically**: a record claim cites a fetched FHIR
+field; a note claim cites a **verbatim quote** checked as a substring of the note text; an evidence
+claim cites a retrieved guideline chunk — plus domain constraints (UC-4 flags are candidates for
+review, never asserted). Every claim carries a **canonical wire citation** — `source_type` `"fhir"`
+for record claims, `"guideline"` for evidence. **Faithfulness** (a Haiku 4.5 entailment judge) runs
+in the **eval harness** (`src/copilot/evals/`), *not* the runtime path. SSE streaming and dynamic
 model-tier routing remain follow-up increments — the service runs a single tier (Sonnet 5) per
 deploy. See `context/decisions/agent-workflow.md`.
 
@@ -32,25 +44,38 @@ When it needs several views (per-use-case sequences, deployment), we'll promote 
 flowchart TD
     client([Client / chat panel]) -->|POST /chat| cid[correlation-ID middleware]
     cid --> obs[observe_turn:<br/>open chat-turn span]
-    obs --> agent{{Pydantic AI agent · Claude}}
+    obs --> sup{{Supervisor / router loop · Claude<br/>typed RouteDecision per hop}}
 
-    agent -->|tool call| tool[FHIR read tools:<br/>patient · problems · meds · allergies<br/>· encounters · encounter_note]
+    sup -->|route: intake| intake{{intake-extractor · Claude}}
+    sup -->|route: evidence| evi{{evidence-retriever · Claude}}
+    sup -->|route: answer| ans{{answerer · Claude}}
+
+    intake -->|tool call| tool[FHIR read tools:<br/>patient · problems · meds · allergies<br/>· encounters · encounter_note]
     tool --> fhir[FhirClient<br/>fixture · or SMART httpx, no DB creds]
     fhir -->|R4 resources| parse[parse → typed models]
     parse --> flog[(FetchLog<br/>typed resource)]
-    parse --> agent
+    intake -->|extracted facts| sup
 
-    agent -->|candidate ChatResponse| gate{output_validator:<br/>grounding gate}
+    evi -->|hybrid RAG| retr[Retriever<br/>qdrant: Qdrant + Cohere rerank<br/>fixture: in-process keyword]
+    retr -->|top guideline chunks| chunks[(ChunkRegistry)]
+    evi -->|evidence snippets| sup
+
+    ans -->|candidate ChatResponse| gate{grounding gate}
     flog -. resolve field → value .-> gate
-    gate -->|claim not grounded| retry[ModelRetry] --> agent
-    gate -->|all grounded| stamp[stamp source.value<br/>from the record]
-    stamp --> resp[[ChatResponse:<br/>claims + verified values]]
+    chunks -. resolve chunk → citation .-> gate
+    gate -->|claim not grounded| retry[ModelRetry] --> ans
+    gate -->|all grounded| stamp[stamp source.value<br/>from record / guideline]
+    stamp --> resp[[ChatResponse:<br/>claims + wire citations]]
     resp -->|200 JSON| client
 
     obs -. tokens · cost · verification score .-> lf[(Langfuse trace)]
 ```
 
-`/health` and `/ready` are orthogonal probes, not part of the turn (see below).
+The **grounding gate** shown on the answerer also attaches to each worker's output (reject an
+extracted fact or evidence claim that isn't traceable to a source) — the same code, one seam,
+reused. Because routing is *procedural* (not delegation-as-tool), the workers are sibling
+instrumented runs under the turn root, so the trace is flat rather than nesting workers under a
+supervisor span. `/health` and `/ready` are orthogonal probes, not part of the turn (see below).
 
 ## Layout
 
@@ -59,14 +84,16 @@ src/copilot/
   main.py          FastAPI app, routes, middleware wiring
   config.py        pydantic-settings; all config/secrets from env (COPILOT_ prefix)
   schemas.py       ChatRequest / ChatResponse / Claim / SourceRef contracts (+ follow_ups)
-  agent.py         Pydantic AI agent: six FHIR tools + deterministic output_validator gate
+  agent.py         Pydantic AI agents: supervisor/router + workers (six FHIR tools) + grounding gate
+  retrieval.py     ChunkRegistry: resolves evidence SourceRefs so the gate can ground guideline claims
   verification.py  FetchLog + field-level grounding & value stamping (ARCHITECTURE.md §7)
   conversation.py  in-memory multi-turn ConversationStore (per user+patient; TTL + LRU bounded)
   pricing.py       model-tier pricing tables + per-turn cost (turn_cost_usd)
   correlation.py   X-Correlation-ID middleware
   observability.py Langfuse + Pydantic AI instrumentation; chat-turn span + verification & cost scores
-  health.py        /health + /ready dependency probes
+  health.py        /health + /ready dependency probes (fhir · llm · langfuse · qdrant · cohere)
   fhir/            FhirClient protocol, httpx impl, fixture impl, PatientDemographics
+  rag/             hybrid retriever (COPILOT_RETRIEVAL_MODE: qdrant + Cohere rerank | keyword) + corpus
   evals/           Langfuse-hosted eval dataset, cases, deterministic + Haiku-judge evaluators
 tests/             deterministic tests (fixtures + FunctionModel; no live LLM/FHIR)
 ```
@@ -77,7 +104,7 @@ tests/             deterministic tests (fixtures + FunctionModel; no live LLM/FH
 cd agent
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env            # fixture FHIR mode works with no external services
+cp .env.example .env            # fixture FHIR + fixture retrieval mode work with no external services
 
 # Serve (fixture patient id "1" is bundled):
 uvicorn copilot.main:app --reload
@@ -92,12 +119,30 @@ curl -X POST localhost:8000/chat \
 `/chat` needs `COPILOT_ANTHROPIC_API_KEY` for a live answer. Without it, run the tests — they
 drive the agent with a scripted model and need no key.
 
+## Retrieval
+
+The evidence-retriever runs **hybrid RAG** over the same 55-chunk in-repo clinical-guideline
+corpus in both modes; `COPILOT_RETRIEVAL_MODE` picks the backend:
+
+| Mode | Backend | External keys | Use for |
+|---|---|---|---|
+| `fixture` *(default)* | in-process keyword retriever over the in-repo corpus | none | local runs, tests, offline / no-key demos |
+| `qdrant` | live **Qdrant** (Railway) hybrid search (dense + sparse → RRF) + **Cohere** rerank (`rerank-v4.0-fast`) | `QDRANT_URL`, `QDRANT_API_KEY`, `COHERE_API_KEY` | prod / faithful retrieval eval |
+
+**Recommend `fixture` for local development and tests** — it exercises the full graph and grounding
+gate with no external services or keys. Switch to `qdrant` only when validating the live pipeline;
+it adds the `qdrant` and `cohere` dependency probes to `/ready` (below). The Qdrant collection
+defaults to `guidelines` (`COPILOT_QDRANT_COLLECTION`). Credentials use their native SDK names
+(`CO_API_KEY` is also accepted for Cohere); the `COPILOT_`-prefixed forms work too.
+
 ## Making `/ready` green
 
 `/ready` returns 503 until every dependency probe passes, and 200 only when all do (that is
 the point — it must never return an unconditional 200). It reports each dependency's status
-in the body, e.g. `{"fhir": true, "llm": false, "langfuse": false}`. The LLM and Langfuse
-probes fail out of the box because no credentials are set.
+in the body, e.g. `{"fhir": true, "llm": false, "langfuse": false, "qdrant": true, "cohere": true}`.
+The LLM and Langfuse probes fail out of the box because no credentials are set. The `qdrant` and
+`cohere` probes report ready **without a network call** in `fixture` retrieval mode (they aren't
+used); in `qdrant` mode they probe the live services and need the keys below.
 
 > **Secrets never go in this file.** Set the variables below in your gitignored `.env`
 > (locally) or as Railway service variables (prod) — `.env.example` lists them with empty
@@ -111,6 +156,8 @@ Credentials use their **native SDK names** (copy them straight from each vendor)
 | `ANTHROPIC_API_KEY` | LLM probe (`GET api.anthropic.com/v1/models` — metadata, not a completion) | Claude Console |
 | `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` | Langfuse probe (`GET {host}/api/public/health`) — **both** required, or tracing stays disabled | Langfuse → Settings → API Keys (free Hobby tier is enough) |
 | `LANGFUSE_BASE_URL` | *(optional)* defaults to EU Cloud; **must match your project region** — US is `https://us.cloud.langfuse.com` | your Langfuse instance URL |
+| `QDRANT_URL` + `QDRANT_API_KEY` | Qdrant probe (`GET {url}/readyz`) — **only in `qdrant` retrieval mode**; skipped (reported ready) in `fixture` mode | your Qdrant service (Railway internal URL in prod) |
+| `COHERE_API_KEY` | Cohere probe (`GET api.cohere.com/v1/models`) — **only in `qdrant` retrieval mode**; skipped in `fixture` mode | Cohere dashboard (native `CO_API_KEY` also accepted) |
 
 With those set in `.env`:
 
@@ -118,8 +165,10 @@ With those set in `.env`:
 curl -s localhost:8000/ready | jq       # 200, every dependency "ok": true
 ```
 
-The same three probes back `/ready` whether run locally or on Railway — setting these as
-Railway service variables is what makes the deployed `/ready` report healthy.
+The same five probes back `/ready` whether run locally or on Railway — setting these as
+Railway service variables is what makes the deployed `/ready` report healthy. In `fixture`
+retrieval mode only the `fhir`, `llm`, and `langfuse` probes need credentials; `qdrant` mode
+adds the `qdrant` and `cohere` probes.
 
 ## Quality gates
 
@@ -172,8 +221,10 @@ curl -X POST https://<agent-domain>/chat -H 'content-type: application/json' \
 railway variables --set COPILOT_FHIR_CLIENT_MODE=http --service copilot-agent      # flip back to real FHIR
 ```
 
-Fixture mode exercises the full pipeline (Claude · 6 tools · grounding gate · Langfuse trace) on
-seed data; it does **not** hit live FHIR or the auth path. Default the deployed service to `http`.
+Fixture mode exercises the full pipeline (Claude · supervisor+workers graph · grounding gate ·
+Langfuse trace) on seed data; it does **not** hit live FHIR or the auth path. Default the deployed
+service to `http`. (This `COPILOT_FHIR_CLIENT_MODE` toggle is independent of
+`COPILOT_RETRIEVAL_MODE` above — one governs FHIR reads, the other guideline retrieval.)
 
 ## Deploy (Railway)
 

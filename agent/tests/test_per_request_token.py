@@ -58,7 +58,9 @@ def test_cors_origins_default_to_empty_not_wildcard(monkeypatch: pytest.MonkeyPa
     # Fail closed: an unconfigured service must permit no browser origin at all. A "*" default would
     # let any page on the internet spend a stolen SMART token against /chat.
     monkeypatch.delenv("COPILOT_CORS_ORIGINS", raising=False)
-    assert Settings().cors_origins == []
+    # _env_file=None so the default is tested against the CODE, not an ambient agent/.env (which a
+    # worktree may inherit); "unconfigured" means no env var AND no .env file.
+    assert Settings(_env_file=None).cors_origins == []
 
 
 @pytest.mark.parametrize(

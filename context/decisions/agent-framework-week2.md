@@ -147,6 +147,20 @@ inside the same framework before any cross-framework migration is needed.
 
 ---
 
+## As-built (what shipped)
+
+A **procedural router loop** shipped: a router agent emits a typed `RouteDecision` per hop and
+plain Python dispatches the workers (intake-extractor + evidence-retriever → answerer). This is
+exactly this doc's own stated **mitigation** — every route decision is logged as a structured
+event and surfaced as a Langfuse child span, so routing is inspectable *in the trace* even though
+it's expressed in code. One consequence supersedes the §"Langfuse / OTel fit" rationale above:
+because routing is procedural rather than delegation-as-tool, the workers are **sibling
+instrumented runs under the turn root**, not spans nested under a supervisor's run — the trace is
+flat, not "worker = child span of the supervisor span." `pydantic-graph` and LangGraph remain the
+pre-registered escape hatches if the routing outgrows the procedural loop.
+
+---
+
 ## Sources (2026, verified)
 
 - Pydantic AI multi-agent: [Multi-Agent Patterns — Pydantic Docs](https://pydantic.dev/docs/ai/guides/multi-agent-applications/), [pydantic-ai `docs/multi-agent-applications.md`](https://github.com/pydantic/pydantic-ai/blob/main/docs/multi-agent-applications.md) (agent delegation via tools; `ctx.usage` threads token accounting; delegated runs nest in the parent trace with distinct `name`), [`pydantic-graph` / Agents docs](https://pydantic.dev/docs/ai/core-concepts/agent/)

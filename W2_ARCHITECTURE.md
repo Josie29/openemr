@@ -98,7 +98,7 @@ so this expansion would be additive.
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
 | **Eval harness** | 7 cases, report-only, runs on promotion PRs | **50 cases, 5 boolean rubrics, PR-blocking, >5% = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs, FHIR writes |
-| **Tracing** | Flat spans under one turn | Per-worker spans **nested under the supervisor span** |
+| **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
 
 **What did not change** (and why that matters): the deployment topology (Option D — PHP module +
 standalone Python agent), the authorization model (patient-scoped SMART token minted in PHP, IDOR
@@ -199,13 +199,13 @@ citation metadata in one shape:
 { source_type, source_id, page_or_section, field_or_chunk_id, quote_or_value }
 ```
 
-| Field | For an extracted document fact | For a retrieved guideline snippet |
-|---|---|---|
-| `source_type` | `lab_pdf` / `intake_form` | `guideline` |
-| `source_id` | the `DocumentReference` ID | the corpus document ID |
-| `page_or_section` | PDF page number | section heading |
-| `field_or_chunk_id` | the schema field name | the Qdrant chunk ID |
-| `quote_or_value` | the extracted value (verbatim) | the retrieved snippet text |
+| Field | For an extracted document fact | For a retrieved guideline snippet | For a FHIR record claim |
+|---|---|---|---|
+| `source_type` | `lab_pdf` / `intake_form` | `guideline` | `fhir` |
+| `source_id` | the `DocumentReference` ID | the corpus document ID | the FHIR resource type/id (e.g. `Condition/123`) |
+| `page_or_section` | PDF page number | section heading | — (n/a for a record claim) |
+| `field_or_chunk_id` | the schema field name | the Qdrant chunk ID | the FHIR element / field name |
+| `quote_or_value` | the extracted value (verbatim) | the retrieved snippet text | the field value (verbatim) |
 
 For `lab_pdf`, the citation additionally records the **bounding-box coordinates** on the page —
 emitted **natively by Mistral OCR 4** alongside each typed field (§3, §3.1), not reconstructed by a
@@ -222,8 +222,9 @@ against the source and stamps the real value (§4.3). The **canonical `Citation`
 `{source_type, source_id, page_or_section, field_or_chunk_id, quote_or_value}` — is what the
 click-to-source UI consumes. The final answer grounds each claim via the internal reference, then
 emits the canonical `Citation` per claim: `source_type = guideline` for corpus claims,
-`openemr_record` for record claims; the `lab_pdf` / `intake_form` document citations (with
-bounding boxes) come from the ingestion path (§3.1).
+`fhir` for record claims (the `FhirCitation` arm of the `schemas.py` discriminated union, now
+produced for record claims alongside `GuidelineCitation`'s `guideline`); the `lab_pdf` /
+`intake_form` document citations (with bounding boxes) come from the ingestion path (§3.1).
 
 ### 3.4 Extraction is a one-time transform — re-extraction & idempotency
 
@@ -307,8 +308,9 @@ risk"). We answer that by making routing legible **in the trace**:
   chosen route (`extract_intake` / `retrieve_evidence` / `answer`) plus a one-line reason — logged
   as a structured event with its correlation ID. The PRD requires that handoffs be "logged and
   explainable" — this is that log.
-- **Langfuse child spans.** Each **route decision** is a **child span under the turn span**, and
-  the worker it dispatches is a child span in turn (§9), so the full hand-off chain is
+- **Langfuse child spans.** Each **route decision** is a **child span under the chat-turn root**,
+  and the worker it dispatches is a **sibling instrumented run under the same root** — a flat
+  shape, not nested under a separate supervisor span (§9) — so the full hand-off chain is
   reconstructable from the correlation ID alone. The routing is inspectable in the trace even
   though it is expressed in code.
 - **Escalation path.** If routing later needs an explicit, diagrammable FSM, `pydantic-graph`
@@ -390,9 +392,9 @@ with the concrete choices: dense `BAAI/bge-small-en-v1.5` (384-dim), sparse `Qdr
 (IDF), `prefetch_k=20`, `rerank_top_n=5`. Retrieved snippets carry the §3.3 `guideline`
 citation arm; `/ready` now probes Qdrant (`/readyz`) and Cohere (§10). Design contract:
 [`context/specs/hybrid-rag-pipeline.md`](context/specs/hybrid-rag-pipeline.md). The retriever
-is a standalone capability this increment; **weaving evidence into the final answer and the
-`output_validator` gate shown above is the JOS-56 supervisor/worker graph** (§4), which consumes
-this retriever and enforces the evidence guardrail at the worker level.
+began as a standalone capability this increment; **the JOS-56 supervisor/worker graph** (§4) that
+weaves evidence into the final answer and the `output_validator` gate shown above is **now
+built** — it consumes this retriever and enforces the evidence guardrail at the worker level.
 
 ### 5.2 The sophistication ladder — where we stopped, and why
 
@@ -492,6 +494,12 @@ this into the gate the PRD demands:
 - **PR-blocking git hook / CI job.** The suite runs on every PR and **blocks the merge** if any
   rubric category **regresses by more than 5%** or drops below its pass threshold.
 
+> **As-built vs. target-state.** The Week-1 single agent has been **removed from the /chat
+> request path** — the supervisor graph (§4) is now the only /chat behavior, and the single agent
+> survives solely as the eval-harness target. The 50-case PR-blocking gate above is described as
+> **target-state**: migrating the eval harness onto the graph is tracked under **JOS-50**; the
+> as-built harness is still the Week-1 7-case report-only suite ([`ARCHITECTURE.md`](ARCHITECTURE.md) §11).
+
 | Rubric | Boolean question it answers | Guards against |
 |---|---|---|
 | `schema_valid` | Did extraction conform to the `LabReport`/`IntakeForm` schema? | Raw extractor output bypassing the canonical contract (§3) |
@@ -512,6 +520,11 @@ only in a database with no recovery path.
 Every test is classified by layer and documented with **the failure mode it guards against** (PRD
 Engineering Requirements). Integration tests run in CI **without live API access** by stubbing
 LLM and Mistral OCR 4 extractor responses against fixture documents.
+
+> **Note.** The Week-1 single agent has been **removed from the /chat request path** — the
+> supervisor graph (§4) is now the only /chat behavior — and now lives only in the eval harness
+> ([`ARCHITECTURE.md`](ARCHITECTURE.md) §11; graph migration tracked under **JOS-50**). The
+> full ingestion→answer integration path below exercises the graph, not the retired single agent.
 
 | Layer | What it covers | Failure mode it guards |
 |---|---|---|
@@ -543,13 +556,19 @@ Week 2 **extends** the Week-1 observability seam ([`ARCHITECTURE.md`](ARCHITECTU
 Langfuse, same correlation-ID discipline, same structured-log format. No parallel logging
 convention is introduced; the Week-1 log schema gains new event types.
 
-- **Route-decision and per-worker spans nested under the turn span.** Each supervisor **route
-  decision** is emitted as its own **Langfuse child span** under the turn span, carrying the chosen
-  route (`extract_intake` / `retrieve_evidence` / `answer`) and its one-line reason; the worker it
-  dispatches (intake-extractor, evidence-retriever) is a child span in turn, with the extraction
-  and retrieval sub-calls traceable *within* their worker spans. The full hand-off chain is
+- **Route-decision and per-worker spans under the chat-turn root — a flat shape (as-built).**
+  Each supervisor **route decision** is emitted as its own **Langfuse child span** under the
+  **chat-turn root**, carrying the chosen route (`extract_intake` / `retrieve_evidence` /
+  `answer`) and its one-line reason; the worker it dispatches (intake-extractor,
+  evidence-retriever) is captured as a **sibling instrumented run under the same chat-turn root**
+  — with the extraction and retrieval sub-calls traceable *within* their worker runs. This is an
+  intended **flat** shape: route events and worker runs both hang off the chat-turn root, **not**
+  nested under a separate "supervisor span" (verified live). The full hand-off chain is
   reconstructable **from the correlation ID alone** — the PRD's explicit distributed-tracing
   requirement.
+- **Prompt-management syncs the answerer prompt.** Prompt-management now syncs the answerer
+  prompt `copilot-answerer-prompt` (replacing the Week-1 `copilot-system-prompt`), so the graph's
+  final-answer stage is versioned in Langfuse like the Week-1 single agent's system prompt was.
 - **Correlation-ID propagation into the new boundaries.** The Week-1 correlation ID
   ([`ARCHITECTURE.md`](ARCHITECTURE.md) §10) now threads through **ingestion** (document
   upload/extract), **worker handoffs**, the **extraction call**, **retrieval calls**, and **FHIR writes**

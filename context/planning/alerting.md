@@ -19,6 +19,14 @@ recalibrate as traffic grows. Observed baseline: latency **p50 21.5s / p95 29s /
 "answer in seconds" bar — that's a product-latency concern tracked separately, not something an
 alert threshold should fire on every turn.)
 
+> **⚠️ RE-BASELINE — the A1/A5 baselines are Week-1-derived and provisional.** The p95 latency
+> (~29s → A1) and p95 `turn_cost` (~$0.092 → A5) baselines were measured on 22 **single-agent**
+> turns (2026-07-10) = one LLM call per turn. `/chat` now runs the Week-2 supervisor graph, where a
+> turn makes ~3–5 LLM calls (router + N worker hops + answerer), so **both p95 latency and p95
+> `turn_cost` will step up materially**. Treat the A1 and A5 thresholds below as provisional until
+> re-baselined against accumulated graph traffic; the A2/A3/A4 thresholds (counts / grounding avg)
+> are unaffected.
+
 ---
 
 ## 1. Signal inventory — what the agent emits today
@@ -29,8 +37,8 @@ Every `POST /chat` turn is one Langfuse `chat-turn` trace (`observability.py`), 
 |---|---|---|
 | Turn / span latency | OTel auto-instrumentation (generation + tool spans) | Yes |
 | Token usage & cost | OTel auto-instrumentation | Yes |
-| Tool calls (each FHIR read = one span) | `agent.py` `_track` tool wrappers | Yes |
-| `verification_grounding` (0/1) | `observe_turn` → `score_trace` (`observability.py`) | Yes |
+| Tool calls (each FHIR read = one span) | `register_fhir_read_tools` (intake-extractor worker) + `search_guidelines` (evidence-retriever) | Yes |
+| `verification_grounding` (0/1) | `TurnTrace.verified()` (called from `main.py`) | Yes |
 | `turn_error` (=1 on any failed turn) | `TurnTrace.errored()` in `/chat` handlers | Yes |
 | `tool_error` (=1 on a FHIR read failure) | `TurnTrace.errored(tool_failure=True)` | Yes |
 | `turn_cost` (turn model cost, USD) | `TurnTrace.costed()` in `/chat`; priced by `pricing.turn_cost_usd` | Yes |
@@ -52,7 +60,21 @@ cost, which a multi-generation turn (grounding retry, tool loop) splits — not 
 route computes each turn's dollar cost from its token usage (`pricing.turn_cost_usd`, priced by
 `ModelTier`) and emits it as the `turn_cost` numeric score, giving A5 a true per-turn value to
 threshold. Cost is emitted on the *answered* path only (a turn that errors before returning has no
-usage to price); those turns are already covered by A2/A3.
+usage to price); those turns are already covered by A2/A3. `turn_cost` correctly aggregates usage
+across the **whole** graph, and per-route child spans land under `chat-turn` (verified live).
+
+**Week-2 signals — not yet emitted (tracked).** The PRD-week-2 dashboard/alerts call for a few
+graph-shaped signals this doc does *not* yet cover: a **routing-decision distribution** metric
+(today routing is only per-trace `route:*` spans with no aggregatable score), **per-worker
+latency/cost**, and **RAG retrieval-hit-rate** — none are emitted yet. They pair with new alerts
+not in §2: extraction-failure-rate, RAG-retrieval-latency, and eval-regression. This is a recorded
+gap only: the MVP observability slice is **JOS-59** and the full dashboards/alerts are **JOS-64** —
+the code work is out of scope for this change.
+
+**Prompt Management.** The service now syncs `copilot-answerer-prompt`; the Week-1
+`copilot-system-prompt` is orphaned by the service (kept only for the single-agent eval harness).
+Only 1 of the graph's 4 prompts (router / extractor / retriever / answerer) is versioned — full
+coverage is a **JOS-64** follow-up.
 
 ---
 

@@ -53,8 +53,11 @@ citation union's seams honest.
 
 **Qdrant is authoritative for nothing patient-specific.** It holds only the non-PHI
 guideline corpus, rebuildable from the repo — a disposable index, not a system of record.
-No PHI is ever sent to Qdrant or Cohere in this path (the query is the physician's question +
-guideline text; patient facts come from the separate FHIR tools).
+No patient identifiers (name, MRN, date of birth) or specific patient values are ever sent to
+Qdrant or Cohere in this path: the query carries the de-identified clinical topic (the condition or
+screening subject), and the corpus is non-PHI guideline text. Patient facts and values come from
+the separate FHIR tools, not the retrieval query (the evidence-retriever prompt enforces this;
+query-content de-identification hardening is tracked under JOS-65).
 
 ---
 
@@ -281,9 +284,10 @@ set on `copilot-agent` — `QDRANT_URL=http://qdrant.railway.internal:6333`,
 
 - **SDK drift** (qdrant-client/fastembed/cohere APIs changed since training cutoff) →
   mitigated by Phase-1 research scouts pinning the real 2026 surface before code.
-- **PHI leakage to vendors** → the retrieval query is the clinical question + guideline text,
-  never patient identifiers; assert no PHI in the retriever path; `no_phi_in_logs` eval
-  rubric covers logs.
+- **PHI leakage to vendors** → the retrieval query carries the de-identified clinical topic,
+  never patient identifiers (name/MRN/DOB) or specific values; the corpus is non-PHI guideline
+  text; the evidence-retriever prompt enforces this and `no_phi_in_logs` covers logs (query-content
+  de-identification hardening tracked under JOS-65).
 - **Private-only Qdrant is hard to index into** → resolved by the chosen indexing approach
   (§7.3); document it so re-indexing is reproducible.
 - **Citation-union merge collision with JOS-56** → union is additive; coordinate on

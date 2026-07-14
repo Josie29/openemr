@@ -5,7 +5,7 @@ from copilot.fhir_tools import register_fhir_read_tools
 from copilot.graph.deps import GraphDeps
 from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
-from copilot.retrieval import EvidenceSnippet
+from copilot.rag.models import EvidenceSnippet
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
 
@@ -69,10 +69,11 @@ grounding it in a snippet.
 
 {_CITATION_RULES}
 
-Cite guideline snippets by their `GuidelineChunk` resource_type and the snippet's chunk id, with a
-verbatim `quote` from the snippet text. Surface criteria, thresholds, screening intervals, and
-monitoring cadence — never dosing directives. If retrieval returns nothing relevant, say so in the
-summary and return no claims rather than inventing evidence."""
+Cite guideline snippets with resource_type `guideline` and the snippet's chunk id (its
+`citation.field_or_chunk_id`) as resource_id, with a verbatim `quote` from the snippet text.
+Surface criteria, thresholds, screening intervals, and monitoring cadence — never dosing
+directives. If retrieval returns nothing relevant, say so in the summary and return no claims
+rather than inventing evidence."""
 
 # Langfuse Prompt Management name for the physician-facing answer prompt. The final answer is the
 # turn's user-visible output, so this is the prompt version stamped on each trace (the router and
@@ -169,7 +170,7 @@ def build_evidence_retriever(model: Model) -> Agent[GraphDeps, RetrieverOutput]:
             ctx: The run context (holds the retriever and the chunk registry).
             query: A focused retrieval query built from the clinical question and patient facts.
         """
-        snippets = await ctx.deps.retriever.retrieve(query, limit=5)
+        snippets = await ctx.deps.retriever.retrieve(query)
         # Record what was retrieved so the grounding gate can resolve any chunk the worker cites.
         ctx.deps.chunks.record_all(snippets)
         return snippets

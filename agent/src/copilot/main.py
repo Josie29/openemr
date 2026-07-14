@@ -15,7 +15,6 @@ from pydantic_ai.usage import UsageLimits
 from copilot.citations import build_claim_citations
 from copilot.config import FhirClientMode, Settings, get_settings
 from copilot.conversation import ConversationStore
-from copilot.corpus import CorpusRetriever
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
@@ -30,6 +29,7 @@ from copilot.observability import (
     sync_system_prompt,
 )
 from copilot.pricing import turn_cost_usd
+from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
 from copilot.retrieval import ChunkRegistry
 from copilot.schemas import ChatRequest, ChatResponse
 
@@ -60,7 +60,7 @@ def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, An
     """Serialize the final answer and attach the canonical wire citation to each claim.
 
     The response keeps the answer's own ``claims`` (with their gate-stamped ``source``) and adds,
-    per claim, the project-wide :class:`~copilot.ingestion.Citation` list the sidebar's
+    per claim, the project-wide :data:`~copilot.schemas.Citation` list the sidebar's
     click-to-source (JOS-57) consumes — additive, so nothing the current sidebar reads is removed.
 
     Args:
@@ -212,6 +212,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
         shutdown_observability(app.state.observability_enabled)
+        # Close the evidence retriever (the Qdrant client, when live; a no-op for the fixture).
+        await app.state.retriever.aclose()
         client = app.state.fhir
         if isinstance(client, HttpFhirClient):
             await client.aclose()
@@ -243,10 +245,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.tracing_environment,
     )
     app.state.fhir = _build_readiness_client(settings)
-    # The curated guideline corpus is loaded once at startup (small, static, in-repo) and served by
-    # a lexical retriever standing in for JOS-53's Qdrant pipeline behind the same Retriever
-    # protocol — so the evidence-retriever grounds on real guidelines with no external service.
-    app.state.retriever = CorpusRetriever.from_corpus()
+    # The evidence retriever (JOS-53): the live Qdrant+Cohere hybrid pipeline in QDRANT mode, or an
+    # in-process keyword retriever over the in-repo corpus in FIXTURE mode. build_retriever returns
+    # None only when QDRANT is selected but unconfigured — degrade to the fixture (real corpus,
+    # lower-quality ranking) so /chat still grounds on guidelines rather than failing, and log it;
+    # /ready separately surfaces the degraded dependency.
+    retriever = build_retriever(settings)
+    if retriever is None:
+        logger.warning("evidence retriever unconfigured for QDRANT mode; using fixture fallback")
+        retriever = FixtureEvidenceRetriever.from_corpus(settings.rerank_top_n)
+    app.state.retriever = retriever
     # The Week-2 supervisor graph is the only /chat behavior: supervisor routes to the
     # intake-extractor and evidence-retriever, and the grounding gate is enforced on each worker and
     # the final answer (context/decisions/agent-framework-week2.md).

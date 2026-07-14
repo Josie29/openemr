@@ -132,7 +132,8 @@ class ChatRequest(BaseModel):
 class CitationSourceType(StrEnum):
     """The kind of source a :class:`Citation` points at (W2_ARCHITECTURE.md §3.3).
 
-    ``GUIDELINE`` is produced this increment. ``LAB_PDF`` / ``INTAKE_FORM`` are reserved for
+    ``GUIDELINE`` (evidence) and ``FHIR`` (patient-record claims) are produced today — the
+    supervisor graph's final answer emits both. ``LAB_PDF`` / ``INTAKE_FORM`` are reserved for
     the document-extraction increment: their variants are declared so the union is extensible,
     but nothing produces them yet.
     """
@@ -140,6 +141,7 @@ class CitationSourceType(StrEnum):
     GUIDELINE = "guideline"
     LAB_PDF = "lab_pdf"
     INTAKE_FORM = "intake_form"
+    FHIR = "fhir"
 
 
 class CitationBase(BaseModel):
@@ -200,9 +202,24 @@ class IntakeFormCitation(CitationBase):
     source_type: Literal[CitationSourceType.INTAKE_FORM] = CitationSourceType.INTAKE_FORM
 
 
-# The general citation-contract type (for the eventual final-answer gate). The retriever
-# narrows to GuidelineCitation — it only ever emits guideline citations this increment.
+class FhirCitation(CitationBase):
+    """A citation to a patient-record claim read from a FHIR resource (the Week-1 read path).
+
+    The converged form of the Week-1 :class:`SourceRef` on the shared five-field contract, so the
+    supervisor's final answer emits patient-record and guideline claims in one machine-readable
+    shape. Field mapping from a resolved ``SourceRef``: ``source_id`` <- ``resource_type/id``,
+    ``page_or_section`` <- the resource type, ``field_or_chunk_id`` <- the cited field, and
+    ``quote_or_value`` <- the gate-stamped record value. ``SourceRef`` remains the gate's internal
+    grounding shape; this is its wire/UI projection (routing the grounding gate by ``source_type``
+    is still the tracked follow-up).
+    """
+
+    source_type: Literal[CitationSourceType.FHIR] = CitationSourceType.FHIR
+
+
+# The general citation-contract type. Today the retriever narrows to GuidelineCitation and the
+# final-answer response emits GuidelineCitation (evidence) + FhirCitation (record) per claim.
 Citation = Annotated[
-    GuidelineCitation | LabPdfCitation | IntakeFormCitation,
+    GuidelineCitation | LabPdfCitation | IntakeFormCitation | FhirCitation,
     Field(discriminator="source_type"),
 ]

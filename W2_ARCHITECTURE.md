@@ -415,12 +415,13 @@ routing *is* the Agentic-RAG rung, earned from the §4 decision rather than bolt
 short of Graph RAG and multi-hop **on purpose**: their cost, latency, and non-determinism buy
 nothing on a few-hundred-chunk flat corpus.
 
-> **Current state vs. target.** The §5.1 pipeline is the *target*. As built today, the
-> evidence-retriever runs a **simple lexical retriever over the real in-repo curated corpus
-> (55 chunks)** as a stand-in **behind the same retrieval interface** — the corpus and the
-> citations it emits are real; only the **ranker** is a placeholder, pending the Qdrant hybrid
-> pipeline (dense + sparse → RRF → Cohere rerank). Swapping the ranker in behind the unchanged
-> interface is the remaining step.
+> **Runtime modes.** The §5.1 pipeline runs as built in **`QDRANT` mode** (the deployed default):
+> the live Qdrant + Cohere hybrid retriever grounds the evidence-retriever. A **`FIXTURE` mode**
+> runs an in-process keyword retriever over the same real in-repo corpus (55 chunks) — no network,
+> no Docker — for tests and offline dev, mirroring `FhirClientMode.FIXTURE`. Both satisfy the one
+> `EvidenceRetriever` interface, so the supervisor graph is identical in either mode; `/ready`
+> surfaces a degraded Qdrant/Cohere dependency and the service falls back to the fixture retriever
+> rather than failing to answer.
 
 > **Terminology guard.** "Graph" in this project means the **agent orchestration graph**
 > (supervisor → workers, §4) — **not** Graph RAG (a knowledge graph over entities). Our retrieval

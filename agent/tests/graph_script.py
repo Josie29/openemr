@@ -1,5 +1,6 @@
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
@@ -7,6 +8,34 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from copilot.graph.routing import Route, RouteDecision
 from copilot.graph.supervisor import CopilotGraph
+from copilot.rag.models import EvidenceSnippet
+
+
+@dataclass
+class StubRetriever:
+    """A deterministic :class:`~copilot.rag.retriever.EvidenceRetriever` for graph tests.
+
+    Returns a fixed set of snippets regardless of the query (and ignores the optional filters), so
+    a test can exercise the evidence-retriever's grounding path with an exact, known snippet — no
+    corpus content dependency, no Qdrant, no network.
+    """
+
+    snippets: Sequence[EvidenceSnippet] = field(default_factory=tuple)
+
+    async def retrieve(
+        self,
+        query: str,
+        *,
+        guideline: str | None = None,
+        source: str | None = None,
+        section: str | None = None,
+        top_n: int | None = None,
+    ) -> list[EvidenceSnippet]:
+        """Return the seeded snippets (query and filters ignored)."""
+        return list(self.snippets)
+
+    async def aclose(self) -> None:
+        """No-op — the stub holds no resources."""
 
 # Shared scaffolding for driving the supervisor graph deterministically in tests: each of the four
 # agents (router, intake-extractor, evidence-retriever, answerer) is overridden with a scripted

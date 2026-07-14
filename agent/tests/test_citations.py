@@ -1,51 +1,52 @@
 from copilot.citations import build_claim_citations, to_citation
-from copilot.ingestion import SourceType
-from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry, EvidenceSnippet
-from copilot.schemas import Claim, SourceRef
+from copilot.rag.models import EvidenceSnippet
+from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
+from copilot.schemas import CitationSourceType, Claim, GuidelineCitation, SourceRef
 
 _SNIPPET = EvidenceSnippet(
-    chunk_id="ada-1",
-    source_id="ada-soc-2025",
-    title="ADA Standards of Care 2025",
-    section="Screening",
-    text="Screen adults aged 35 years or older for type 2 diabetes.",
+    citation=GuidelineCitation(
+        source_id="ada-soc-2025",
+        page_or_section="Screening",
+        field_or_chunk_id="ada-1",
+        quote_or_value="Screen adults aged 35 years or older for type 2 diabetes.",
+    ),
+    guideline="t2dm",
     source_url="https://example.org/ada",
-    date="2025",
+    rerank_score=0.9,
 )
 
 
 def test_guideline_ref_maps_to_a_guideline_citation_with_chunk_provenance() -> None:
-    # Guards the wire contract for evidence: a guideline claim must expose the GUIDELINE source
-    # type and the real guideline slug/section (from the retrieved chunk, not the chunk id), so
-    # JOS-57's click-to-source can link the card to the actual guideline.
+    # Guards the wire contract for evidence: a guideline claim maps to the canonical
+    # GuidelineCitation carrying the retrieved chunk's provenance (source id, section, chunk id)
+    # specific grounded quote — what JOS-57's click-to-source links the card to.
     ref = SourceRef(
         resource_type=GUIDELINE_RESOURCE_TYPE,
         resource_id="ada-1",
         quote="Screen adults aged 35 years or older",
-        value="Screen adults aged 35 years or older",  # stamped by the gate
+        value="Screen adults aged 35 years or older",  # stamped by the gate (the specific span)
     )
     citation = to_citation(ref, _SNIPPET)
 
-    assert citation.source_type is SourceType.GUIDELINE
-    assert citation.source_id == "ada-soc-2025"  # the guideline slug, not the chunk id
+    assert citation.source_type is CitationSourceType.GUIDELINE
+    assert citation.source_id == "ada-soc-2025"  # the guideline source, from the chunk
     assert citation.page_or_section == "Screening"
     assert citation.field_or_chunk_id == "ada-1"
-    assert citation.quote_or_value == "Screen adults aged 35 years or older"
+    assert citation.quote_or_value == "Screen adults aged 35 years or older"  # the claim's span
 
 
-def test_fhir_ref_maps_to_an_openemr_record_citation() -> None:
-    # Guards that a record-derived claim carries the OPENEMR_RECORD source type and a resource-typed
-    # source id, so a patient fact and a guideline fact are distinguishable in the citation payload.
+def test_fhir_ref_maps_to_a_fhir_citation() -> None:
+    # Guards that a record-derived claim maps to the FHIR arm of the citation union with a
+    # resource-typed source id, so a patient fact and a guideline fact are distinguishable.
     ref = SourceRef(
         resource_type="Patient", resource_id="1", field="birth_date", value="1958-03-12"
     )
     citation = to_citation(ref)
 
-    assert citation.source_type is SourceType.OPENEMR_RECORD
+    assert citation.source_type is CitationSourceType.FHIR
     assert citation.source_id == "Patient/1"
     assert citation.field_or_chunk_id == "birth_date"
     assert citation.quote_or_value == "1958-03-12"
-    assert citation.bounding_box is None  # boxes come only from lab_pdf extraction (JOS-54)
 
 
 def test_guideline_citation_falls_back_when_chunk_is_unknown() -> None:
@@ -56,7 +57,7 @@ def test_guideline_citation_falls_back_when_chunk_is_unknown() -> None:
     )
     citation = to_citation(ref, None)
 
-    assert citation.source_type is SourceType.GUIDELINE
+    assert citation.source_type is CitationSourceType.GUIDELINE
     assert citation.source_id == "ada-1"  # falls back to the chunk id
     assert citation.page_or_section == "S1"  # falls back to the ref's stamped section
 
@@ -83,6 +84,9 @@ def test_build_claim_citations_covers_primary_and_supporting() -> None:
 
     citations = build_claim_citations(claim, chunks)
 
-    assert [c.source_type for c in citations] == [SourceType.GUIDELINE, SourceType.OPENEMR_RECORD]
+    assert [c.source_type for c in citations] == [
+        CitationSourceType.GUIDELINE,
+        CitationSourceType.FHIR,
+    ]
     assert citations[0].source_id == "ada-soc-2025"  # enriched from the registry
     assert citations[1].source_id == "Patient/1"

@@ -53,7 +53,7 @@ def test_grounded_answer_reaches_the_physician(settings: Settings) -> None:
     body = response.json()
     assert body["claims"], "a grounded answer must carry its claims"
     assert body["claims"][0]["source"]["value"] == "1958-03-12"  # stamped from the record
-    assert body["claims"][0]["citations"][0]["source_type"] == "openemr_record"  # wire citation
+    assert body["claims"][0]["citations"][0]["source_type"] == "fhir"  # canonical wire citation
 
 
 def test_ungrounded_answer_is_refused_not_returned(settings: Settings) -> None:

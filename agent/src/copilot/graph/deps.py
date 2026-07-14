@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 
 from copilot.fhir.client import FhirClient
-from copilot.retrieval import ChunkRegistry, Retriever
+from copilot.rag.retriever import EvidenceRetriever
+from copilot.retrieval import ChunkRegistry
 from copilot.verification import FetchLog
 
 
@@ -24,6 +25,6 @@ class GraphDeps:
     fhir: FhirClient
     patient_id: str
     correlation_id: str
-    retriever: Retriever
+    retriever: EvidenceRetriever
     fetched: FetchLog
     chunks: ChunkRegistry

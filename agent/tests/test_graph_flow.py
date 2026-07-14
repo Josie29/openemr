@@ -13,9 +13,11 @@ from copilot.graph.routing import Route, RouteDecision
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import build_evidence_retriever
 from copilot.observability import TurnTrace
-from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry, EvidenceSnippet, FakeRetriever
-from copilot.schemas import ChatResponse, Claim, SourceRef
+from copilot.rag.models import EvidenceSnippet
+from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
+from copilot.schemas import ChatResponse, Claim, GuidelineCitation, SourceRef
 from copilot.verification import FetchLog
+from graph_script import StubRetriever
 
 # NOTE (same caveat as test_chat_flow): these tests drive each agent with a scripted FunctionModel,
 # so they depend on Pydantic AI's message/AgentInfo API. The behavior asserted — the supervisor
@@ -23,11 +25,15 @@ from copilot.verification import FetchLog
 # the JOS-56 contract that must hold regardless of the model surface.
 
 _SNIPPET = EvidenceSnippet(
-    chunk_id="ada-1",
-    source_id="ada-soc-2025",
-    title="ADA Standards of Care 2025",
-    section="Screening",
-    text="Screen adults aged 35 years or older for prediabetes and type 2 diabetes.",
+    citation=GuidelineCitation(
+        source_id="ada-soc-2025",
+        page_or_section="Screening",
+        field_or_chunk_id="ada-1",
+        quote_or_value="Screen adults aged 35 years or older for prediabetes and type 2 diabetes.",
+    ),
+    guideline="t2dm",
+    source_url="https://example.org/ada",
+    rerank_score=0.9,
 )
 _GUIDELINE_QUOTE = "Screen adults aged 35 years or older"
 
@@ -44,7 +50,7 @@ def _deps() -> GraphDeps:
         fhir=FixtureFhirClient.from_seed(),
         patient_id="1",
         correlation_id="test-cid",
-        retriever=FakeRetriever(snippets=(_SNIPPET,)),
+        retriever=StubRetriever(snippets=(_SNIPPET,)),
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
     )
@@ -170,7 +176,7 @@ async def test_supervisor_routes_workers_and_composes_grounded_answer() -> None:
     fhir_claim, guideline_claim = result.answer.claims
     assert fhir_claim.source.value == "1958-03-12"  # stamped from the fetched Patient record
     assert guideline_claim.source.value == _GUIDELINE_QUOTE  # matched in the retrieved chunk
-    assert guideline_claim.source.label == "ADA Standards of Care 2025"  # chunk identity stamped
+    assert guideline_claim.source.label == "ada-soc-2025"  # chunk identity (source id) stamped
 
 
 async def test_evidence_worker_gate_rejects_ungrounded_quote() -> None:

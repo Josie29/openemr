@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
@@ -36,7 +37,7 @@ CAPTURE_W, CAPTURE_H = 816, 1056
 CAPTURE_SCALE = 2
 PAPER = (247, 244, 236)  # warm off-white the page sits on
 
-PROFILES: dict[str, dict] = {
+PROFILES: dict[str, dict[str, Any]] = {
     "light": {
         "width": 1275,        # ~150 DPI on Letter
         "dpi": 150.0,
@@ -68,7 +69,8 @@ PROFILES: dict[str, dict] = {
         "salt_p": 0.0015,
         "jpeg_q": 40,
         # Localized damage does the "make it fail" work — the global settings stay readable so the
-        # extractor still returns structure. Illegibility is confined to the stain/streak/crease/edge.
+        # extractor still returns structure. Illegibility is confined to the
+        # stain/streak/crease/edge.
         "artifacts": ["toner_streaks", "coffee_stain", "fold_crease", "edge_shadow"],
     },
 }
@@ -142,7 +144,8 @@ def coffee_stain(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     fill = np.clip(1.0 - dist, 0, 1) * 0.45                     # lighter tint inside
     alpha = np.clip(ring * 0.6 + fill, 0, 0.72)[:, :, None]
     brown = np.array([120, 84, 52], dtype=np.float32)
-    return arr * (1 - alpha) + brown * alpha
+    stained: np.ndarray = arr * (1 - alpha) + brown * alpha
+    return stained
 
 
 def fold_crease(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -159,7 +162,10 @@ def fold_crease(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 def edge_shadow(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Darkening gradient + thin black scanner border down the right edge (page not flat on glass)."""
+    """Darkening gradient + thin black scanner border down the right edge.
+
+    (Page not flat on glass.)
+    """
     h, w, _ = arr.shape
     band = int(w * 0.11)
     grad = np.linspace(1.0, 0.32, band)[None, :, None]
@@ -177,7 +183,7 @@ ARTIFACTS = {
 }
 
 
-def degrade(src_png: Path, out_pdf: Path, preview: Path | None, p: dict) -> None:
+def degrade(src_png: Path, out_pdf: Path, preview: Path | None, p: dict[str, Any]) -> None:
     """Apply the scan-artifact pipeline for profile ``p`` and write the PDF (+ optional preview).
 
     Args:
@@ -191,10 +197,12 @@ def degrade(src_png: Path, out_pdf: Path, preview: Path | None, p: dict) -> None
     src = Image.open(src_png).convert("RGB")
     tw = p["width"]
     th = round(tw * src.height / src.width)
-    img = src.resize((tw, th), Image.LANCZOS)
+    img = src.resize((tw, th), Image.Resampling.LANCZOS)
 
     # Feed skew, filling exposed corners with the warm paper color.
-    img = img.rotate(p["skew_deg"], resample=Image.BICUBIC, expand=False, fillcolor=PAPER)
+    img = img.rotate(
+        p["skew_deg"], resample=Image.Resampling.BICUBIC, expand=False, fillcolor=PAPER
+    )
 
     # Desaturate toward grayscale, retaining an optional faint warm cast.
     gray = img.convert("L").convert("RGB")

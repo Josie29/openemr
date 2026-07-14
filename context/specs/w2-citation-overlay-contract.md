@@ -37,6 +37,9 @@ The derived FHIR `Observation` carries the value but **not** the box (no native 
 ## Why a session-authed viewer, not a browser Binary fetch
 The obvious approach — the sidebar fetching `GET /fhir/Binary/{id}` with the SMART token — **hits a scope wall**: the patient-scoped Co-Pilot token has `DocumentReference.read` (lists the doc) but no `Binary` read scope, and OpenEMR's Binary endpoint requires `user/Binary.r`, which a patient-launch SMART app cannot obtain. So the document is served by the **session-authenticated `source-view.php`** (the logged-in EHR user's own session ACL), sidestepping SMART Binary entirely. This is the serving mechanism JOS-56 keeps — the producer only stamps the citation fields; no new scope is needed.
 
-## To wire the real producer (JOS-54/56)
-1. When a claim cites a document-derived `Observation`, stamp `document_id` (the stored `DocumentReference` UUID), `page`, and `bounding_box` (**in points**) from the sidecar onto the `SourceRef`.
+## Integrated with JOS-56 (the citation wire)
+JOS-56 landed the canonical `Citation` discriminated union (`SourceRef.to_citation()` → a per-claim `claims[].citations` list, added by `main.py._answer_payload`), with `LabPdfCitation`/`IntakeFormCitation` **reserved** for exactly this feature. This branch converged onto it: `to_citation` now projects a document-derived fact (a `SourceRef` carrying the overlay provenance) to a **`LabPdfCitation`** with its `page` + `bounding_box`, and the stub routes through `_answer_payload`, so `/chat` emits the canonical `citations` too. The sidebar currently reads the overlay off the legacy `claims[].source` (kept by JOS-56 — additive); a small follow-up can migrate it to read the canonical `claims[].citations` `LabPdfCitation`.
+
+## To wire the real producer (JOS-54)
+1. When a claim cites a document-derived `Observation`, stamp `document_id` (the `DocumentReference` UUID), `page`, and `bounding_box` (**in PDF points**) from the extraction sidecar onto the `SourceRef` — `to_citation` then projects them onto the `LabPdfCitation` automatically.
 2. Delete the `main.py` stub + `COPILOT_STUB_DOC_ID`.

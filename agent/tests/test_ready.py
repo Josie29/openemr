@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from copilot.config import Settings
+from copilot.config import FhirClientMode, RetrievalMode, Settings
 from copilot.main import create_app
 
 
@@ -27,6 +27,41 @@ def test_ready_returns_503_when_a_dependency_is_down(settings: Settings) -> None
     assert body["ready"] is False
     llm = next(dep for dep in body["dependencies"] if dep["name"] == "llm")
     assert llm["ok"] is False
+
+
+def test_ready_reports_retrieval_deps_green_in_fixture_mode(settings: Settings) -> None:
+    # In fixture/offline mode the retrieval pipeline is served in-process, so its /ready probes
+    # must report ready without any network call — otherwise local dev + CI would see a red
+    # /ready purely because Qdrant/Cohere aren't reachable, masking real failures.
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/ready").json()
+
+    deps = {dep["name"]: dep for dep in body["dependencies"]}
+    assert deps["qdrant"]["ok"] is True
+    assert deps["cohere"]["ok"] is True
+
+
+def test_ready_marks_retrieval_deps_down_when_live_but_unconfigured() -> None:
+    # The JOS-53 acceptance: Qdrant must be a real /ready dependency (degraded if unreachable).
+    # A live deploy with no Qdrant URL / Cohere key must report those probes red, not silently
+    # green — the failure a naive probe would hide from a grader / on-call. No key/url is set,
+    # so every probe short-circuits offline (no network call in the test).
+    settings = Settings(
+        fhir_client_mode=FhirClientMode.FIXTURE,
+        retrieval_mode=RetrievalMode.QDRANT,
+        qdrant_url=None,
+        cohere_api_key=None,
+        anthropic_api_key=None,
+        langfuse_public_key=None,
+        langfuse_secret_key=None,
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    deps = {dep["name"]: dep for dep in response.json()["dependencies"]}
+    assert deps["qdrant"]["ok"] is False
+    assert deps["cohere"]["ok"] is False
 
 
 def test_response_carries_correlation_id_header(settings: Settings) -> None:

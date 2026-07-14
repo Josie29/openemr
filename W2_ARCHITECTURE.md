@@ -52,7 +52,7 @@ new capabilities, each a controlled expansion of a Week-1 seam rather than a rep
 
 | Concern | Week-2 decision | Evidence |
 |---|---|---|
-| Orchestration | **Pydantic AI** multi-agent (supervisor delegates to workers as tools; programmatic hand-off) — *not* LangGraph | [`agent-framework-week2.md`](context/decisions/agent-framework-week2.md) |
+| Orchestration | **Pydantic AI** multi-agent (a router/supervisor agent emits a typed route each hop; plain Python dispatches the worker and loops) — *not* LangGraph | [`agent-framework-week2.md`](context/decisions/agent-framework-week2.md) |
 | Document extraction | **Mistral OCR 4** (schema mode — typed fields + native pixel bboxes + per-word confidence, one pass) → strict Pydantic schema → OpenEMR `DocumentReference` + derived FHIR `Observation` | §3; [`vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md) |
 | Vector store | **Qdrant** (dedicated Railway service, private networking) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Hybrid retrieval | FastEmbed dense + sparse → Qdrant Universal Query API `Fusion.RRF` | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
@@ -215,6 +215,16 @@ citation is not merely *present*, it is *locatable on the source*; a field the e
 without a resolved box (or below the confidence floor) is a low-confidence refusal (§11), never a
 fabricated rectangle.
 
+**Two citation shapes, layered — not competing.** The gate-internal grounding reference and this
+canonical wire contract are two **layers** of the same mechanism, not rival formats. The
+**grounding reference** is gate-internal: it resolves a structured field or a verbatim quote
+against the source and stamps the real value (§4.3). The **canonical `Citation`** above —
+`{source_type, source_id, page_or_section, field_or_chunk_id, quote_or_value}` — is what the
+click-to-source UI consumes. The final answer grounds each claim via the internal reference, then
+emits the canonical `Citation` per claim: `source_type = guideline` for corpus claims,
+`openemr_record` for record claims; the `lab_pdf` / `intake_form` document citations (with
+bounding boxes) come from the ingestion path (§3.1).
+
 ### 3.4 Extraction is a one-time transform — re-extraction & idempotency
 
 Extraction is a **one-time transform, not a per-turn operation.** The pipeline in §3.1 runs
@@ -256,25 +266,32 @@ intake-extractor needs facts from document X:
 ```mermaid
 flowchart TB
     panel["Physician panel\n(OpenEMR module · SSE stream)"] --> sup
-    sup["SUPERVISOR\ndecides: extract? retrieve evidence? answer ready?\nlogged, inspectable handoffs"]
-    sup -->|route: extract| ext["intake-extractor\nattach_and_extract → Mistral OCR 4 (schema mode)\n→ schema → cited facts (lab PDF + intake form)"]
-    sup -->|route: retrieve| ret["evidence-retriever\nhybrid RAG + rerank over guideline corpus"]
-    ext -->|worker output_validator| sup
-    ret -->|worker output_validator| sup
-    sup --> gate["FINAL grounding gate (output_validator)\nevery clinical claim carries citation metadata,\nor ModelRetry"]
+    sup["SUPERVISOR (router)\nemits a typed RouteDecision each hop:\nextract_intake | retrieve_evidence | answer  (+ one-line reason)"]
+    sup -->|route: extract_intake| ext["intake-extractor\npatient-scoped FHIR reads + attach_and_extract → Mistral OCR 4 (schema mode)\n→ schema → cited facts (record + lab PDF + intake form)"]
+    sup -->|route: retrieve_evidence| ret["evidence-retriever\nhybrid RAG + rerank over guideline corpus"]
+    ext -->|worker output_validator → grounded output accumulated| sup
+    ret -->|worker output_validator → grounded output accumulated| sup
+    sup -->|route: answer / max-hops reached| gate["answerer — FINAL grounding gate (output_validator)\nevery clinical claim carries citation metadata,\nor ModelRetry"]
     gate --> ans["Grounded answer\n(record facts vs. guideline evidence, each cited)"]
-    sup -.->|structured route events + child spans| obs[("Langfuse")]
+    sup -.->|each RouteDecision = structured event + Langfuse child span| obs[("Langfuse")]
 ```
 
-The supervisor delegates to each worker **as a tool** (Pydantic AI agent delegation): it calls
-the worker, the worker returns a typed result, and the supervisor resumes control to decide the
-next step. The flow is shallow and near-linear — the PRD's own word is *small graph* — which is
+The supervisor is a **procedural router loop**, not tool-delegation. A dedicated
+**router/supervisor agent** emits a typed **`RouteDecision`** each hop — a closed enum of three
+routes (`extract_intake`, `retrieve_evidence`, `answer`) plus a one-line reason. Plain Python then
+dispatches the chosen worker (intake-extractor or evidence-retriever), accumulates its grounded
+output, and loops — re-invoking the router with the accumulated state — until the router decides
+`answer` or a **max-hops ceiling** is hit (at which point it composes an answer anyway rather than
+looping). The flow is shallow and near-linear — the PRD's own word is *small graph* — which is
 exactly why a full `StateGraph` (LangGraph) is machinery we would pay for now and grow into
 later ([`agent-framework-week2.md`](context/decisions/agent-framework-week2.md)). The workers
 are:
 
-- **intake-extractor** — owns `attach_and_extract` (§3). Turns an uploaded document into
-  schema-valid, cited facts.
+- **intake-extractor** — owns the **full patient-scoped FHIR read toolset** (demographics,
+  problems, medications, allergies, encounters, and free-text encounter notes) **plus**
+  `attach_and_extract` (§3). It therefore **fully subsumes the Week-1 single agent**, which has
+  been **removed from the request path** — the supervisor graph is now the **only** `/chat`
+  behavior. Turns an uploaded document, or the patient's own record, into schema-valid, cited facts.
 - **evidence-retriever** — owns the hybrid RAG tool (§5). Turns a clinical question into ranked,
   cited guideline snippets.
 
@@ -282,16 +299,18 @@ are:
 
 The single biggest risk of picking Pydantic AI over LangGraph is that its routing is *procedural
 Python* rather than a rendered graph object, so a grader who equates "inspectable routing" with
-"a labeled-edge diagram" could read delegation-via-tool-call as less inspectable
+"a labeled-edge diagram" could read a procedural router loop as less inspectable
 ([`agent-framework-week2.md`](context/decisions/agent-framework-week2.md), "single biggest
 risk"). We answer that by making routing legible **in the trace**:
 
-- **Structured route events.** Every supervisor routing decision is logged as a structured event:
-  *which worker, why, correlation ID*. The PRD requires that handoffs be "logged and explainable"
-  — this is that log.
-- **Langfuse child spans.** Each worker invocation is a **child span of the supervisor span**
-  (§9), so the full route is reconstructable from the correlation ID alone. The routing is
-  inspectable in the trace even though it is expressed in code.
+- **Structured route events.** Every hop's routing decision is a typed **`RouteDecision`** — the
+  chosen route (`extract_intake` / `retrieve_evidence` / `answer`) plus a one-line reason — logged
+  as a structured event with its correlation ID. The PRD requires that handoffs be "logged and
+  explainable" — this is that log.
+- **Langfuse child spans.** Each **route decision** is a **child span under the turn span**, and
+  the worker it dispatches is a child span in turn (§9), so the full hand-off chain is
+  reconstructable from the correlation ID alone. The routing is inspectable in the trace even
+  though it is expressed in code.
 - **Escalation path.** If routing later needs an explicit, diagrammable FSM, `pydantic-graph`
   gives one *inside the same framework* — no cross-framework migration
   ([`agent-framework-week2.md`](context/decisions/agent-framework-week2.md)).
@@ -300,18 +319,22 @@ risk"). We answer that by making routing legible **in the trace**:
 
 Week 1's crown-jewel verification seam — `@agent.output_validator` + `ModelRetry`
 ([`ARCHITECTURE.md`](ARCHITECTURE.md) §7) — is a *per-agent* pre-return hook. Because it survives
-the framework unchanged, we attach it in **three** places rather than one:
+the framework unchanged, we attach it in **three** places rather than one — all three backed by
+**one shared citation-resolver abstraction** (resolve a claim against its source, or refuse):
 
-1. **On the intake-extractor** — reject any extracted fact that doesn't resolve to a source span
-   (a native bbox + page from Mistral OCR 4, above the confidence floor; the schema + citation +
-   extractor geometry enforce this together; §3). This is the "vision extraction without invention"
-   mandate, mechanically enforced.
-2. **On the evidence-retriever** — reject an evidence claim without chunk metadata (`source_id` /
-   `chunk_id`).
-3. **On the final supervisor answer** — reject any clinical claim lacking the full citation shape
-   (§3.3), exactly as Week 1 did for the single agent.
+1. **On the intake-extractor** — a **FHIR fetch-log resolver** for record claims: reject any
+   record claim that doesn't resolve to a logged FHIR fetch, and any extracted document fact that
+   doesn't resolve to a source span (a native bbox + page from Mistral OCR 4, above the confidence
+   floor; the schema + citation + extractor geometry enforce this together; §3). This is the
+   "vision extraction without invention" mandate, mechanically enforced.
+2. **On the evidence-retriever** — a **guideline chunk-registry resolver**: reject an evidence
+   claim without chunk metadata (`source_id` / `chunk_id`) resolvable in the corpus registry.
+3. **On the final answer** — a **composite of both resolvers**: reject any clinical claim lacking
+   the full citation shape (§3.3), exactly as Week 1 did for the single agent.
 
-One defensible seam, *reused three times*, not rebuilt. This is the mechanical enforcement of the
+**One seam, reused three times, not rebuilt** — a single citation-resolver abstraction with a
+FHIR-fetch-log implementation for record claims, a chunk-registry implementation for evidence
+claims, and a composite of the two for the final answer. This is the mechanical enforcement of the
 Week-2 citation contract and the `citation_present` / `factually_consistent` eval rubrics (§7).
 Failure direction remains **refusal, not silent pass**: an unattributable answer degrades to "the
 record doesn't support that" rather than shipping ([`ARCHITECTURE.md`](ARCHITECTURE.md) §7).
@@ -361,6 +384,16 @@ Each choice traces to a requirement
   on a small corpus), pinned to a v4.0 model (`rerank-3.5` is deprecated). Config-level swap to
   Voyage or Jina if the latency report puts rerank on the critical path.
 
+**Implementation status (JOS-53).** The pipeline above is built in `agent/src/copilot/rag/`
+(`retriever.py` hybrid+rerank, `index.py` content-correct indexer, `corpus.py`, `models.py`),
+with the concrete choices: dense `BAAI/bge-small-en-v1.5` (384-dim), sparse `Qdrant/bm25`
+(IDF), `prefetch_k=20`, `rerank_top_n=5`. Retrieved snippets carry the §3.3 `guideline`
+citation arm; `/ready` now probes Qdrant (`/readyz`) and Cohere (§10). Design contract:
+[`context/specs/hybrid-rag-pipeline.md`](context/specs/hybrid-rag-pipeline.md). The retriever
+is a standalone capability this increment; **weaving evidence into the final answer and the
+`output_validator` gate shown above is the JOS-56 supervisor/worker graph** (§4), which consumes
+this retriever and enforces the evidence guardrail at the worker level.
+
 ### 5.2 The sophistication ladder — where we stopped, and why
 
 The governing principle is **match solution complexity to problem complexity** — do not default
@@ -381,6 +414,14 @@ We land on **hybrid + metadata + rerank, exposed as tools the supervisor routes 
 routing *is* the Agentic-RAG rung, earned from the §4 decision rather than bolted on. We stop
 short of Graph RAG and multi-hop **on purpose**: their cost, latency, and non-determinism buy
 nothing on a few-hundred-chunk flat corpus.
+
+> **Runtime modes.** The §5.1 pipeline runs as built in **`QDRANT` mode** (the deployed default):
+> the live Qdrant + Cohere hybrid retriever grounds the evidence-retriever. A **`FIXTURE` mode**
+> runs an in-process keyword retriever over the same real in-repo corpus (55 chunks) — no network,
+> no Docker — for tests and offline dev, mirroring `FhirClientMode.FIXTURE`. Both satisfy the one
+> `EvidenceRetriever` interface, so the supervisor graph is identical in either mode; `/ready`
+> surfaces a degraded Qdrant/Cohere dependency and the service falls back to the fixture retriever
+> rather than failing to answer.
 
 > **Terminology guard.** "Graph" in this project means the **agent orchestration graph**
 > (supervisor → workers, §4) — **not** Graph RAG (a knowledge graph over entities). Our retrieval
@@ -502,11 +543,13 @@ Week 2 **extends** the Week-1 observability seam ([`ARCHITECTURE.md`](ARCHITECTU
 Langfuse, same correlation-ID discipline, same structured-log format. No parallel logging
 convention is introduced; the Week-1 log schema gains new event types.
 
-- **Per-worker spans nested under the supervisor span.** Each worker invocation
-  (intake-extractor, evidence-retriever) is a **child span of the supervisor span**, and the
-  extraction and retrieval sub-calls are traceable *within* their worker spans. The full
-  multi-agent trace is reconstructable **from the correlation ID alone** — the PRD's explicit
-  distributed-tracing requirement.
+- **Route-decision and per-worker spans nested under the turn span.** Each supervisor **route
+  decision** is emitted as its own **Langfuse child span** under the turn span, carrying the chosen
+  route (`extract_intake` / `retrieve_evidence` / `answer`) and its one-line reason; the worker it
+  dispatches (intake-extractor, evidence-retriever) is a child span in turn, with the extraction
+  and retrieval sub-calls traceable *within* their worker spans. The full hand-off chain is
+  reconstructable **from the correlation ID alone** — the PRD's explicit distributed-tracing
+  requirement.
 - **Correlation-ID propagation into the new boundaries.** The Week-1 correlation ID
   ([`ARCHITECTURE.md`](ARCHITECTURE.md) §10) now threads through **ingestion** (document
   upload/extract), **worker handoffs**, the **extraction call**, **retrieval calls**, and **FHIR writes**

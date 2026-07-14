@@ -133,25 +133,26 @@ set). Skip this section if the working directory does not match
 worktree, where `<slug>` is the branch label. `openemr-cmd worktree list`
 confirms.
 
-> **⚠️ `openemr-cmd worktree` does not work in this fork — it is a git
-> submodule.** This repo is checked out as a submodule of a parent
-> `gauntlet-ai` repo (`.git` is a file pointing at
-> `../../.git/modules/projects/…`, not a directory). `openemr-cmd worktree`
-> resolves the compose dir from the submodule's gitdir
-> (`.git/modules/…/docker/development-easy`), which does not exist, so
-> `worktree add`/`--start` fail (`Compose directory not found`) even though
-> exit code is 0. **Fallback:** for code-only components (PHP/JS edits that
-> don't need to render live *while you write them*), cut a **raw
-> `git worktree add -b feature/<name> <path> qa/integration`**, implement and
-> commit there (`--no-verify`, since the container-routed commit hook also
-> needs a stack it can't find), then merge the branch into the **primary
-> checkout's** `qa/integration` and run the live stack + full code-quality
-> there before promoting. Note a raw worktree has **no `vendor/`** (gitignored,
-> not materialized), so it cannot lint/test/run — all verification happens in
-> the primary. The "no orphaned openemr-cmd state" concern below does not apply
-> to a code-only raw worktree because you never start a stack or register
-> openemr-cmd state for it. Fixing `openemr-cmd` to support the submodule
-> layout is tracked as a low-priority Linear issue.
+> **✅ `openemr-cmd worktree` works here (submodule fix applied).** This repo is
+> a git submodule, which used to make the tool mis-resolve `OPENEMR_ROOT` into
+> `.git/modules/…` and fail `worktree add`/`--start` with `Compose directory not
+> found`. Fixed in `~/bin/openemr-cmd` (resolver now uses the gitdir's
+> `core.worktree`); root cause + patch in
+> `context/planning/openemr-cmd-submodule-worktree-fix.md`. That fix lives in the
+> personal `~/bin/openemr-cmd` — re-apply from the doc if the tool is reinstalled.
+>
+> **Co-Pilot full-stack in a fresh worktree** (its DB starts empty — no SMART
+> client, module off, no `AI_COPILOT_*` env):
+> 1. `openemr-cmd worktree add <branch> -b --base qa/integration --start`
+> 2. `openemr-cmd worktree exec <branch> drid` — load demo patients
+> 3. `…/oe-module-ai-copilot/scripts/bootstrap-worktree-copilot.sh <branch> --agent-port 8001`
+>    — registers/enables the SMART client (secret encrypted by this instance, no
+>    keys-table cloning), enables the module, injects env, recreates the container
+> 4. start the agent on a **non-8000** port (avoids another session's :8000) — the
+>    script prints the `uvicorn` command
+>
+> All steps hit the worktree's own containers, so concurrent local sessions stay
+> isolated.
 
 **Never use raw `git worktree add`, `git worktree remove`, or
 `git worktree move` against this repo.** The `openemr-cmd worktree` script

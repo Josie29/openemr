@@ -329,6 +329,16 @@ Each choice traces to a requirement
   on a small corpus), pinned to a v4.0 model (`rerank-3.5` is deprecated). Config-level swap to
   Voyage or Jina if the latency report puts rerank on the critical path.
 
+**Implementation status (JOS-53).** The pipeline above is built in `agent/src/copilot/rag/`
+(`retriever.py` hybrid+rerank, `index.py` content-correct indexer, `corpus.py`, `models.py`),
+with the concrete choices: dense `BAAI/bge-small-en-v1.5` (384-dim), sparse `Qdrant/bm25`
+(IDF), `prefetch_k=20`, `rerank_top_n=5`. Retrieved snippets carry the §3.3 `guideline`
+citation arm; `/ready` now probes Qdrant (`/readyz`) and Cohere (§10). Design contract:
+[`context/specs/hybrid-rag-pipeline.md`](context/specs/hybrid-rag-pipeline.md). The retriever
+is a standalone capability this increment; **weaving evidence into the final answer and the
+`output_validator` gate shown above is the JOS-56 supervisor/worker graph** (§4), which consumes
+this retriever and enforces the evidence guardrail at the worker level.
+
 ### 5.2 The sophistication ladder — where we stopped, and why
 
 The governing principle is **match solution complexity to problem complexity** — do not default

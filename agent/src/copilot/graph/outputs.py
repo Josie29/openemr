@@ -1,24 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from copilot.fhir.models import Allergy, Medication, PatientDemographics, Problem
 from copilot.schemas import Claim
-
-
-class PatientRecordFacts(BaseModel):
-    """The structured intake slice the intake-extractor reads in one shot, to cite fields from.
-
-    Bundles the core record the worker grounds its claims against — demographics plus the problem,
-    medication, and allergy lists — so a single tool call fetches the whole intake picture and
-    records it for the gate. (Document-extracted lab/intake Observations join this once JOS-54's
-    ingestion write-path exists; today the extractor grounds on the structured FHIR record.)
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    patient: PatientDemographics | None = Field(default=None, description="Demographics")
-    problems: list[Problem] = Field(default_factory=list, description="Active/inactive problems")
-    medications: list[Medication] = Field(default_factory=list, description="Current medications")
-    allergies: list[Allergy] = Field(default_factory=list, description="Allergies")
 
 
 class ExtractorOutput(BaseModel):

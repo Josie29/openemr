@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from copilot.graph.deps import GraphDeps
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
@@ -55,15 +56,17 @@ def build_graph(model: Model) -> CopilotGraph:
 
 @dataclass(frozen=True)
 class GraphResult:
-    """The outcome of one supervised turn: the final answer plus the routing trail that produced it.
+    """The outcome of one supervised turn: the answer, the routing trail, and total token usage.
 
     ``routes`` is the ordered list of every supervisor hand-off, so the turn's control flow is
     reconstructable in full (the JOS-56 acceptance criterion) — the same trail the observability
-    layer emits as child spans under the correlation id.
+    layer emits as child spans under the correlation id. ``usage`` sums the token usage across the
+    router, workers, and answerer so the turn's cost is priced over the whole graph, not one agent.
     """
 
     answer: ChatResponse
     routes: list[RouteDecision]
+    usage: RunUsage
 
 
 async def run_graph(
@@ -73,6 +76,7 @@ async def run_graph(
     turn: TurnTrace,
     *,
     max_hops: int = 4,
+    usage_limits: UsageLimits | None = None,
 ) -> GraphResult:
     """Run one turn through the supervisor: route, dispatch workers, then compose the answer.
 
@@ -81,6 +85,7 @@ async def run_graph(
     trace), and dispatches the chosen worker — whose grounded output accumulates into the shared
     ``deps`` registries. The loop ends when the router says ``ANSWER`` or ``max_hops`` is reached;
     the final answer is then composed from the workers' reports and gated against both sources.
+    Token usage is summed across every agent run so the caller can price the whole turn.
 
     Args:
         graph: The built supervisor + workers + answerer.
@@ -89,28 +94,41 @@ async def run_graph(
         turn: The turn's trace handle; each route decision is emitted as a child span on it.
         max_hops: Hard ceiling on routing iterations, so a router that never says ``ANSWER`` still
             terminates and composes an answer rather than looping.
+        usage_limits: Per-run usage limits (e.g. a tool-call ceiling) applied to every agent run,
+            so a worker that loops a tool is stopped and the turn degrades to a refusal upstream.
 
     Returns:
-        A :class:`GraphResult` carrying the composed answer and the ordered routing trail.
+        A :class:`GraphResult` carrying the composed answer, the ordered routing trail, and the
+        summed token usage.
     """
     reports: list[WorkerReport] = []
     routes: list[RouteDecision] = []
+    usage = RunUsage()
 
     for _ in range(max_hops):
-        decision = (await graph.router.run(_router_input(message, reports), deps=deps)).output
+        routing = await graph.router.run(
+            _router_input(message, reports), deps=deps, usage_limits=usage_limits
+        )
+        usage += routing.usage
+        decision = routing.output
         routes.append(decision)
         turn.routed(decision.route.value, decision.reason)
         if decision.route is Route.ANSWER:
             break
         if decision.route is Route.EXTRACT_INTAKE:
-            extracted = (await graph.extractor.run(message, deps=deps)).output
-            reports.append(("intake-extractor", extracted))
+            extracted = await graph.extractor.run(message, deps=deps, usage_limits=usage_limits)
+            usage += extracted.usage
+            reports.append(("intake-extractor", extracted.output))
         elif decision.route is Route.RETRIEVE_EVIDENCE:
-            retrieved = (await graph.retriever.run(message, deps=deps)).output
-            reports.append(("evidence-retriever", retrieved))
+            retrieved = await graph.retriever.run(message, deps=deps, usage_limits=usage_limits)
+            usage += retrieved.usage
+            reports.append(("evidence-retriever", retrieved.output))
 
-    answer = (await graph.answerer.run(_answerer_input(message, reports), deps=deps)).output
-    return GraphResult(answer=answer, routes=routes)
+    answered = await graph.answerer.run(
+        _answerer_input(message, reports), deps=deps, usage_limits=usage_limits
+    )
+    usage += answered.usage
+    return GraphResult(answer=answered.output, routes=routes, usage=usage)
 
 
 def _router_input(message: str, reports: list[WorkerReport]) -> str:

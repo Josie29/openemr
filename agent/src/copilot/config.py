@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     # /chat degrades it to a refusal rather than letting the cost run.
     agent_tool_calls_limit: int = 12
 
+    # Hard ceiling on supervisor routing hops in one turn (Week-2 multi-agent graph). Each hop is a
+    # route decision + at most one worker dispatch; a normal turn resolves in 2-3 (extract,
+    # retrieve, answer). Bounding it means a router that never says "answer" still terminates and
+    # answer rather than looping worker calls. See copilot.graph.supervisor.run_graph.
+    agent_max_hops: int = 4
+
     # Browser origins allowed to call /chat directly (ARCHITECTURE.md §4: the chat XHR goes from the
     # physician's browser to this service, not proxied through PHP). Empty means no browser may call
     # us — fail closed rather than defaulting to "*", which would let any page spend a stolen token.

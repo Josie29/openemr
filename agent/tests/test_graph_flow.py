@@ -81,7 +81,7 @@ def _extractor_model() -> FunctionModel:
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if not state["fetched"]:
             state["fetched"] = True
-            return ModelResponse(parts=[ToolCallPart(tool_name="get_patient_record", args={})])
+            return ModelResponse(parts=[ToolCallPart(tool_name="get_patient", args={})])
         args = output.model_dump(mode="json")
         return ModelResponse(parts=[ToolCallPart(tool_name=_final_tool_name(info), args=args)])
 

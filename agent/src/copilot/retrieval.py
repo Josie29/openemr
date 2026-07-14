@@ -5,16 +5,19 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from copilot.fhir.models import ResourceIdentity
+from copilot.ingestion import SourceType
 from copilot.schemas import SourceRef
 from copilot.verification import quote_in_text
 
-# The synthetic FHIR-shaped resource type a guideline citation uses, so a claim drawn from the
+# The resource-type tag a guideline citation uses on its SourceRef, so a claim drawn from the
 # corpus flows through the SAME SourceRef/gate machinery as a claim drawn from a FHIR record: the
 # claim cites (GUIDELINE_RESOURCE_TYPE, chunk_id) with a verbatim quote, and the guideline resolver
 # grounds it. Keeping one citation shape is what lets the final answer ground FHIR facts and
-# guideline evidence in a single pass. The exact wire-level citation contract
-# (source_type/source_id/page_or_section/field_or_chunk_id) is JOS-55's to formalize.
-GUIDELINE_RESOURCE_TYPE = "GuidelineChunk"
+# guideline evidence in a single pass. This is the project-wide guideline vocabulary
+# (``SourceType.GUIDELINE`` from the canonical citation contract in ``copilot.ingestion``), so the
+# same token names a guideline source in the gate and in the wire-level ``Citation`` (see
+# ``copilot.citations``).
+GUIDELINE_RESOURCE_TYPE = SourceType.GUIDELINE.value
 
 
 class EvidenceSnippet(BaseModel):
@@ -35,6 +38,12 @@ class EvidenceSnippet(BaseModel):
         default=None, description="Section/heading the chunk came from, if known"
     )
     text: str = Field(description="The chunk text; a claim grounds by quoting this verbatim")
+    source_url: str | None = Field(
+        default=None, description="Public URL of the source guideline, for the citation link"
+    )
+    date: str | None = Field(
+        default=None, description="Publication year/date of the source guideline, if known"
+    )
     score: float | None = Field(
         default=None, description="Reranker relevance score, if the retriever supplied one"
     )
@@ -122,6 +131,21 @@ class ChunkRegistry:
         """
         for snippet in snippets:
             self._snippets[snippet.chunk_id] = snippet
+
+    def get(self, chunk_id: str) -> EvidenceSnippet | None:
+        """Return the snippet a chunk id was retrieved as this turn, or None.
+
+        Lets the wire-citation builder (``copilot.citations``) recover a guideline claim's full
+        provenance — source slug, section, URL — from the chunk the claim grounded on, the same
+        way the gate recovers the grounded value.
+
+        Args:
+            chunk_id: The chunk id (a guideline citation's ``resource_id``).
+
+        Returns:
+            The retrieved :class:`EvidenceSnippet`, or None when it was not retrieved this turn.
+        """
+        return self._snippets.get(chunk_id)
 
     def resolve(self, ref: SourceRef) -> str | None:
         """Ground a guideline citation: its quote must appear verbatim in the cited chunk.

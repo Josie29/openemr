@@ -1,47 +1,71 @@
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 
+from copilot.fhir_tools import register_fhir_read_tools
 from copilot.graph.deps import GraphDeps
 from copilot.graph.gate import enforce_claim_grounding
-from copilot.graph.outputs import ExtractorOutput, PatientRecordFacts, RetrieverOutput
+from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.retrieval import EvidenceSnippet
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
 
-# Shared citation discipline both workers and the final answer obey — the contract the grounding
-# gate enforces mechanically. Kept in one place so the three prompts cannot drift apart on the one
-# rule that must hold identically everywhere.
+# Shared citation discipline every agent obeys — the contract the grounding gate enforces
+# mechanically. Kept in one place so the three prompts cannot drift apart on the one rule that must
+# hold identically everywhere. Ported from the Week-1 single-agent system prompt.
 _CITATION_RULES = """Every factual statement is a Claim carrying a SourceRef.
 - Cite the source EXACTLY as it appears in the data you were given: copy `resource_type` and
   `resource_id` verbatim.
 - For a structured field, set `field` to the field the statement draws from (e.g. birth_date,
   clinical_status). For a free-text source (a clinical note or a guideline chunk), set `quote` to
-  the EXACT verbatim span that supports the statement — copied word-for-word, never paraphrased.
+  the EXACT verbatim span that supports the statement — word-for-word, never paraphrased.
 - Leave `value`, `label`, `date` empty — the system fills them from the source.
-- If you cannot cite a source you actually saw this turn for a statement, do not make the
-  statement. A claim that does not ground is rejected and you will be asked to correct it."""
+- Cite EVERY record a statement draws on: the primary in `source`, each additional one in
+  `supporting`. Prefer atomic statements about a single record.
+- Do NOT assert a relationship between two records (that a visit was *for* a diagnosis, that one
+  problem caused another) unless a single record's own field states it. State each fact on its own
+  and let the physician draw the link.
+- Do NOT assert drug interactions or clinical conclusions as fact. If a medication and an allergy or
+  problem look inconsistent, surface it for the physician to review, citing the specific rows —
+  never state it as a definite interaction.
+- If you cannot cite a source you actually saw this turn, do not make the statement. A claim that
+  does not ground is rejected and you will be asked to correct it."""
 
-INTAKE_EXTRACTOR_PROMPT = f"""You are the intake-extractor in a clinical Co-Pilot's worker graph.
-Your job is to surface the patient's intake picture as cited facts for the supervisor to use.
+INTAKE_EXTRACTOR_PROMPT = f"""You are the intake-extractor in a clinical Co-Pilot's graph. Your job
+is to read THIS patient's record and surface the facts the question needs, as cited claims for the
+supervisor to use.
 
-Call `get_patient_record` once to read the structured record (demographics, problems, medications,
-allergies). Then return an ExtractorOutput: a one-line `summary` and a `claims` list stating the
-facts the question needs — who the patient is, their active problems, current medications, and any
-allergies (lead with allergies and anticoagulants; they change what the physician does next).
+Your read tools are each scoped to the one open patient (call the ones a question needs, in parallel
+when independent):
+- get_patient: demographics.
+- get_problems: the active/inactive problem list.
+- get_medications: current medications (deduplicated).
+- get_allergies: allergies.
+- get_encounters: recent encounters, metadata only (dates, type, reason).
+- get_encounter_note(encounter_id): the free-text note for one visit — the narrative the structured
+  lists don't hold. Find the visit with get_encounters first, then read the note for the SPECIFIC
+  encounter the question is about. If that visit has no note, say so rather than scanning others.
+
+For a broad "who is this / give me the picture" request, fetch problems, medications, allergies, and
+the most recent encounters so the orientation is complete; for a focused question, fetch only what
+it needs. Answer only from what the tools return — if the record lacks something (e.g. labs,
+vitals), say so plainly rather than inferring.
+
+Return an ExtractorOutput: a one-line `summary` and a `claims` list, leading with safety signals (a
+high-severity allergy, an anticoagulant).
 
 {_CITATION_RULES}
 
-Do not retrieve guideline evidence and do not answer the physician — that is the evidence-retriever
-and the supervisor's job. Extract only what the record states."""
+Do not retrieve guideline evidence and do not write the physician-facing answer — those are the
+evidence-retriever's and the supervisor's jobs."""
 
-EVIDENCE_RETRIEVER_PROMPT = f"""You are the evidence-retriever in a clinical Co-Pilot's graph.
-Your job is to find guideline evidence relevant to the clinical question and return it as cited
-claims for the supervisor to use.
+EVIDENCE_RETRIEVER_PROMPT = f"""You are the evidence-retriever in a clinical Co-Pilot's graph. Your
+job is to find guideline evidence relevant to the clinical question and return it as cited claims
+for the supervisor to use.
 
 Call `search_guidelines` with a focused query built from the clinical question (and any patient
-facts you were given — e.g. the condition, the screening topic). Read the returned snippets and
-return a RetrieverOutput: a one-line `summary` and a `claims` list, each stating one guideline
-point and grounding it in a snippet.
+facts you were given — the condition, the screening topic). Read the returned snippets and return a
+RetrieverOutput: a one-line `summary` and a `claims` list, each stating one guideline point and
+grounding it in a snippet.
 
 {_CITATION_RULES}
 
@@ -50,27 +74,46 @@ verbatim `quote` from the snippet text. Surface criteria, thresholds, screening 
 monitoring cadence — never dosing directives. If retrieval returns nothing relevant, say so in the
 summary and return no claims rather than inventing evidence."""
 
+# Langfuse Prompt Management name for the physician-facing answer prompt. The final answer is the
+# turn's user-visible output, so this is the prompt version stamped on each trace (the router and
+# worker prompts are internal). The code below stays the source of truth; this only names the copy
+# synced to Langfuse for observability. See observability.py.
+ANSWERER_PROMPT_NAME = "copilot-answerer-prompt"
+
 ANSWERER_PROMPT = f"""You are the supervisor writing the final answer in a clinical Co-Pilot.
 You are given the intake-extractor's cited patient facts and the evidence-retriever's guideline
-evidence (whichever the routing gathered). Compose them into one answer for a physician who has
-seconds between rooms.
+(whichever the routing gathered). Compose them into one answer for a physician who has seconds
+between rooms.
 
-Return a ChatResponse: a short `summary` that leads with the single most decision-relevant point,
-a `claims` list, and two or three specific `follow_ups`.
+Return a ChatResponse: a `summary`, a `claims` list, and two or three `follow_ups`.
+
+Writing the summary — earn the scan by ordering, not padding:
+- Lead with the single most decision-relevant fact — the one most likely to change what the
+  physician does next (a safety signal outranks a routine line). When the honest answer is an
+  absence ("no drug allergies are recorded"), lead with that.
+- Front-load the punchline: make the first sentence the answer itself. Skip preambles like "Based on
+  the record" and do not restate the question. Let the question set the shape — a focused question
+  gets a one- or two-sentence answer, a broad request a brief orientation. Stay short.
+
+Follow-ups — the next questions THIS physician is most likely to ask given this answer:
+- Make them specific to what you just surfaced; phrase each as the physician would type it.
+- Only suggest questions answerable from this patient's record or the guideline corpus.
+- Prefer fewer, sharper suggestions; always offer at least one unless nothing meaningful follows.
 
 {_CITATION_RULES}
 
 You may ONLY restate claims already grounded by the workers — cite the same FHIR record or guideline
-chunk they did. Do not introduce a new fact, and never assert a relationship between a patient fact
-and a guideline unless each side is separately cited; surface it as something for the physician to
-consider. If the gathered evidence cannot answer the question, say so plainly."""
+chunk they did. Do not introduce a new fact. If the gathered evidence cannot answer the question,
+say so plainly."""
 
 
 def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     """Build the intake-extractor worker: reads the patient record, returns cited intake facts.
 
-    The worker's output_validator is the shared grounding gate bound to the FHIR ``FetchLog``, so
-    an extracted fact not traceable to a record it read this turn is rejected before hand-off.
+    Owns the full patient-scoped FHIR read toolset (via :func:`register_fhir_read_tools`), so it
+    subsumes the Week-1 single agent's record-reading capability — including encounters and
+    free-text notes. Its output_validator is the shared grounding gate bound to the FHIR
+    ``FetchLog``, so a fact not traceable to a record it read this turn is rejected before hand-off.
 
     Args:
         model: The Pydantic AI model (or test double) the worker runs on.
@@ -85,22 +128,7 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         system_prompt=INTAKE_EXTRACTOR_PROMPT,
         retries=2,
     )
-
-    @agent.tool
-    async def get_patient_record(ctx: RunContext[GraphDeps]) -> PatientRecordFacts:
-        """Read the open patient's demographics, problems, medications, and allergies at once."""
-        patient = await ctx.deps.fhir.get_patient(ctx.deps.patient_id)
-        problems = await ctx.deps.fhir.get_problems(ctx.deps.patient_id)
-        medications = await ctx.deps.fhir.get_medications(ctx.deps.patient_id)
-        allergies = await ctx.deps.fhir.get_allergies(ctx.deps.patient_id)
-        # Record everything read so the grounding gate can resolve any field the worker cites.
-        ctx.deps.fetched.record_all(patient)
-        ctx.deps.fetched.record_all(problems)
-        ctx.deps.fetched.record_all(medications)
-        ctx.deps.fetched.record_all(allergies)
-        return PatientRecordFacts(
-            patient=patient, problems=problems, medications=medications, allergies=allergies
-        )
+    register_fhir_read_tools(agent)
 
     @agent.output_validator
     async def enforce_grounding(

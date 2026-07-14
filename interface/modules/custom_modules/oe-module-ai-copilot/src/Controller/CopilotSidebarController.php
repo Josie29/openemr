@@ -76,7 +76,9 @@ final readonly class CopilotSidebarController
             'messageSource' => TokenRelayView::MESSAGE_SOURCE,
             // JOS-57 click-to-source: same-origin FHIR base for Binary (source-document) reads,
             // and the locally-vendored pdf.js worker URL for the preview overlay.
-            'fhirBaseUrl' => (new ServerConfig())->getFhirUrl(),
+            // NB: build from the OAuth origin, not ServerConfig::getFhirUrl() — the latter injects a
+            // spurious "/openemr" web-root segment on this stack, giving a 404 for the Binary fetch.
+            'fhirBaseUrl' => $urls->origin . '/apis/default/fhir',
             'pdfWorkerUrl' => $this->moduleWebPath . '/public/assets/vendor/pdfjs/pdf.worker.min.js',
         ];
 

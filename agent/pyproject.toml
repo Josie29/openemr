@@ -61,10 +61,6 @@ python_version = "3.12"
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
-# The synthetic-document fixture GENERATOR is PIL/numpy image code, not part of the typed agent
-# surface — and strict mypy fights PIL's incomplete stubs (LANCZOS/BICUBIC exist at runtime). Keep
-# the fixtures-generator tree out of type-checking; ruff still lints it.
-exclude = ["tests/fixtures/"]
 
 [[tool.mypy.overrides]]
 module = ["fhir.resources.*", "langfuse.*"]

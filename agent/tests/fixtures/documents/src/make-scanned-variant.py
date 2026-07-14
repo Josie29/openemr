@@ -68,7 +68,8 @@ PROFILES: dict[str, dict] = {
         "salt_p": 0.0015,
         "jpeg_q": 40,
         # Localized damage does the "make it fail" work — the global settings stay readable so the
-        # extractor still returns structure. Illegibility is confined to the stain/streak/crease/edge.
+        # extractor still returns structure. Illegibility is confined to the
+        # stain/streak/crease/edge.
         "artifacts": ["toner_streaks", "coffee_stain", "fold_crease", "edge_shadow"],
     },
 }
@@ -159,7 +160,10 @@ def fold_crease(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 def edge_shadow(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Darkening gradient + thin black scanner border down the right edge (page not flat on glass)."""
+    """Darkening gradient + thin black scanner border down the right edge.
+
+    (Page not flat on glass.)
+    """
     h, w, _ = arr.shape
     band = int(w * 0.11)
     grad = np.linspace(1.0, 0.32, band)[None, :, None]

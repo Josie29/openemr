@@ -74,6 +74,10 @@ final readonly class CopilotSidebarController
             'csrfToken' => CsrfUtils::collectCsrfToken(session: $session),
             'expectedOrigin' => $urls->origin,
             'messageSource' => TokenRelayView::MESSAGE_SOURCE,
+            // JOS-57 click-to-source: same-origin FHIR base for Binary (source-document) reads,
+            // and the locally-vendored pdf.js worker URL for the preview overlay.
+            'fhirBaseUrl' => (new ServerConfig())->getFhirUrl(),
+            'pdfWorkerUrl' => $this->moduleWebPath . '/public/assets/vendor/pdfjs/pdf.worker.min.js',
         ];
 
         // JSON_HEX_TAG closes off the `</script>`-in-a-string escape; the payload is inert data read

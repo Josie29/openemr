@@ -38,6 +38,11 @@
     var token = null; // {accessToken, patient, expiresAt}
     var launchInFlight = null;
 
+    // Click-to-source PDF preview (JOS-57). A monotonic id guards against a stale render (a slow PDF
+    // fetch) painting over a newer click; `previewTrigger` is the chip we return focus to on close.
+    var previewRequestId = 0;
+    var previewTrigger = null;
+
     // ---- config / labels -------------------------------------------------
 
     function readConfig() {
@@ -648,10 +653,16 @@
     // each supporting).
     function renderCitation(source) {
         source = source || {};
-        if (source.resource_type === 'DocumentReference') {
-            return renderDocumentCitation(source);
+        var cite = source.resource_type === 'DocumentReference'
+            ? renderDocumentCitation(source)
+            : renderCodedCitation(source);
+        // Click-to-source (JOS-57): only when the agent stamped a bounding box -- i.e. the fact was
+        // derived from an uploaded PDF. Absent a bbox the chip stands exactly as before; a rectangle
+        // is never fabricated.
+        if (hasBoundingBox(source)) {
+            cite.appendChild(buildViewSourceButton(source));
         }
-        return renderCodedCitation(source);
+        return cite;
     }
 
     function renderClaim(claim) {
@@ -673,6 +684,365 @@
         }
 
         return item;
+    }
+
+    // ---- click-to-source PDF preview (JOS-57) ----------------------------
+    //
+    // When a citation carries a `bounding_box`, the fact was read off an uploaded PDF. The chip gets a
+    // "View source" button that opens a preview pane inside this docked panel (never a Bootstrap
+    // modal -- it stays a child of the fixed panel, well below the 1050+ dialog band), fetches the
+    // Binary through the same SMART token the chat uses, renders the cited page with the vendored
+    // pdf.js, and draws the cited rectangle over it.
+
+    /**
+     * Narrow, defensive check that a citation carries a usable bounding box: the box object plus a
+     * document id and four finite numeric edges. Anything malformed falls back to "no rectangle".
+     *
+     * @param {object} source The citation's SourceRef.
+     * @returns {boolean} True when a click-to-source affordance should be rendered.
+     */
+    function hasBoundingBox(source) {
+        var bb = source && source.bounding_box;
+        if (!bb || typeof bb !== 'object' || !source.document_id) {
+            return false;
+        }
+        return isFiniteNumber(bb.x) && isFiniteNumber(bb.y)
+            && isFiniteNumber(bb.width) && isFiniteNumber(bb.height);
+    }
+
+    function isFiniteNumber(value) {
+        return typeof value === 'number' && isFinite(value);
+    }
+
+    /**
+     * Resolve the 1-based page to render: prefer the SourceRef's `page`, fall back to the box's own
+     * `page`, else page 1. Floored so a fractional value can't index a fractional page.
+     *
+     * @param {object} source The citation's SourceRef.
+     * @returns {number} A 1-based, integral page number.
+     */
+    function normalizePage(source) {
+        var page = source.page;
+        if (!isFiniteNumber(page) || page < 1) {
+            var boxPage = source.bounding_box && source.bounding_box.page;
+            page = (isFiniteNumber(boxPage) && boxPage >= 1) ? boxPage : 1;
+        }
+        return Math.floor(page);
+    }
+
+    /**
+     * Build the "View source" button appended to a bbox-bearing citation. The document id, page, and
+     * serialized box ride on the button's dataset so the click handler is self-contained.
+     *
+     * @param {object} source The citation's SourceRef (already passed hasBoundingBox).
+     * @returns {HTMLButtonElement} The keyboard-accessible affordance.
+     */
+    function buildViewSourceButton(source) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-copilot__view-source';
+        button.textContent = labels.viewSource;
+        button.dataset.documentId = String(source.document_id);
+        button.dataset.page = String(normalizePage(source));
+        button.dataset.bbox = JSON.stringify(source.bounding_box);
+        button.dataset.docTitle = (source.label && source.label !== source.value)
+            ? source.label
+            : (humanizeToken(source.resource_type) || labels.previewSourceFallback);
+        button.addEventListener('click', onViewSourceClick);
+        return button;
+    }
+
+    // Read the request off the clicked chip and hand it to the preview pane.
+    function onViewSourceClick(event) {
+        var button = event.currentTarget;
+        var bbox = null;
+        try {
+            bbox = JSON.parse(button.dataset.bbox);
+        } catch (err) {
+            bbox = null;
+        }
+        var documentId = button.dataset.documentId;
+        var page = parseInt(button.dataset.page, 10);
+        if (!documentId || !bbox || isNaN(page)) {
+            return;
+        }
+        previewTrigger = button;
+        openPreview({
+            documentId: documentId,
+            page: page,
+            bbox: bbox,
+            title: button.dataset.docTitle || labels.previewSourceFallback
+        });
+    }
+
+    /**
+     * Lazily build the preview pane and cache its parts on `els`. Built once and reused across
+     * clicks; a child of the fixed sidebar so it overlays the transcript without escaping the panel.
+     */
+    function ensurePreviewPane() {
+        if (els.preview) {
+            return;
+        }
+        var preview = document.createElement('div');
+        preview.className = 'ai-copilot__preview';
+        preview.setAttribute('role', 'dialog');
+        preview.setAttribute('aria-label', labels.previewSourceFallback);
+        preview.setAttribute('aria-hidden', 'true');
+        preview.hidden = true;
+
+        var header = document.createElement('header');
+        header.className = 'ai-copilot__preview-header';
+
+        var title = document.createElement('p');
+        title.className = 'ai-copilot__preview-title';
+        header.appendChild(title);
+
+        var close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'ai-copilot__preview-close';
+        close.setAttribute('aria-label', labels.previewClose);
+        close.textContent = '×'; // U+00D7 multiplication sign -- matches the panel's close glyph
+        header.appendChild(close);
+        preview.appendChild(header);
+
+        var body = document.createElement('div');
+        body.className = 'ai-copilot__preview-body';
+
+        var status = document.createElement('p');
+        status.className = 'ai-copilot__preview-status';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        status.hidden = true;
+        body.appendChild(status);
+
+        var wrap = document.createElement('div');
+        wrap.className = 'ai-copilot__preview-canvas-wrap';
+
+        var canvas = document.createElement('canvas');
+        canvas.className = 'ai-copilot__preview-canvas';
+        wrap.appendChild(canvas);
+
+        var bbox = document.createElement('div');
+        bbox.className = 'ai-copilot__preview-bbox';
+        bbox.setAttribute('aria-hidden', 'true');
+        bbox.hidden = true;
+        wrap.appendChild(bbox);
+
+        body.appendChild(wrap);
+        preview.appendChild(body);
+
+        close.addEventListener('click', closePreview);
+        // Escape closes the pane without collapsing the whole sidebar (stop it reaching a shell handler).
+        preview.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                event.stopPropagation();
+                closePreview();
+            }
+        });
+
+        els.sidebar.appendChild(preview);
+        els.preview = preview;
+        els.previewTitle = title;
+        els.previewClose = close;
+        els.previewStatus = status;
+        els.previewBody = body;
+        els.previewCanvasWrap = wrap;
+        els.previewCanvas = canvas;
+        els.previewBbox = bbox;
+    }
+
+    /**
+     * Reveal the preview pane for a fresh request, reset its canvas/overlay, and kick off the render.
+     *
+     * @param {{documentId: string, page: number, bbox: object, title: string}} req The source to show.
+     */
+    function openPreview(req) {
+        ensurePreviewPane();
+        var requestId = ++previewRequestId; // supersede any in-flight render
+        els.previewTitle.textContent = req.title;
+        els.preview.hidden = false;
+        els.preview.setAttribute('aria-hidden', 'false');
+        els.previewBbox.hidden = true;
+        clearPreviewCanvas();
+        setPreviewStatus(labels.previewLoading, false);
+        els.previewClose.focus();
+        renderPdfPreview(req, requestId);
+    }
+
+    /**
+     * Close the preview, invalidate any in-flight render, and return focus to the triggering chip.
+     */
+    function closePreview() {
+        previewRequestId++; // any render still resolving will see a stale id and bail
+        if (els.preview) {
+            els.preview.hidden = true;
+            els.preview.setAttribute('aria-hidden', 'true');
+        }
+        if (previewTrigger && typeof previewTrigger.focus === 'function') {
+            previewTrigger.focus();
+        }
+        previewTrigger = null;
+    }
+
+    function setPreviewStatus(message, isError) {
+        els.previewStatus.textContent = message || '';
+        els.previewStatus.hidden = !message;
+        els.previewStatus.classList.toggle('ai-copilot__preview-status--error', Boolean(isError));
+    }
+
+    function clearPreviewCanvas() {
+        var canvas = els.previewCanvas;
+        var ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    }
+
+    // Fetch the PDF bytes for a Binary through the SMART token, same base URL the chat is scoped to.
+    function fetchBinary(documentId, accessToken) {
+        return fetch(config.fhirBaseUrl + '/Binary/' + encodeURIComponent(documentId), {
+            headers: {
+                'Authorization': 'Bearer ' + accessToken,
+                'Accept': 'application/pdf'
+            }
+        });
+    }
+
+    // Fetch, and on a 401 drop the token and re-launch once (mirrors sendTurn's single-retry).
+    function fetchBinaryWithReauth(documentId, accessToken) {
+        return fetchBinary(documentId, accessToken).then(function (response) {
+            if (response.status !== 401) {
+                return response;
+            }
+            token = null;
+            return ensureToken().then(function (fresh) {
+                return fetchBinary(documentId, fresh.accessToken);
+            });
+        });
+    }
+
+    /**
+     * Fetch the cited PDF and render its page with the vendored pdf.js, then draw the bounding box.
+     * Every step re-checks `requestId` so a superseding click (or a close) abandons this render
+     * instead of clobbering the newer one. Auth/404/parse failures surface inline in the pane.
+     *
+     * @param {{documentId: string, page: number, bbox: object}} req The source to render.
+     * @param {number} requestId This render's generation, compared against `previewRequestId`.
+     */
+    function renderPdfPreview(req, requestId) {
+        var pdfjs = window.pdfjsLib;
+        if (!pdfjs) {
+            setPreviewStatus(labels.previewError, true);
+            return;
+        }
+        if (!config.fhirBaseUrl) {
+            setPreviewStatus(labels.previewError, true);
+            return;
+        }
+
+        // Point pdf.js at the locally-vendored worker (CSP forbids its CDN default). Idempotent.
+        if (config.pdfWorkerUrl && !pdfjs.GlobalWorkerOptions.workerSrc) {
+            pdfjs.GlobalWorkerOptions.workerSrc = config.pdfWorkerUrl;
+        }
+
+        ensureToken()
+            .then(function (fresh) {
+                return fetchBinaryWithReauth(req.documentId, fresh.accessToken);
+            })
+            .then(function (response) {
+                if (!response.ok) {
+                    // Both messages are ours (localized), safe to show; flag them so the catch can tell
+                    // them from a raw fetch/parse failure.
+                    var reason = response.status === 404 ? labels.previewNotFound : labels.previewError;
+                    var httpErr = new Error(reason);
+                    httpErr.controlled = true;
+                    throw httpErr;
+                }
+                return response.arrayBuffer();
+            })
+            .then(function (buffer) {
+                if (requestId !== previewRequestId) {
+                    return null; // a newer click (or close) won the race -- drop this one
+                }
+                return pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+            })
+            .then(function (pdf) {
+                if (!pdf || requestId !== previewRequestId) {
+                    return null;
+                }
+                var pageNum = Math.min(Math.max(req.page, 1), pdf.numPages);
+                return pdf.getPage(pageNum);
+            })
+            .then(function (page) {
+                if (!page || requestId !== previewRequestId) {
+                    return;
+                }
+                paintPage(page, req.bbox, requestId);
+            })
+            .catch(function (err) {
+                if (requestId !== previewRequestId) {
+                    return;
+                }
+                setPreviewStatus(err && err.controlled ? err.message : labels.previewError, true);
+            });
+    }
+
+    /**
+     * Rasterize the page to the canvas at the pane width, then overlay the bounding box.
+     *
+     * The canvas backing store is scaled by devicePixelRatio for a crisp render, while its CSS size
+     * stays in layout pixels so the bbox overlay (also in layout pixels) lines up. The box is given
+     * in native page pixels, which equal the scale-1 viewport's units, so one `scale` maps both.
+     *
+     * @param {object} page A pdf.js PDFPageProxy.
+     * @param {{x: number, y: number, width: number, height: number}} bbox Native-page-pixel rectangle.
+     * @param {number} requestId This render's generation.
+     */
+    function paintPage(page, bbox, requestId) {
+        var cssWidth = els.previewCanvasWrap.clientWidth || els.previewBody.clientWidth;
+        var base = page.getViewport({ scale: 1 });
+        var scale = cssWidth / base.width;
+        var viewport = page.getViewport({ scale: scale });
+        var outputScale = window.devicePixelRatio || 1;
+
+        var canvas = els.previewCanvas;
+        canvas.width = Math.floor(viewport.width * outputScale);
+        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.style.width = Math.floor(viewport.width) + 'px';
+        canvas.style.height = Math.floor(viewport.height) + 'px';
+
+        var renderTask = page.render({
+            canvasContext: canvas.getContext('2d'),
+            viewport: viewport,
+            // Map the extra device-pixel resolution onto the same viewport (identity when DPR is 1).
+            transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined
+        });
+
+        renderTask.promise.then(function () {
+            if (requestId !== previewRequestId) {
+                return;
+            }
+            setPreviewStatus('', false);
+            positionBbox(bbox, scale);
+        }).catch(function () {
+            if (requestId !== previewRequestId) {
+                return;
+            }
+            setPreviewStatus(labels.previewError, true);
+        });
+    }
+
+    // Place the highlight rectangle over the rendered page and scroll it into view.
+    function positionBbox(bbox, scale) {
+        var box = els.previewBbox;
+        box.style.left = (bbox.x * scale) + 'px';
+        box.style.top = (bbox.y * scale) + 'px';
+        box.style.width = (bbox.width * scale) + 'px';
+        box.style.height = (bbox.height * scale) + 'px';
+        box.hidden = false;
+        if (typeof box.scrollIntoView === 'function') {
+            box.scrollIntoView({ block: 'center', inline: 'nearest' });
+        }
     }
 
     // ---- SMART launch + chat (reused mechanism) --------------------------
@@ -941,7 +1311,15 @@
             clearConfirm: els.sidebar.dataset.labelClearConfirm,
             thinking: els.sidebar.dataset.labelThinking,
             hasConversation: els.sidebar.dataset.labelHasConversation,
-            followUps: els.sidebar.dataset.labelFollowUps
+            followUps: els.sidebar.dataset.labelFollowUps,
+            // Click-to-source (JOS-57). Defaulted here so the feature works before the PHP config
+            // island grows these data-label-* attributes; add them there for localization.
+            viewSource: els.sidebar.dataset.labelViewSource || 'View source',
+            previewClose: els.sidebar.dataset.labelPreviewClose || 'Close source preview',
+            previewSourceFallback: els.sidebar.dataset.labelPreviewSource || 'Source document',
+            previewLoading: els.sidebar.dataset.labelPreviewLoading || 'Loading source document...',
+            previewError: els.sidebar.dataset.labelPreviewError || 'Could not load the source document.',
+            previewNotFound: els.sidebar.dataset.labelPreviewNotFound || 'Source document not found.'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

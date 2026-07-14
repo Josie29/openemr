@@ -643,3 +643,139 @@ body.ai-copilot-resizing {
         transition: none;
     }
 }
+
+/* ---- Click-to-source (JOS-57) ----
+ *
+ * A citation whose fact was read off an uploaded PDF carries a "View source" button; clicking it
+ * opens the in-panel preview pane (below) with the cited page and a highlight over the cited span.
+ * Only bbox-bearing citations get this — ordinary coded/note chips are untouched.
+ */
+
+.ai-copilot__view-source {
+    /* Sit on its own line at the foot of the chip: full-basis so it wraps below the coded chip's
+       row, and last-in-column for note chips. */
+    flex-basis: 100%;
+    align-self: flex-start;
+    margin-top: var(--copilot-space-1);
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: var(--copilot-font-sm);
+    font-weight: 600;
+    color: var(--copilot-accent);
+    cursor: pointer;
+    text-align: left;
+}
+
+.ai-copilot__view-source::after {
+    content: "\00a0\25B8"; /* nbsp + U+25B8 right-pointing triangle: "open the source" */
+    opacity: 0.8;
+}
+
+.ai-copilot__view-source:hover,
+.ai-copilot__view-source:focus-visible {
+    color: var(--copilot-accent-strong);
+    text-decoration: underline;
+    outline: none;
+}
+
+/* ---- In-panel source preview pane ----
+ *
+ * Overlays the docked panel (a child of the fixed .ai-copilot, so it never rises into the 1050+
+ * Bootstrap-dialog band — no backdrop, no modal). Header (title + close) over a scrollable body
+ * holding the rendered page canvas and the highlight rectangle.
+ */
+
+.ai-copilot__preview {
+    position: absolute;
+    inset: 0;
+    z-index: 5; /* above the transcript/composer within the panel; still inside its 1080 context */
+    display: flex;
+    flex-direction: column;
+    background: var(--copilot-surface);
+}
+
+.ai-copilot__preview[hidden] {
+    display: none;
+}
+
+.ai-copilot__preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--copilot-space-2);
+    padding: var(--copilot-space-3);
+    border-bottom: 1px solid var(--copilot-border);
+}
+
+.ai-copilot__preview-title {
+    margin: 0;
+    font-size: var(--copilot-font-base);
+    font-weight: 600;
+    color: var(--copilot-text);
+    /* Long document names truncate rather than push the close button off-panel. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ai-copilot__preview-close {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: var(--copilot-muted);
+    cursor: pointer;
+}
+
+.ai-copilot__preview-body {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: var(--copilot-space-3);
+    background: var(--copilot-surface-alt);
+}
+
+.ai-copilot__preview-status {
+    margin: 0 0 var(--copilot-space-2);
+    font-size: var(--copilot-font-sm);
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__preview-status[hidden] {
+    display: none;
+}
+
+.ai-copilot__preview-status--error {
+    color: var(--copilot-error);
+}
+
+/* Positioning context for the highlight rectangle; width drives the render scale (JS reads
+   clientWidth), so it fills the body content box. */
+.ai-copilot__preview-canvas-wrap {
+    position: relative;
+    width: 100%;
+}
+
+.ai-copilot__preview-canvas {
+    display: block;
+    max-width: 100%;
+    border: 1px solid var(--copilot-border);
+    background: var(--copilot-surface);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* The cited span, drawn over the page in native-page-pixels * render-scale (set inline by the JS).
+   Accent border + faint accent fill so it reads as a highlight, not a control. */
+.ai-copilot__preview-bbox {
+    position: absolute;
+    pointer-events: none; /* purely decorative — clicks fall through to the page */
+    border: 2px solid var(--copilot-accent);
+    border-radius: var(--copilot-radius);
+    background: rgba(30, 78, 216, 0.14); /* --copilot-accent at low alpha */
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); /* thin light halo so it reads on dark ink */
+}
+
+.ai-copilot__preview-bbox[hidden] {
+    display: none;
+}

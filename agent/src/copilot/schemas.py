@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from copilot.ingestion.schemas import BoundingBox
+
 
 class SourceRef(BaseModel):
     """A citation binding a claim to a specific field of a resource the agent actually read.
@@ -50,6 +52,29 @@ class SourceRef(BaseModel):
     date_label: str | None = Field(
         default=None,
         description="What `date` means for this record (e.g. 'Onset'). Leave empty — system-set.",
+    )
+
+    # --- Click-to-source document provenance (JOS-57) ---
+    # Present only when the cited record derives from an uploaded document (lab_pdf / intake_form).
+    # System-stamped from the extraction sidecar (the derived FHIR Observation carries the value but
+    # not the pixel box — W2_ARCHITECTURE §3.3/§6), NEVER written by the model. The verification gate
+    # ignores these — they are overlay provenance, not verified fields. The sidebar renders a
+    # click-to-source bbox overlay iff `bounding_box` is present; absent => citation shows quote +
+    # page with no rectangle (a box is never fabricated).
+    document_id: str | None = Field(
+        default=None,
+        description="Binary/DocumentReference id of the source document. Leave empty — system-set.",
+    )
+    page: int | None = Field(
+        default=None,
+        description="1-based source page the value was read from. Leave empty — system-set.",
+    )
+    bounding_box: BoundingBox | None = Field(
+        default=None,
+        description=(
+            "Native-pixel box of the value on the source page, for the click-to-source overlay. "
+            "Leave empty — system-set from the extraction sidecar; absent means no overlay."
+        ),
     )
 
 

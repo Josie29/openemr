@@ -59,9 +59,9 @@ class SourceRef(BaseModel):
 
     # --- Click-to-source document provenance (JOS-57) ---
     # Present only when the cited record derives from an uploaded document (lab_pdf / intake_form).
-    # System-stamped from the extraction sidecar (the derived FHIR Observation carries the value but
-    # not the pixel box — W2_ARCHITECTURE §3.3/§6), NEVER written by the model. The verification gate
-    # ignores these — they are overlay provenance, not verified fields. `to_citation` projects them
+    # System-stamped from the extraction sidecar (the derived FHIR Observation carries the value
+    # but not the pixel box — W2_ARCHITECTURE §3.3/§6), NEVER written by the model. The verification
+    # gate ignores these — overlay provenance, not verified fields. `to_citation` projects them
     # onto the canonical `LabPdfCitation` the sidebar's click-to-source consumes.
     document_id: str | None = Field(
         default=None,
@@ -85,8 +85,8 @@ class SourceRef(BaseModel):
         A *pure* projection of the **stamped** ``SourceRef`` (``value``/``label``/``date`` already
         filled by the grounding gate), so the sidebar's click-to-source (JOS-57) gets the
         machine-readable contract with no second lookup: a **document-extraction** fact (carrying
-        the JOS-57 overlay provenance) projects to a :class:`LabPdfCitation` with its page + bounding
-        box; a guideline reference reads the stamped ``label``/``date``; a FHIR reference reads its
+        the JOS-57 overlay provenance) projects to a :class:`LabPdfCitation` with its page +
+        bounding box; a guideline reference reads the stamped ``label``/``date``; a FHIR reads its
         resource type/id and field. Kept off :class:`Claim` so it never enters an LLM output schema.
 
         Returns:

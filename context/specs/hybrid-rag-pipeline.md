@@ -260,6 +260,18 @@ endpoint reports `unreachable`, both `ok=false` (fail closed → 503).
 6. **Update `W2_ARCHITECTURE.md`** §10 (deployment) + §5 if pipeline detail changed
    (CLAUDE.md: keep architecture docs current in the same change).
 
+**Deploy status (2026-07-14 — infra provisioned, deferred-index path).** The `qdrant`
+service is live on Railway (project `agentforge-openemr`, env `production`): image
+`qdrant/qdrant:v1.18.2`, `QDRANT__SERVICE__HOST=::` (IPv6 bind), volume `qdrant-volume` at
+`/qdrant/storage`, `QDRANT__SERVICE__API_KEY` set (64-char), private-only at
+`qdrant.railway.internal:6333` (no public domain). **Corpus not yet indexed** — it
+auto-indexes at promotion via the start-command indexer (in-network, reads the key from the
+container env). **Remaining promotion steps** (do when JOS-53 + JOS-56 promote to `main`):
+set on `copilot-agent` — `QDRANT_URL=http://qdrant.railway.internal:6333`,
+`QDRANT_API_KEY=${{qdrant.QDRANT__SERVICE__API_KEY}}` (Railway reference, no secret copy), and
+`COHERE_API_KEY` (user-set); add `python -m copilot.rag.index` to the start command; confirm
+`/ready` reports Qdrant + Cohere reachable.
+
 ---
 
 ## 8. Risks & mitigations

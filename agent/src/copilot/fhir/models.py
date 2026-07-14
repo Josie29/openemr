@@ -519,6 +519,79 @@ class NoteContent(BaseModel):
         return ResourceIdentity(label=self.type_display, date=self.date, date_label="Date")
 
 
+def _uploaded_document_attachment(resource: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a DocumentReference's binary attachment (PDF/Binary), or None for a text note.
+
+    An uploaded lab document carries an ``application/pdf`` attachment (or a ``url``/Binary
+    reference); an OpenEMR clinical note instead carries inline ``text/plain`` (read by
+    ``get_encounter_note``). This is what separates the two DocumentReference kinds without relying
+    on the exact OpenEMR category token.
+
+    Args:
+        resource: A FHIR ``DocumentReference`` resource.
+
+    Returns:
+        The binary attachment dict, or None when the resource is a text note / has no binary data.
+    """
+    content = resource.get("content")
+    if not isinstance(content, list):
+        return None
+    for item in content:
+        attachment = item.get("attachment") if isinstance(item, dict) else None
+        if not isinstance(attachment, dict):
+            continue
+        content_type = attachment.get("contentType")
+        has_url = isinstance(attachment.get("url"), str) and attachment.get("url")
+        if content_type == "application/pdf" or (content_type != "text/plain" and has_url):
+            return attachment
+    return None
+
+
+class LabDocumentSummary(BaseModel):
+    """A discovered uploaded lab document (a ``DocumentReference`` with a PDF/Binary attachment).
+
+    Returned by ``get_lab_documents`` so the intake-extractor can find the id of a patient's
+    uploaded lab report and hand it to ``attach_and_extract``. This is metadata only — the document
+    is OCR'd from its bytes, not read from FHIR (the SMART token cannot read the Binary; see the
+    seam spec), so no ``citation_identity`` is needed here.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    resource_type: str = Field(
+        default="DocumentReference", description="FHIR resource type, always 'DocumentReference'"
+    )
+    resource_id: str = Field(description="FHIR DocumentReference.id — pass to attach_and_extract")
+    title: str | None = Field(default=None, description="Document title/filename, if any")
+    date: str | None = Field(default=None, description="DocumentReference.date")
+
+    @classmethod
+    def try_from_fhir(cls, resource: dict[str, Any]) -> "LabDocumentSummary | None":
+        """Parse a ``DocumentReference`` into a summary, or None if it is not an uploaded document.
+
+        Args:
+            resource: A FHIR ``DocumentReference`` resource (parsed JSON).
+
+        Returns:
+            The typed summary for an uploaded (PDF/Binary) document, or None for a text note or a
+            resource lacking a logical id.
+        """
+        resource_id = resource.get("id")
+        if not isinstance(resource_id, str) or not resource_id:
+            return None
+        attachment = _uploaded_document_attachment(resource)
+        if attachment is None:
+            return None
+        title = attachment.get("title")
+        if not (isinstance(title, str) and title.strip()):
+            title = _codeable_text(resource.get("type")) or resource.get("description")
+        return cls(
+            resource_id=resource_id,
+            title=title if isinstance(title, str) and title.strip() else None,
+            date=resource.get("date") if isinstance(resource.get("date"), str) else None,
+        )
+
+
 def dedup_medications(medications: list[Medication]) -> list[Medication]:
     """Collapse duplicate meds from the FHIR prescriptions/lists UNION (deployment-strategy.md).
 

@@ -1,6 +1,6 @@
 # Citation → click-to-source overlay contract (JOS-57 seam)
 
-**Status:** Implemented (frontend + stub) on `feature/w2-jos57-click-to-source`. This is the **shared seam** the document-extraction path (JOS-54 extractor + JOS-56 intake-extractor worker) must emit so the sidebar's click-to-source overlay renders. Documented so the producer and the renderer don't drift.
+**Status:** **Fully wired.** The renderer + viewer landed on `feature/w2-jos57-click-to-source` (merged to `qa/integration`, PR #21); the **real producer landed in JOS-54** on `feature/w2-jos54-mistral-extraction` (the stub is deleted). This documents the **shared seam** the document-extraction path (JOS-54 extractor + JOS-56 intake-extractor worker) emits so the sidebar's click-to-source overlay renders, so the producer and the renderer don't drift.
 
 ## The wire shape
 
@@ -40,6 +40,13 @@ The obvious approach — the sidebar fetching `GET /fhir/Binary/{id}` with the S
 ## Integrated with JOS-56 (the citation wire)
 JOS-56 landed the canonical `Citation` discriminated union (`SourceRef.to_citation()` → a per-claim `claims[].citations` list, added by `main.py._answer_payload`), with `LabPdfCitation`/`IntakeFormCitation` **reserved** for exactly this feature. This branch converged onto it: `to_citation` now projects a document-derived fact (a `SourceRef` carrying the overlay provenance) to a **`LabPdfCitation`** with its `page` + `bounding_box`, and the stub routes through `_answer_payload`, so `/chat` emits the canonical `citations` too. The sidebar currently reads the overlay off the legacy `claims[].source` (kept by JOS-56 — additive); a small follow-up can migrate it to read the canonical `claims[].citations` `LabPdfCitation`.
 
-## To wire the real producer (JOS-54)
-1. When a claim cites a document-derived `Observation`, stamp `document_id` (the `DocumentReference` UUID), `page`, and `bounding_box` (**in PDF points**) from the extraction sidecar onto the `SourceRef` — `to_citation` then projects them onto the `LabPdfCitation` automatically.
-2. Delete the `main.py` stub + `COPILOT_STUB_DOC_ID`.
+## Realized by JOS-54 (the real producer)
+The intake-extractor's `attach_and_extract` tool OCRs an uploaded lab PDF (Mistral OCR schema mode) into cited `LabReport` facts, recorded in a `DocumentFactRegistry` (`agent/src/copilot/ingestion/`). That registry is a `CitationResolver` joined into the intake-extractor's and the final answer's grounding gates, so a claim citing a lab fact grounds exactly like a FHIR/guideline claim. On resolve it returns the `document_id`, `page`, and `bounding_box` (**converted to PDF points** from the extractor's native pixels using the page DPI), which `_stamp` copies onto the `SourceRef`; `to_citation` then projects them onto the `LabPdfCitation` automatically. The `main.py` stub + `COPILOT_STUB_DOC_ID` are deleted.
+
+### Box strategy — estimated per-row band (not a tight box)
+Mistral OCR returns the field values but only **whole-table** geometry (the lab table is a single block; its HTML has no per-cell coordinates). So a per-value box is **estimated**: the table block's y-range is split by the table's row order, and each value gets a **full-width band at its row**. This lands on the correct row (a deliberate accuracy/complexity trade — see the box-strategy decision), not the tight box the hand-measured stub drew. A tighter box would need a local per-word OCR pass (a documented alternative, not taken).
+
+### Deferred (separable follow-ups — not needed for the overlay)
+- **Persistence to OpenEMR** — writing the derived `Observation`s + the bbox sidecar (`procedure_*` chain from `write_experiment.py`, recover it from git) so facts round-trip. The overlay does not need this; the doc is already uploaded and cited by its real id.
+- **Production doc-bytes fetch** — the extractor currently reads the committed fixture PDF as its byte-source (the real `document_id` is discovered live, so the viewer + citation resolve the actual record); fetching bytes from OpenEMR by id is blocked on the same Binary-scope wall the viewer sidesteps.
+- **`intake_form` extraction** and `get_observations` read-back.

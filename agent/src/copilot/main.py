@@ -21,6 +21,7 @@ from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
 from copilot.health import check_readiness
+from copilot.ingestion.extractor import build_extractor
 from copilot.observability import (
     configure_observability,
     observe_turn,
@@ -29,7 +30,7 @@ from copilot.observability import (
 )
 from copilot.pricing import turn_cost_usd
 from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
-from copilot.schemas import ChatRequest, ChatResponse, Claim, SourceRef
+from copilot.schemas import ChatRequest, ChatResponse
 
 logger = logging.getLogger("copilot")
 
@@ -258,6 +259,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # intake-extractor and evidence-retriever, and the grounding gate is enforced on each worker and
     # the final answer (context/decisions/agent-framework-week2.md).
     app.state.graph = build_graph(_build_model(settings))
+    # The document extractor (JOS-54): live Mistral OCR in MISTRAL mode, a recorded-response replay
+    # in FIXTURE mode, or None when unconfigured (the intake-extractor then reports no uploaded
+    # document rather than failing). App-lifetime and stateless; the per-conversation fact registry
+    # that its output is grounded against lives on each ConversationSession.
+    app.state.extractor = build_extractor(settings)
     # Server-side conversation state so multi-turn history (which contains PHI) stays in the
     # service rather than round-tripping through the client. TTL-evicted; single-instance.
     app.state.conversation_store = ConversationStore(ttl_seconds=1800, max_sessions=1000)
@@ -274,59 +280,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status_code = 200 if report.ready else 503
         return JSONResponse(status_code=status_code, content=report.model_dump())
 
-    def _stub_doc_citation_content(conversation_id: str | None) -> dict[str, Any] | None:
-        """JOS-57 demo stub (REMOVABLE). When ``COPILOT_STUB_DOC_ID`` names an uploaded document's
-        Binary id, short-circuit ``/chat`` with a canned document-fact answer carrying real bounding
-        boxes (from the clean-lab fixture), so the click-to-source overlay can be built and verified
-        before the intake-extractor worker (JOS-56) produces real cited facts. Returns ``None`` when
-        the stub env is unset — i.e. normal operation is completely unaffected.
-        """
-        import os
-
-        doc_id = os.environ.get("COPILOT_STUB_DOC_ID")
-        if not doc_id:
-            return None
-        from copilot.ingestion.schemas import BoundingBox
-
-        def _fact(text: str, label: str, value: str, box: BoundingBox) -> Claim:
-            return Claim(
-                text=text,
-                source=SourceRef(
-                    resource_type="Observation",
-                    resource_id=f"stub-{label.lower().replace(' ', '-').replace(',', '')}",
-                    field="value",
-                    value=value,
-                    label=label,
-                    document_id=doc_id,
-                    page=1,
-                    bounding_box=box,
-                ),
-            )
-
-        answer = ChatResponse(
-            summary=(
-                "From the uploaded lab report: fasting glucose and potassium are both high, and "
-                "creatinine is elevated. Click a value to see where it was read on the source scan."
-            ),
-            # bbox values in PDF points (72-DPI space) — the coordinate space the overlay scales
-            # from (pdf.js scale-1 viewport). The spike produced native pixels at 200 DPI; converted
-            # here x72/200. The real extractor (JOS-54) must emit points too — see the seam doc.
-            claims=[
-                _fact("Fasting glucose was 108 mg/dL (high).", "Glucose, Fasting", "108",
-                      BoundingBox(page=1, x=249.8, y=205.2, width=16.9, height=10.8)),
-                _fact("Potassium was 5.4 mmol/L (high).", "Potassium", "5.4",
-                      BoundingBox(page=1, x=252.0, y=231.5, width=14.4, height=10.1)),
-                _fact("Creatinine was 1.44 mg/dL (high).", "Creatinine", "1.44",
-                      BoundingBox(page=1, x=248.0, y=281.9, width=18.4, height=10.4)),
-            ],
-            follow_ups=["What was the eGFR on this panel?"],
-        )
-        # Route through the same projection the real handler uses, so the stub emits the canonical
-        # `citations` (a LabPdfCitation carrying the box) as well as the legacy `claims[].source`.
-        content = _answer_payload(answer)
-        content["conversation_id"] = conversation_id or "stub-conversation"
-        return content
-
     @app.post("/chat")
     async def chat(request: Request, payload: ChatRequest) -> JSONResponse:
         """Answer one agent turn, grounded and traced (ARCHITECTURE.md §6.2).
@@ -336,12 +289,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         recorded as a score. Tracing failures never affect the response.
         """
         correlation_id = current_correlation_id()
-
-        # JOS-57 demo stub (removable): short-circuit with a canned document-fact answer when
-        # COPILOT_STUB_DOC_ID is set. No-op in normal operation (returns None).
-        stub_content = _stub_doc_citation_content(payload.conversation_id)
-        if stub_content is not None:
-            return JSONResponse(status_code=200, content=stub_content)
 
         enabled = request.app.state.observability_enabled
         settings: Settings = request.app.state.settings
@@ -385,10 +332,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 patient_id=payload.patient_id,
                 correlation_id=correlation_id,
                 retriever=request.app.state.retriever,
-                # Both registries accumulate across the conversation so a follow-up can cite a
-                # record read — or a guideline chunk retrieved — in an earlier turn.
+                extractor=request.app.state.extractor,
+                # The registries accumulate across the conversation so a follow-up can cite a record
+                # read, a guideline chunk retrieved, or a lab fact extracted in an earlier turn.
                 fetched=session.fetched,
                 chunks=session.chunks,
+                documents=session.documents,
             )
 
             with observe_turn(

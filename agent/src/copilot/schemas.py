@@ -74,8 +74,8 @@ class SourceRef(BaseModel):
     bounding_box: BoundingBox | None = Field(
         default=None,
         description=(
-            "Native-pixel box of the value on the source page, for the click-to-source overlay. "
-            "Leave empty — system-set from the extraction sidecar; absent means no overlay."
+            "Box of the value on the source page in PDF points (72-DPI), for the click-to-source "
+            "overlay. Leave empty — system-set from the extraction sidecar; absent means no box."
         ),
     )
 
@@ -95,7 +95,7 @@ class SourceRef(BaseModel):
         """
         quote_or_value = self.value or self.quote or ""
         if self.bounding_box is not None:
-            # Document-extraction fact: carries the native pixel box + page for the overlay.
+            # Document-extraction fact: carries the box (PDF points) + page for the overlay.
             return LabPdfCitation(
                 source_id=self.document_id or f"{self.resource_type}/{self.resource_id}",
                 page_or_section=str(self.page) if self.page is not None else self.resource_type,
@@ -251,7 +251,7 @@ class LabPdfCitation(CitationBase):
     """A citation to an extracted lab-PDF field, with the click-to-source overlay geometry.
 
     Produced by :meth:`SourceRef.to_citation` for a document-derived fact (JOS-57). Beyond the
-    shared five fields it carries the native pixel ``bounding_box`` + ``page`` the sidebar draws
+    shared five fields it carries the ``bounding_box`` (in PDF points) + ``page`` the sidebar draws
     on the source scan (W2_ARCHITECTURE.md §3.3). Absent ``bounding_box`` means the value could
     not be located on the page — the sidebar shows the citation without a rectangle, never a
     fabricated box.
@@ -263,7 +263,7 @@ class LabPdfCitation(CitationBase):
     )
     bounding_box: BoundingBox | None = Field(
         default=None,
-        description="Native-pixel box of the value on the page, for the click-to-source overlay.",
+        description="Box of the value on the page in PDF points (72-DPI), for the overlay.",
     )
 
 

@@ -5,6 +5,7 @@ import httpx
 from copilot.fhir.models import (
     Allergy,
     Encounter,
+    LabDocumentSummary,
     Medication,
     NoteContent,
     PatientDemographics,
@@ -78,6 +79,17 @@ class FhirClient(Protocol):
         Reads ``DocumentReference`` (category ``clinical-note``) for the patient and keeps those
         tied to ``encounter_id`` — the FHIR API has no ``encounter`` search param, so the filter is
         client-side (verified against OpenEMR's FHIR service).
+
+        Raises:
+            FhirError: If the read fails or times out.
+        """
+        ...
+
+    async def get_lab_documents(self, patient_id: str) -> list[LabDocumentSummary]:
+        """List the patient's uploaded lab documents (``DocumentReference`` with binary content).
+
+        Returns the uploaded documents (PDF/Binary attachment) only — inline ``text/plain`` clinical
+        notes are excluded — so the intake-extractor can find a lab report's id and OCR it.
 
         Raises:
             FhirError: If the read fails or times out.
@@ -183,6 +195,13 @@ class HttpFhirClient:
         )
         notes = [NoteContent.from_fhir(r) for r in resources]
         return [note for note in notes if note.encounter_id == encounter_id]
+
+    async def get_lab_documents(self, patient_id: str) -> list[LabDocumentSummary]:
+        # Search all of the patient's DocumentReferences and keep the uploaded (PDF/Binary) ones;
+        # the exact OpenEMR lab category token is unreliable, so the attachment kind is the filter.
+        resources = await self._search("DocumentReference", patient_id)
+        summaries = (LabDocumentSummary.try_from_fhir(r) for r in resources)
+        return [summary for summary in summaries if summary is not None]
 
     async def ping(self) -> None:
         try:

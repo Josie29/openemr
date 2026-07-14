@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from copilot.fhir.models import ResourceIdentity
+from copilot.ingestion.schemas import BoundingBox
 from copilot.schemas import ChatResponse, Claim, SourceRef
 
 _MISSING = object()
@@ -17,10 +18,17 @@ class Resolution:
     wire :class:`~copilot.schemas.Citation` is a further *pure* projection of the stamped
     ``SourceRef`` (see :meth:`~copilot.schemas.SourceRef.to_citation`), so it is derived at the
     response boundary rather than carried here.
+
+    A document-extraction resolver (JOS-54) additionally returns the click-to-source overlay
+    provenance — the source ``document_id``, ``page``, and ``bounding_box`` (**in PDF points**) —
+    which :func:`_stamp` copies onto the ``SourceRef``. FHIR/guideline resolvers leave these None.
     """
 
     value: str
     identity: ResourceIdentity | None
+    document_id: str | None = None
+    page: int | None = None
+    bounding_box: BoundingBox | None = None
 
 
 class CitationResolver(Protocol):
@@ -271,9 +279,18 @@ def _stamp(resolver: CitationResolver, ref: SourceRef) -> SourceRef | None:
     resolution = resolver.resolve(ref)
     if resolution is None:
         return None
-    update: dict[str, str | None] = {"value": resolution.value}
+    update: dict[str, Any] = {"value": resolution.value}
     if resolution.identity is not None:
         update["label"] = resolution.identity.label
         update["date"] = resolution.identity.date
         update["date_label"] = resolution.identity.date_label
+    # Document-extraction facts also carry the click-to-source overlay provenance (JOS-54/57).
+    # Stamped by code from the extraction sidecar, never model-authored — `to_citation` then
+    # projects them onto the wire `LabPdfCitation` the sidebar draws.
+    if resolution.document_id is not None:
+        update["document_id"] = resolution.document_id
+    if resolution.page is not None:
+        update["page"] = resolution.page
+    if resolution.bounding_box is not None:
+        update["bounding_box"] = resolution.bounding_box
     return ref.model_copy(update=update)

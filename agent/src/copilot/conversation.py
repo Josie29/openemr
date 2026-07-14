@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from pydantic_ai.messages import ModelMessage
 
+from copilot.ingestion.registry import DocumentFactRegistry
 from copilot.retrieval import ChunkRegistry
 from copilot.verification import FetchLog
 
@@ -13,17 +14,19 @@ from copilot.verification import FetchLog
 class ConversationSession:
     """Server-side state for one multi-turn conversation, bound to a single patient.
 
-    Holds the Pydantic AI ``message_history`` replayed into each turn, plus the two grounding
-    registries *accumulated across the whole conversation*: the ``fetched`` FHIR log and the
-    ``chunks`` guideline registry. Accumulating both is what lets a later turn cite a resource an
-    earlier turn read or a guideline chunk an earlier turn retrieved — the grounding gate resolves
-    claims against them.
+    Holds the Pydantic AI ``message_history`` replayed into each turn, plus the three grounding
+    registries *accumulated across the whole conversation*: the ``fetched`` FHIR log, the ``chunks``
+    guideline registry, and the ``documents`` extracted-lab-fact registry. Accumulating all three is
+    what lets a later turn cite a resource an earlier turn read, a guideline chunk an earlier turn
+    retrieved, or a lab fact an earlier turn extracted — the grounding gate resolves claims against
+    them (and the extraction cache means a follow-up need not re-OCR the same report).
     """
 
     patient_id: str
     messages: list[ModelMessage] = field(default_factory=list)
     fetched: FetchLog = field(default_factory=FetchLog)
     chunks: ChunkRegistry = field(default_factory=ChunkRegistry)
+    documents: DocumentFactRegistry = field(default_factory=DocumentFactRegistry)
     last_used: float = 0.0
 
 

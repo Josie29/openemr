@@ -1,10 +1,14 @@
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 
+from copilot.fhir.models import LabDocumentSummary
 from copilot.fhir_tools import register_fhir_read_tools
 from copilot.graph.deps import GraphDeps
 from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
+from copilot.ingestion.extractor import ExtractionError
+from copilot.ingestion.registry import LabFactHandle
+from copilot.ingestion.schemas import DocType
 from copilot.rag.models import EvidenceSnippet
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
@@ -45,10 +49,19 @@ when independent):
   lists don't hold. Find the visit with get_encounters first, then read the note for the SPECIFIC
   encounter the question is about. If that visit has no note, say so rather than scanning others.
 
+You also read UPLOADED lab-report documents (values the FHIR lists don't hold):
+- list_lab_documents: the patient's uploaded lab reports (id, title, date). Metadata only.
+- attach_and_extract(document_id): OCR one lab report into its individual lab results. Returns a
+  list of facts, each with a `resource_type` ("Observation"), a `resource_id`, and the printed
+  `test_name`/`value`/`unit`/`reference_range`/`abnormal_flag`. When a question is about lab values,
+  a trend, or an uploaded report, call list_lab_documents, then attach_and_extract on the relevant
+  report, and state the results the question needs. Cite each fact you state with its
+  `resource_type`/`resource_id` and `field` "value" — verbatim from the tool result.
+
 For a broad "who is this / give me the picture" request, fetch problems, medications, allergies, and
 the most recent encounters so the orientation is complete; for a focused question, fetch only what
-it needs. Answer only from what the tools return — if the record lacks something (e.g. labs,
-vitals), say so plainly rather than inferring.
+it needs. Answer only from what the tools return — if the record lacks something (e.g. the labs are
+not in an uploaded report), say so plainly rather than inferring.
 
 Return an ExtractorOutput: a one-line `summary` and a `claims` list, leading with safety signals (a
 high-severity allergy, an anticoagulant).
@@ -133,12 +146,43 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     )
     register_fhir_read_tools(agent)
 
+    @agent.tool
+    async def list_lab_documents(ctx: RunContext[GraphDeps]) -> list[LabDocumentSummary]:
+        """List the patient's uploaded lab-report documents (id, title, date) for extraction.
+
+        Args:
+            ctx: The run context (holds the patient-scoped FHIR client).
+        """
+        return await ctx.deps.fhir.get_lab_documents(ctx.deps.patient_id)
+
+    @agent.tool
+    async def attach_and_extract(
+        ctx: RunContext[GraphDeps], document_id: str
+    ) -> list[LabFactHandle]:
+        """OCR one uploaded lab report into its individual, citable lab results.
+
+        Args:
+            ctx: The run context (holds the extractor and the document-fact registry).
+            document_id: The DocumentReference id from list_lab_documents to extract.
+        """
+        if ctx.deps.extractor is None:
+            return []
+        try:
+            extracted = await ctx.deps.extractor.extract(document_id, DocType.LAB_PDF)
+        except ExtractionError:
+            # The document could not be read — return no facts so the worker reports the gap
+            # rather than fabricating lab values around a failed OCR.
+            return []
+        # Record the extracted facts so the grounding gate can resolve any the worker cites.
+        return ctx.deps.documents.record(extracted)
+
     @agent.output_validator
     async def enforce_grounding(
         ctx: RunContext[GraphDeps], output: ExtractorOutput
     ) -> ExtractorOutput:
-        """Reject any intake claim not grounded in a FHIR record read this turn."""
-        return enforce_claim_grounding(output, ctx.deps.fetched, subject="intake-extractor")
+        """Reject any intake claim not grounded in a FHIR record read or a lab fact extracted."""
+        resolver = CompositeResolver((ctx.deps.fetched, ctx.deps.documents))
+        return enforce_claim_grounding(output, resolver, subject="intake-extractor")
 
     return agent
 
@@ -211,8 +255,8 @@ def build_answerer(model: Model) -> Agent[GraphDeps, ChatResponse]:
 
     @agent.output_validator
     async def enforce_grounding(ctx: RunContext[GraphDeps], output: ChatResponse) -> ChatResponse:
-        """Reject any final claim not grounded in a FHIR record or guideline chunk this turn."""
-        resolver = CompositeResolver((ctx.deps.fetched, ctx.deps.chunks))
+        """Reject any final claim not grounded in a FHIR record, guideline chunk, or lab fact."""
+        resolver = CompositeResolver((ctx.deps.fetched, ctx.deps.chunks, ctx.deps.documents))
         return enforce_claim_grounding(output, resolver, subject="final answer")
 
     return agent

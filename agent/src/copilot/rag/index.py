@@ -1,8 +1,10 @@
 import argparse
 import uuid
 
+import httpx
 from pydantic import BaseModel
 from qdrant_client import QdrantClient, models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from copilot.config import get_settings
 from copilot.rag.corpus import CorpusError, load_corpus
@@ -83,7 +85,10 @@ def _existing_dense_dim(client: QdrantClient, collection: str) -> int | None:
     """
     try:
         vectors = client.get_collection(collection).config.params.vectors
-    except Exception:  # introspection failure — do not risk deleting on a transient read error
+    except (UnexpectedResponse, httpx.HTTPError, ConnectionError):
+        # Only a transport/connection failure returns None ("can't tell" -> don't recreate). A
+        # structural change in the response shape (e.g. an AttributeError after a client upgrade)
+        # must surface loudly rather than silently disable the dimension-mismatch guard.
         return None
     if isinstance(vectors, dict) and "dense" in vectors:
         return int(vectors["dense"].size)

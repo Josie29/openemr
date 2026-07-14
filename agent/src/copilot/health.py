@@ -117,7 +117,9 @@ async def _check_cohere(settings: Settings) -> DependencyStatus:
     """Probe the Cohere rerank API reachability (W2_ARCHITECTURE.md §5, §10).
 
     Uses a lightweight authenticated models-list GET — never a rerank call, which is billable.
-    In fixture retrieval mode Cohere is not used, so the probe reports ready without a call.
+    The models endpoint is version-stable, so this checks reachability + auth, not the (v2)
+    rerank contract. In fixture retrieval mode Cohere is not used, so the probe reports ready
+    without a call.
     """
     if settings.retrieval_mode is RetrievalMode.FIXTURE:
         return DependencyStatus(name=DependencyName.COHERE, ok=True, detail="fixture mode")

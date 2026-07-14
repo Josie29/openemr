@@ -96,7 +96,7 @@ class QdrantEvidenceRetriever:
         section: str | None = None,
         top_n: int | None = None,
     ) -> list[EvidenceSnippet]:
-        limit = top_n or self._rerank_top_n
+        limit = top_n if top_n is not None else self._rerank_top_n
         query_filter = _build_filter(guideline=guideline, source=source, section=section)
 
         # Hybrid: prefetch a dense (semantic) and a sparse (lexical) candidate set, each scoped
@@ -139,7 +139,11 @@ class QdrantEvidenceRetriever:
     async def _rerank(
         self, query: str, candidates: list[CorpusChunk], top_n: int
     ) -> list[EvidenceSnippet]:
-        """Rerank fused candidates with Cohere and project the top-n onto EvidenceSnippets."""
+        """Rerank fused candidates with Cohere and project the top-n onto EvidenceSnippets.
+
+        Raises:
+            RetrievalError: If the Cohere rerank call fails.
+        """
         documents = [chunk.text for chunk in candidates]
         try:
             reranked = await self._cohere.rerank(
@@ -158,8 +162,10 @@ class QdrantEvidenceRetriever:
         ]
 
     async def aclose(self) -> None:
-        # cohere.AsyncClientV2 (5.x) exposes no public close(); its underlying httpx pool is
-        # released on GC / process exit. Only the Qdrant client needs an explicit close.
+        # cohere.AsyncClientV2 (7.x) still exposes no public close()/aclose() — only an untyped
+        # __aexit__, which strict typing rejects and whose pooled httpx client is released on
+        # process exit regardless. Closing it here would buy only a cosmetic teardown at the cost
+        # of a vendor type-ignore, so we close just the Qdrant client explicitly.
         await self._qdrant.close()
 
 
@@ -197,7 +203,7 @@ class FixtureEvidenceRetriever:
         section: str | None = None,
         top_n: int | None = None,
     ) -> list[EvidenceSnippet]:
-        limit = top_n or self._rerank_top_n
+        limit = top_n if top_n is not None else self._rerank_top_n
         candidates = self._chunks
         if guideline is not None:
             candidates = [c for c in candidates if c.guideline == guideline]
@@ -216,7 +222,9 @@ class FixtureEvidenceRetriever:
         scored.sort(key=lambda item: item[0], reverse=True)
         top = scored[:limit]
         # Normalize overlap to a [0, 1] pseudo-relevance so the shape matches the live path.
-        max_overlap = max((overlap for overlap, _ in top), default=1) or 1
+        # Every chunk in `top` has overlap >= 1 (only positive-overlap chunks enter `scored`), so
+        # `default=1` alone covers the empty case — no extra zero-guard needed.
+        max_overlap = max((overlap for overlap, _ in top), default=1)
         return [_to_snippet(chunk, round(overlap / max_overlap, 4)) for overlap, chunk in top]
 
     async def aclose(self) -> None:

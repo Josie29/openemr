@@ -167,8 +167,11 @@ RRF is rank-based, so no dense/sparse score-scale tuning to defend.
 ### 4.2 SDK specifics (verified 2026 — Phase-1 scouts)
 
 **Pinned deps** (add to `agent/pyproject.toml`):
-`qdrant-client[fastembed]>=1.18,<2`, `cohere>=5.8,<6`. FastEmbed rides the `[fastembed]`
-extra (no separate install); the v2 Cohere clients live in the `cohere` package.
+`qdrant-client[fastembed]>=1.18,<2`, `cohere>=7.0,<8`. FastEmbed rides the `[fastembed]`
+extra (no separate install); the v2 Cohere clients (`AsyncClientV2`) live in the `cohere`
+package. Versions verified latest 2026-07-14 (qdrant-client 1.18.0, fastembed 0.8.0,
+cohere 7.0.5); the cohere 7.x `AsyncClientV2.rerank` API is unchanged from the 5.x form we
+built against (confirmed by a live rerank).
 
 **Qdrant — production path** (`create_collection`/`upsert`/`query_points`, NOT the
 `.add()`/`.query()` convenience layer). Let the client embed via FastEmbed by passing
@@ -299,3 +302,8 @@ set on `copilot-agent` — `QDRANT_URL=http://qdrant.railway.internal:6333`,
 - **Citation-union convergence.** Migrate the Week-1 FHIR `SourceRef` into a `fhir` arm of the
   `Citation` union and route the grounding gate by `source_type` (§3.3) — naturally forced when
   document extraction lands.
+- **`ScopeFilter` value object (optional DRY).** The `(guideline, source, section)` scope triple
+  is repeated across the retriever Protocol, both `retrieve` signatures, `_build_filter`, and the
+  fixture retriever's Python filter. A small frozen `ScopeFilter` model with `.to_qdrant_filter()`
+  / `.matches(chunk)` would centralize scope semantics and prevent fixture/live drift — worth it
+  only if a 4th scope field is added; deferred while the field set is stable.

@@ -215,6 +215,38 @@ citation is not merely *present*, it is *locatable on the source*; a field the e
 without a resolved box (or below the confidence floor) is a low-confidence refusal (§11), never a
 fabricated rectangle.
 
+### 3.4 Extraction is a one-time transform — re-extraction & idempotency
+
+Extraction is a **one-time transform, not a per-turn operation.** The pipeline in §3.1 runs
+**once per document version.** The first time the intake-extractor needs facts from a document it
+runs the full pipeline; on every later turn those facts are already **structured chart data**
+(persisted records) plus a **cached extraction result**, so the worker *reads* them — it does not
+re-invoke the VLM. Re-reading a scanned PDF on every follow-up question would be slow, costly, and
+a fresh chance to hallucinate; there is no reason to, because the transform's output is durable.
+
+**The idempotency key is the source document's stable ID** — the *same* `source_id` the citation
+contract already carries (§3.3). One provenance tag does three jobs: **citation, idempotency, and
+lineage.** The guard is a check-the-destination-before-writing step:
+
+```
+intake-extractor needs facts from document X:
+  1. Does an extraction result already exist for (doc-X id, content hash)?
+  2. YES → read persisted facts + cached citations. Skip VLM, skip persist.
+  3. NO  → extract → validate → persist (provenance = doc-X) → cache the extraction result.
+```
+
+- **Content hash guards re-uploads.** The key is `(document id, content hash)`, not the id alone.
+  A corrected re-upload changes the hash and is extracted as a **new version**; the prior facts
+  stay traceable to the prior version, so nothing becomes *untraceable* (§6).
+- **Why cache the whole extraction result, not just the facts.** A persisted lab `Observation`
+  carries the *value* but **not the pixel bounding box** the click-to-source overlay needs. So the
+  full extraction result — typed facts *plus* page/bbox citations — is stored as a **sidecar**
+  (§6), and re-rendering the overlay on a later turn reads the sidecar rather than re-running
+  Mistral OCR 4.
+- **Concurrency.** Two turns touching an un-extracted document at once could double-write; a
+  per-document lock (or an upsert keyed on `provenance + field`) makes first-touch extraction
+  safe. Low-risk at demo scale, called out so it is a decision, not an accident.
+
 ---
 
 ## 4. Worker graph — supervisor + two workers
@@ -358,7 +390,7 @@ nothing on a few-hundred-chunk flat corpus.
 
 ## 6. Data model & authority
 
-Week 2 introduces four artifact types. Each has exactly **one source of truth**, explicit
+Week 2 introduces five artifact types. Each has exactly **one source of truth**, explicit
 lineage, defined access control, and validation rules — **no silent overwrites** (PRD Engineering
 Requirements, "data authority must be explicit").
 
@@ -368,6 +400,7 @@ Requirements, "data authority must be explicit").
 | **Intake facts** | OpenEMR (demographics / meds / allergies / family history records) | Derived from a stored `DocumentReference` via extraction | Patient-scoped | `IntakeForm` schema |
 | **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{guideline, source, section}` metadata |
 | **Citation records** | The agent (emitted per claim) | Composed from an extraction or a retrieval result; for `lab_pdf`, the page + pixel bbox are **native output of Mistral OCR 4**, not a reconstructed rectangle | Rides with the answer payload | Must satisfy the full citation shape (§3.3); a `lab_pdf` citation whose field lacks a resolved bbox is refused, not shipped with a fabricated box |
+| **Extraction-result cache (sidecar)** | Derived cache — **rebuildable**, not a system of record | One extraction pass over a stored source document; keyed to `(document id, content hash)` (§3.4) | Same patient scope as the source document it derives from | Holds the validated facts + page/bbox citations; superseded when the source version (hash) changes |
 
 **Qdrant is authoritative for nothing patient-specific** — it holds only the non-PHI guideline
 corpus, and that corpus is reproducible from the repo, so Qdrant is a rebuildable index, not a
@@ -383,8 +416,20 @@ untraceable records." We enforce this by:
 - **Provenance link.** Every derived `Observation` is tagged with a reference to the
   `DocumentReference` it came from — so no derived record is *untraceable*, and the chain
   `Observation → DocumentReference → cited page/bbox` is always walkable.
-- **Idempotent derivation.** Re-extraction reconciles against existing derived Observations for
-  that source rather than blindly inserting, preventing *duplicates*.
+- **Idempotent derivation — check the destination first.** Before extracting or persisting, the
+  worker checks whether an extraction result already exists for `(document id, content hash)`
+  (§3.4). If it does, it reads the persisted facts and cached citations instead of re-running the
+  VLM or re-inserting Observations; if it does not, it extracts once and records provenance. This
+  is what makes the "one-time transform" (§3.4) safe to trigger from a chat turn without
+  duplicating records.
+- **Where the cache lives — sidecar in OpenEMR, not a new agent datastore.** The extraction result
+  (facts + page/bbox citations) is stored **alongside the source in OpenEMR**, linked to the source
+  document, rather than in a database owned by the agent service. The agent deliberately holds no
+  datastore of its own ([`ARCHITECTURE.md`](ARCHITECTURE.md) — FHIR-only, no DB credentials); a
+  private ledger would add a second source of truth to reconcile. Keeping the sidecar in OpenEMR
+  preserves **one system of record** and lets the whole per-document state (source + facts +
+  citations) be recovered together (§11). The trade-off — an OpenEMR read to check extraction
+  status instead of an O(1) local lookup — is negligible at this scale.
 
 ---
 

@@ -21,6 +21,14 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
 ]
+# Document extraction (intake-extractor VLM). OPTIONAL extra: mistralai 2.x pins
+# opentelemetry-semantic-conventions<0.61, which conflicts with langfuse's 0.63b1 — keeping it out
+# of the base install stops a plain `pip install -e .` from breaking langfuse tracing. Install with
+# `pip install -e .[extraction]`, then force otel back to 0.63b1. Resolve the pin (a resolver
+# override or a mistralai bump) when the extractor is wired into the service.
+extraction = [
+    "mistralai>=1.0",
+]
 # Load/stress testing the deployed /chat endpoint (agent/loadtest/, JOS-18).
 # Installed into an isolated venv by run.sh; recorded here for provenance.
 loadtest = [

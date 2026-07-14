@@ -5,7 +5,11 @@
 This fork is being extended with an AI Clinical Co-Pilot per `./PRD-week-1.md`
 and `./PRD-week-2.md` (Gauntlet AI case study — read the relevant week's PRD
 before making any architectural or scope decision). Deliverables
-required by the PRD: `./AUDIT.md`, `./USERS.md`, `./ARCHITECTURE.md`.
+required by the PRD: `./AUDIT.md`, `./USERS.md`, `./ARCHITECTURE.md` (Week 1),
+and `./W2_ARCHITECTURE.md` (Week 2). **Keep the architecture docs current:** when a
+change alters the architecture (ingestion, worker graph, RAG, eval gate, data model,
+deployment, or observability), update the matching `ARCHITECTURE.md` /
+`W2_ARCHITECTURE.md` in the same change so the docs never drift from the code.
 
 ### Our docs live in `/context/`, not `/docs/`
 

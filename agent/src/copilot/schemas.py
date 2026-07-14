@@ -1,3 +1,6 @@
+from enum import StrEnum
+from typing import Annotated, Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -108,3 +111,98 @@ class ChatRequest(BaseModel):
         default=None,
         description="Opaque id echoed from a prior turn's response; omit to start a new one",
     )
+
+
+# ---------------------------------------------------------------------------
+# Week-2 unified citation contract (W2_ARCHITECTURE.md §3.3, §6)
+#
+# Every clinical claim in a Week-2 answer — retrieved OR extracted — carries citation
+# metadata in one machine-readable shape, keyed on ``source_type``:
+#     { source_type, source_id, page_or_section, field_or_chunk_id, quote_or_value }
+# We model it as a discriminated (tagged) union so each source kind is a typed variant and
+# adding a new one (document extraction) is additive, not a rewrite.
+#
+# This increment (JOS-53, hybrid RAG) produces only ``GuidelineCitation``. The Week-1 FHIR
+# ``SourceRef`` above is untouched; converging it into this union as a ``fhir`` arm — and
+# routing the grounding gate by ``source_type`` — is a tracked follow-up (see
+# context/specs/hybrid-rag-pipeline.md §3.3).
+# ---------------------------------------------------------------------------
+
+
+class CitationSourceType(StrEnum):
+    """The kind of source a :class:`Citation` points at (W2_ARCHITECTURE.md §3.3).
+
+    ``GUIDELINE`` is produced this increment. ``LAB_PDF`` / ``INTAKE_FORM`` are reserved for
+    the document-extraction increment: their variants are declared so the union is extensible,
+    but nothing produces them yet.
+    """
+
+    GUIDELINE = "guideline"
+    LAB_PDF = "lab_pdf"
+    INTAKE_FORM = "intake_form"
+
+
+class CitationBase(BaseModel):
+    """The five-field citation shape shared by every source type (W2_ARCHITECTURE.md §3.3).
+
+    Inheritance is deliberate here: :data:`Citation` is a discriminated (tagged) union whose
+    variants share this exact contract and differ only by their ``source_type`` tag. That is
+    the idiomatic Pydantic tagged-union shape — distinct from the general compose-over-inherit
+    guidance, which targets domain models, not union arms.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source_id: str = Field(
+        description="Stable id of the source document/record the claim is traceable to"
+    )
+    page_or_section: str = Field(
+        description="Where in the source the support lives — PDF page or section heading"
+    )
+    field_or_chunk_id: str = Field(
+        description="The specific unit within the source — schema field name or retrieval chunk id"
+    )
+    quote_or_value: str = Field(
+        description="The verbatim supporting text (retrieved snippet) or extracted value"
+    )
+
+
+class GuidelineCitation(CitationBase):
+    """A citation to a retrieved clinical-guideline chunk (the JOS-53 evidence path).
+
+    Field mapping from the corpus chunk: ``source_id`` <- ``source``, ``page_or_section`` <-
+    ``section``, ``field_or_chunk_id`` <- ``chunk_id``, ``quote_or_value`` <- the retrieved
+    ``text``. The topic slug (``guideline``) and ``source_url`` ride on the surrounding
+    :class:`~copilot.rag.models.EvidenceSnippet` as presentation metadata, not on the minimum
+    citation shape.
+    """
+
+    source_type: Literal[CitationSourceType.GUIDELINE] = CitationSourceType.GUIDELINE
+
+
+class LabPdfCitation(CitationBase):
+    """RESERVED (document-extraction increment): a citation to an extracted lab-PDF field.
+
+    Declared so :data:`Citation` is a genuine, extensible union today. Not produced by any
+    code yet. When the extractor lands it will additionally carry the native bounding-box
+    coordinates + page for the click-to-source overlay (W2_ARCHITECTURE.md §3.3).
+    """
+
+    source_type: Literal[CitationSourceType.LAB_PDF] = CitationSourceType.LAB_PDF
+
+
+class IntakeFormCitation(CitationBase):
+    """RESERVED (document-extraction increment): a citation to an extracted intake-form field.
+
+    Declared for union extensibility; not produced by any code yet.
+    """
+
+    source_type: Literal[CitationSourceType.INTAKE_FORM] = CitationSourceType.INTAKE_FORM
+
+
+# The general citation-contract type (for the eventual final-answer gate). The retriever
+# narrows to GuidelineCitation — it only ever emits guideline citations this increment.
+Citation = Annotated[
+    GuidelineCitation | LabPdfCitation | IntakeFormCitation,
+    Field(discriminator="source_type"),
+]

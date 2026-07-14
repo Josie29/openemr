@@ -14,7 +14,7 @@ dependencies = [
     "langfuse>=4",
     # Hybrid RAG (JOS-53): Qdrant vector store + in-client FastEmbed (dense+sparse), Cohere rerank.
     "qdrant-client[fastembed]>=1.18,<2",
-    "cohere>=5.8,<6",
+    "cohere>=7.0,<8",
 ]
 
 [project.optional-dependencies]

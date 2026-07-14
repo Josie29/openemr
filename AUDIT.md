@@ -258,7 +258,7 @@ PHI already leaves the system through these in-tree paths — each is an existin
 - **Comlink telehealth** — `interface/modules/custom_modules/oe-module-comlink-telehealth`.
 - **External CCDA validator** — globals default points at `ccda.healthit.gov` (test only; `globals.inc.php:3728` explicitly warns not to transmit PHI there).
 
-*Forward-looking (not a finding on the existing system):* routing any PHI to an external LLM/AI provider would introduce a **new** outbound data flow requiring a signed BAA and a de-identification (§164.514) assessment before enablement — worth flagging now given the direction of travel, but no such flow exists in this tree today.
+*AI/LLM egress (Co-Pilot agent, Week 2):* the standalone Co-Pilot agent in this fork routes to external AI providers — the answer model (Anthropic Claude) and, for guideline retrieval, **Qdrant** (Railway private network) + **Cohere** rerank — each a BAA surface under the blanket-BAA posture. The guideline corpus is non-PHI; the retrieval query is constrained to the de-identified clinical topic (no patient identifiers or specific values, enforced by the evidence-retriever prompt). A §164.514 de-identification assessment of query/prompt content and PHI-scrubbing across traces/logs are tracked under JOS-65. See [`W2_ARCHITECTURE.md`](W2_ARCHITECTURE.md) §5, §9.
 
 ### 7. Certification context
 

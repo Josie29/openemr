@@ -150,9 +150,11 @@ class ChatRequest(BaseModel):
 # We model it as a discriminated (tagged) union so each source kind is a typed variant and
 # adding a new one (document extraction) is additive, not a rewrite.
 #
-# This increment (JOS-53, hybrid RAG) produces only ``GuidelineCitation``. The Week-1 FHIR
-# ``SourceRef`` above is untouched; converging it into this union as a ``fhir`` arm — and
-# routing the grounding gate by ``source_type`` — is a tracked follow-up (see
+# Today the supervisor graph's final answer produces both ``GuidelineCitation`` (guideline
+# evidence) and the ``FhirCitation`` record-claim arm below (the converged projection of the
+# Week-1 FHIR ``SourceRef``). ``LabPdfCitation`` / ``IntakeFormCitation`` remain reserved for the
+# document-extraction increment — declared for union extensibility, produced by nothing yet.
+# Routing the grounding gate by ``source_type`` is still a tracked follow-up (see
 # context/specs/hybrid-rag-pipeline.md §3.3).
 # ---------------------------------------------------------------------------
 

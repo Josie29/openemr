@@ -182,7 +182,7 @@ stage.
 - **LLM-as-reranker / listwise** — RankGPT-style; the LLM orders candidates.
 - **Late-interaction rerank** — ColBERT-style scoring as the rerank step.
 
-**Your pick:** **Cohere Rerank 3.5** — one API call, ~free at your volume.
+**Your pick:** **Cohere Rerank (`rerank-v4.0-fast`)** — one API call, ~free at your volume.
 
 ### Context post-processing
 **Term:** contextual compression
@@ -287,7 +287,7 @@ The same surface, ranked by leverage — where to actually spend effort first.
 | --- | --- |
 | **Day-one decisions** | Chunking strategy (layout-aware for PDFs) · Hybrid fusion (RRF over BM25 + dense) |
 | **Near non-decisions** | Similarity metric (cosine, matched to embedder) · ANN index (flat/exact — corpus is tiny) |
-| **Highest-ROI upgrades** | Reranking (Cohere Rerank 3.5) · Contextual retrieval (context prefix before embedding) |
+| **Highest-ROI upgrades** | Reranking (Cohere Rerank `rerank-v4.0-fast`) · Contextual retrieval (context prefix before embedding) |
 | **What CI scores** | The RAG triad (faithfulness / answer / context) · Retrieval recall@k on the golden set |
 | **Scale you don't have yet** | Quantization / PQ (millions of vectors) · DiskANN / multi-vector (large or precision-critical corpora) |
 

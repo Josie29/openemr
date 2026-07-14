@@ -82,8 +82,9 @@ class Settings(BaseSettings):
     fhir_max_retries: int = 2
 
     # Hybrid RAG evidence retrieval (JOS-53 — W2_ARCHITECTURE.md §5). Qdrant holds ONLY the
-    # non-PHI guideline corpus and Cohere reranks guideline text against the clinical question;
-    # no patient identifier is ever sent to either (patient facts come from the FHIR tools). See
+    # non-PHI guideline corpus and Cohere reranks guideline text against the clinical question; no
+    # patient identifiers or specific values are sent — the query carries only the de-identified
+    # clinical topic (patient facts come from the FHIR tools, not the query). See
     # context/specs/hybrid-rag-pipeline.md. Defaults to QDRANT so the deployed service uses the
     # real pipeline; local dev/tests opt into FIXTURE via .env / the settings override.
     retrieval_mode: RetrievalMode = RetrievalMode.QDRANT

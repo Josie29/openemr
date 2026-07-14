@@ -3,6 +3,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from copilot.ingestion.schemas import BoundingBox
+
 
 class SourceRef(BaseModel):
     """A citation binding a claim to a specific field of a resource the agent actually read.
@@ -55,20 +57,53 @@ class SourceRef(BaseModel):
         description="What `date` means for this record (e.g. 'Onset'). Leave empty — system-set.",
     )
 
+    # --- Click-to-source document provenance (JOS-57) ---
+    # Present only when the cited record derives from an uploaded document (lab_pdf / intake_form).
+    # System-stamped from the extraction sidecar (the derived FHIR Observation carries the value
+    # but not the pixel box — W2_ARCHITECTURE §3.3/§6), NEVER written by the model. The verification
+    # gate ignores these — overlay provenance, not verified fields. `to_citation` projects them
+    # onto the canonical `LabPdfCitation` the sidebar's click-to-source consumes.
+    document_id: str | None = Field(
+        default=None,
+        description="Binary/DocumentReference id of the source document. Leave empty — system-set.",
+    )
+    page: int | None = Field(
+        default=None,
+        description="1-based source page the value was read from. Leave empty — system-set.",
+    )
+    bounding_box: BoundingBox | None = Field(
+        default=None,
+        description=(
+            "Native-pixel box of the value on the source page, for the click-to-source overlay. "
+            "Leave empty — system-set from the extraction sidecar; absent means no overlay."
+        ),
+    )
+
     def to_citation(self) -> "Citation":
         """Project this grounded citation onto the canonical wire ``Citation`` (§3.3).
 
         A *pure* projection of the **stamped** ``SourceRef`` (``value``/``label``/``date`` already
         filled by the grounding gate), so the sidebar's click-to-source (JOS-57) gets the
-        machine-readable contract with no second lookup: a guideline reference reads the stamped
-        ``label`` (the guideline source id) and ``date`` (the section); a FHIR reference reads its
+        machine-readable contract with no second lookup: a **document-extraction** fact (carrying
+        the JOS-57 overlay provenance) projects to a :class:`LabPdfCitation` with its page +
+        bounding box; a guideline reference reads the stamped ``label``/``date``; a FHIR reads its
         resource type/id and field. Kept off :class:`Claim` so it never enters an LLM output schema.
 
         Returns:
-            The :class:`GuidelineCitation` or :class:`FhirCitation` for this reference, carrying the
-            claim's specific grounded value/quote.
+            The typed :data:`Citation` variant for this reference, carrying the claim's specific
+            grounded value/quote (and, for a document fact, the click-to-source box).
         """
         quote_or_value = self.value or self.quote or ""
+        if self.bounding_box is not None:
+            # Document-extraction fact: carries the native pixel box + page for the overlay.
+            return LabPdfCitation(
+                source_id=self.document_id or f"{self.resource_type}/{self.resource_id}",
+                page_or_section=str(self.page) if self.page is not None else self.resource_type,
+                field_or_chunk_id=self.field or self.resource_id,
+                quote_or_value=quote_or_value,
+                page=self.page,
+                bounding_box=self.bounding_box,
+            )
         if self.resource_type == CitationSourceType.GUIDELINE.value:
             return GuidelineCitation(
                 source_id=self.label or self.resource_id,
@@ -213,14 +248,23 @@ class GuidelineCitation(CitationBase):
 
 
 class LabPdfCitation(CitationBase):
-    """RESERVED (document-extraction increment): a citation to an extracted lab-PDF field.
+    """A citation to an extracted lab-PDF field, with the click-to-source overlay geometry.
 
-    Declared so :data:`Citation` is a genuine, extensible union today. Not produced by any
-    code yet. When the extractor lands it will additionally carry the native bounding-box
-    coordinates + page for the click-to-source overlay (W2_ARCHITECTURE.md §3.3).
+    Produced by :meth:`SourceRef.to_citation` for a document-derived fact (JOS-57). Beyond the
+    shared five fields it carries the native pixel ``bounding_box`` + ``page`` the sidebar draws
+    on the source scan (W2_ARCHITECTURE.md §3.3). Absent ``bounding_box`` means the value could
+    not be located on the page — the sidebar shows the citation without a rectangle, never a
+    fabricated box.
     """
 
     source_type: Literal[CitationSourceType.LAB_PDF] = CitationSourceType.LAB_PDF
+    page: int | None = Field(
+        default=None, description="1-based source page the value was read from."
+    )
+    bounding_box: BoundingBox | None = Field(
+        default=None,
+        description="Native-pixel box of the value on the page, for the click-to-source overlay.",
+    )
 
 
 class IntakeFormCitation(CitationBase):

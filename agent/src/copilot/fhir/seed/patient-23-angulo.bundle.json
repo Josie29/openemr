@@ -1,0 +1,686 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "23",
+        "meta": {
+          "versionId": "1"
+        },
+        "name": [
+          {
+            "use": "official",
+            "family": "Angulo",
+            "given": [
+              "Sergio"
+            ]
+          }
+        ],
+        "gender": "male",
+        "birthDate": "1979-03-14",
+        "identifier": [
+          {
+            "system": "urn:oid:openemr",
+            "value": "OE-000023"
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-asthma",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "195967001",
+              "display": "Asthma"
+            }
+          ],
+          "text": "Asthma"
+        },
+        "onsetDateTime": "2016-04-11"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-concussion",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "resolved"
+            }
+          ]
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "110030002",
+              "display": "Concussion"
+            }
+          ],
+          "text": "Concussion"
+        },
+        "onsetDateTime": "2026-01-06",
+        "abatementDateTime": "2026-02-22"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-budesonide",
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "authoredOn": "2016-04-11",
+        "medicationCodeableConcept": {
+          "text": "budesonide 160 mcg inhaler"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-albuterol",
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "authoredOn": "2016-04-11",
+        "medicationCodeableConcept": {
+          "text": "albuterol 90 mcg inhaler (Ventolin)"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-prednisone",
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "authoredOn": "2020-10-09",
+        "medicationCodeableConcept": {
+          "text": "prednisone 5 mg tablet"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-fexofenadine",
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "authoredOn": "2005-06-15",
+        "medicationCodeableConcept": {
+          "text": "fexofenadine 180 mg tablet"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-epinephrine",
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "authoredOn": "2005-06-15",
+        "medicationCodeableConcept": {
+          "text": "epinephrine 0.3 mg auto-injector"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-ibuprofen",
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "authoredOn": "2026-01-06",
+        "medicationCodeableConcept": {
+          "text": "ibuprofen 600 mg tablet"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-naproxen",
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "authoredOn": "2025-09-30",
+        "medicationCodeableConcept": {
+          "text": "naproxen 500 mg tablet"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-aspirin",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "high",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Aspirin"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Hives and wheezing"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-peanut",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "high",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Peanut"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Anaphylaxis"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-fish",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "high",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Fish"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Anaphylaxis"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-mold",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "low",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Mold"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Rhinitis"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-dustmite",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "low",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Dust mite"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Rhinitis"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-dander",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "low",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Animal dander"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Rhinitis"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-grass",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "low",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Grass pollen"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Allergic rhinitis"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-tree",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "criticality": "low",
+        "patient": {
+          "reference": "Patient/23"
+        },
+        "code": {
+          "text": "Tree pollen"
+        },
+        "reaction": [
+          {
+            "manifestation": [
+              {
+                "text": "Allergic rhinitis"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-2022-01",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "185349003",
+                "display": "Office visit"
+              }
+            ],
+            "text": "Office visit"
+          }
+        ],
+        "reasonCode": [
+          {
+            "text": "Asthma follow-up after hospitalization"
+          }
+        ],
+        "period": {
+          "start": "2022-01-22T10:00:00Z",
+          "end": "2022-01-22T10:25:00Z"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-2026-01",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "185349003",
+                "display": "Office visit"
+              }
+            ],
+            "text": "Office visit"
+          }
+        ],
+        "reasonCode": [
+          {
+            "text": "Emergency room visit \u2014 head injury"
+          }
+        ],
+        "period": {
+          "start": "2026-01-06T21:15:00Z",
+          "end": "2026-01-06T23:40:00Z"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-2026-06",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "subject": {
+          "reference": "Patient/23"
+        },
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "185349003",
+                "display": "Office visit"
+              }
+            ],
+            "text": "Office visit"
+          }
+        ],
+        "reasonCode": [
+          {
+            "text": "General examination"
+          }
+        ],
+        "period": {
+          "start": "2026-06-03T09:30:00Z",
+          "end": "2026-06-03T10:00:00Z"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "note-2022-01",
+        "status": "current",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "11506-3",
+              "display": "Progress note"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/us/core/CodeSystem/us-core-documentreference-category",
+                "code": "clinical-note",
+                "display": "Clinical Note"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "reference": "Patient/23",
+          "type": "Patient"
+        },
+        "date": "2022-01-22T10:25:00Z",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "text/plain",
+              "data": "U3ViamVjdGl2ZTogRm9sbG93LXVwIHR3byBkYXlzIGFmdGVyIGhvc3BpdGFsIGRpc2NoYXJnZSBmb3IgYW4gYWN1dGUgYXN0aG1hIGV4YWNlcmJhdGlvbiAoYWRtaXR0ZWQgMjAyMi0wMS0yMCkuIEJyZWF0aGluZyBtdWNoIGltcHJvdmVkLCB1c2luZyByZXNjdWUgYWxidXRlcm9sIG9ubHkgb2NjYXNpb25hbGx5LiBBc3Nlc3NtZW50L1BsYW46IEFzdGhtYSBleGFjZXJiYXRpb24gdGhhdCByZXF1aXJlZCBzeXN0ZW1pYyBjb3J0aWNvc3Rlcm9pZHMgZHVyaW5nIHRoZSBhZG1pc3Npb24uIFByZWRuaXNvbmUgNSBtZyB3YXMgc3RhcnRlZCBmb3IgdGhlIGFjdXRlIGZsYXJlIGFuZCBpcyB0byBiZSByZXNlcnZlZCBmb3IgZnV0dXJlIGV4YWNlcmJhdGlvbnM7IGNvbnRpbnVlIGJ1ZGVzb25pZGUgY29udHJvbGxlciBhbmQgYWxidXRlcm9sIHJlc2N1ZS4gUmVpbmZvcmNlZCBpbmhhbGVyIHRlY2huaXF1ZSBhbmQgdHJpZ2dlciBhdm9pZGFuY2UuIEZvbGxvdyB1cCBhcyBuZWVkZWQu"
+            }
+          }
+        ],
+        "context": {
+          "encounter": [
+            {
+              "reference": "Encounter/enc-2022-01",
+              "type": "Encounter"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "note-2026-01",
+        "status": "current",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "11506-3",
+              "display": "Progress note"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/us/core/CodeSystem/us-core-documentreference-category",
+                "code": "clinical-note",
+                "display": "Clinical Note"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "reference": "Patient/23",
+          "type": "Patient"
+        },
+        "date": "2026-01-06T23:40:00Z",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "text/plain",
+              "data": "U3ViamVjdGl2ZTogUHJlc2VudGVkIHRvIHRoZSBlbWVyZ2VuY3kgZGVwYXJ0bWVudCBhZnRlciBhIGZhbGwgd2l0aCBoZWFkIHN0cmlrZTsgYnJpZWYgY29uZnVzaW9uIGFuZCBoZWFkYWNoZSwgbm8gbG9zcyBvZiBjb25zY2lvdXNuZXNzLiBBc3Nlc3NtZW50L1BsYW46IENvbmN1c3Npb24uIEFkdmlzZWQgY29nbml0aXZlIGFuZCBwaHlzaWNhbCByZXN0IHdpdGggZ3JhZHVhbCByZXR1cm4gdG8gYWN0aXZpdHkuIEF2b2lkZWQgTlNBSURzIGZvciBhbmFsZ2VzaWEgZ2l2ZW4gdGhlIGRvY3VtZW50ZWQgYXNwaXJpbiBhbGxlcmd5OyBhY2V0YW1pbm9waGVuIHJlY29tbWVuZGVkIGluc3RlYWQuIFJldHVybiBwcmVjYXV0aW9ucyByZXZpZXdlZDsgZm9sbG93IHVwIGlmIHN5bXB0b21zIHBlcnNpc3Qu"
+            }
+          }
+        ],
+        "context": {
+          "encounter": [
+            {
+              "reference": "Encounter/enc-2026-01",
+              "type": "Encounter"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "note-2026-06",
+        "status": "current",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "11506-3",
+              "display": "Progress note"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/us/core/CodeSystem/us-core-documentreference-category",
+                "code": "clinical-note",
+                "display": "Clinical Note"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "reference": "Patient/23",
+          "type": "Patient"
+        },
+        "date": "2026-06-03T10:00:00Z",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "text/plain",
+              "data": "U3ViamVjdGl2ZTogUm91dGluZSBnZW5lcmFsIGV4YW1pbmF0aW9uOyBwYXRpZW50IGZlZWxpbmcgd2VsbCB3aXRoIG5vIG5ldyBjb21wbGFpbnRzLiBBc3Nlc3NtZW50L1BsYW46IEFzdGhtYSBzdGFibGUgb24gYnVkZXNvbmlkZSBjb250cm9sbGVyIHdpdGggaW5mcmVxdWVudCBhbGJ1dGVyb2wgdXNlLiBUaGUgSmFudWFyeSBjb25jdXNzaW9uIGhhcyBmdWxseSByZXNvbHZlZC4gUmV2aWV3ZWQgZW52aXJvbm1lbnRhbCBhbmQgZm9vZCBhbGxlcmdpZXMgKHBlYW51dCwgZmlzaCkgYW5kIGNvbmZpcm1lZCB0aGUgcGF0aWVudCBjYXJyaWVzIGFuIGVwaW5lcGhyaW5lIGF1dG8taW5qZWN0b3IgZm9yIGFuYXBoeWxheGlzIHJpc2suIENvbnRpbnVlIGN1cnJlbnQgcmVnaW1lbjsgaGVhbHRoIG1haW50ZW5hbmNlIHVwIHRvIGRhdGUu"
+            }
+          }
+        ],
+        "context": {
+          "encounter": [
+            {
+              "reference": "Encounter/enc-2026-06",
+              "type": "Encounter"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

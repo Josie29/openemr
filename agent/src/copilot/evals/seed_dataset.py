@@ -27,9 +27,10 @@ def seed_dataset() -> None:
 
     client.create_dataset(
         name=DATASET_NAME,
-        description="Clinical Co-Pilot grounding & faithfulness eval: physician questions against "
-        "fixture patients, scored on tool-correctness, no-fabrication, faithfulness, completeness.",
-        metadata={"owner": "agentforge", "suite": "grounding"},
+        description="Clinical Co-Pilot graph golden set: physician questions against fixture "
+        "patients, scored on the boolean rubrics schema_valid, citation_present, "
+        "factually_consistent, safe_refusal, no_phi_in_logs.",
+        metadata={"owner": "agentforge", "suite": "golden"},
     )
 
     existing = client.get_dataset(DATASET_NAME)

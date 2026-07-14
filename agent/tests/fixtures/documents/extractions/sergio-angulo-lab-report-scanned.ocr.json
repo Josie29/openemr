@@ -1,0 +1,2440 @@
+{
+  "pages": [
+    {
+      "index": 0,
+      "markdown": "SYNTHETIC DEMO DATA \u2014 FICTIONAL PATIENT & LABORATORY \u2014 NOT A REAL MEDICAL RECORD \u2014 AGENTFORGE CLINICAL CO-PILOT\n\n# Cedar Valley Reference Laboratory\n\n4120 Meridian Park Blvd, Suite 200 \u00b7 Austin, TX 78744\n\nCLIA #45D0000000 \u00b7 Director: Priya N. Raman, MD, PhD, FCAP \u00b7 (512) 555-0148\n\n# LABORATORY REPORT\n\nAccession: CVRL-26-0788143\n\nReport Status: FINAL\n\nPATIENT NAME\n\nAngulo, Sergio\n\nORDERING PROVIDER\n\nA. Mercado, MD\n\nREPORT RELEASED\n\n2026-07-09 07:05\n\nDATE OF BIRTH / AGE / SEX\n\n1979-03-14 / 47 / M\n\nSPECIMEN COLLECTED\n\n2026-07-08 09:40\n\nSPECIMEN TYPE\n\nSerum / Whole Blood (EDTA)\n\nMRN\n\nOE-000023\n\nSPECIMEN RECEIVED\n\n2026-07-08 15:12\n\nFASTING\n\nYes\n\n[tbl-0.html](tbl-0.html)\n\n# PERFORMING LABORATORY COMMENT\n\nRenal function has declined since the prior draw: creatinine 1.06 \u2192 1.44 mg/dL with eGFR 78 \u2192 54 mL/min/1.73m\u00b2 (now CKD stage G3a range), accompanied by potassium 5.4 mmol/L and BUN 27 mg/dL. Pattern is consistent with a pre-renal / NSAID-related effect; correlate with medications and consider repeat renal panel. Peripheral eosinophilia (9%, absolute 0.71 10\u00b3/\u03bcL) noted \u2014 correlate clinically with atopic/allergic history. Results reviewed and released by the performing laboratory.\n\nFlag key: H = above reference range \u00b7 L = below reference range. Reference ranges are method- and instrument-specific. Prior values shown for the same analyte from the most recent available prior specimen (2026-01-06).\n\nElectronically signed: Priya N. Raman, MD, PhD, FCAP \u2014 Laboratory Director \u00b7 2026-07-09 07:05 CT\n\nCedar Valley Reference Laboratory \u00b7 CLIA #45D0000000\n\nPatient: Angulo, Sergio \u00b7 MRN OE-000023 \u00b7 Acc. CVRL-26-0788143\n\nPage 1 of 1",
+      "images": [],
+      "dimensions": {
+        "dpi": 93,
+        "height": 1023,
+        "width": 791
+      },
+      "tables": [
+        {
+          "id": "tbl-0.html",
+          "content": "<table><tr><th>TEST</th><th>RESULT</th><th>FLAG</th><th>REFERENCE RANGE</th><th>UNITS</th><th>PRIOR (2026-01-06)</th></tr><tr><td colspan=\"6\"><b>COMPREHENSIVE METABOLIC PANEL</b></td></tr><tr><td>Glucose, Fasting</td><td>108</td><td>H</td><td>70\u201399</td><td>mg/dL</td><td>96</td></tr><tr><td>Sodium</td><td>140</td><td></td><td>136\u2013145</td><td>mmol/L</td><td>139</td></tr><tr><td>Potassium</td><td>5.4</td><td>H</td><td>3.5\u20135.1</td><td>mmol/L</td><td>4.6</td></tr><tr><td>Chloride</td><td>104</td><td></td><td>98\u2013107</td><td>mmol/L</td><td>102</td></tr><tr><td>Carbon Dioxide (CO2)</td><td>24</td><td></td><td>22\u201329</td><td>mmol/L</td><td>25</td></tr><tr><td>Urea Nitrogen (BUN)</td><td>27</td><td>H</td><td>7\u201320</td><td>mg/dL</td><td>18</td></tr><tr><td>Creatinine</td><td>1.44</td><td>H</td><td>0.70\u20131.30</td><td>mg/dL</td><td>1.06</td></tr><tr><td>eGFR (CKD-EPI 2021)</td><td>54</td><td>L</td><td>\u226560</td><td>mL/min/1.73m\u00b2</td><td>78</td></tr><tr><td>BUN/Creatinine Ratio</td><td>19</td><td></td><td>9\u201320</td><td>\u2014</td><td>17</td></tr><tr><td>Calcium</td><td>9.4</td><td></td><td>8.6\u201310.2</td><td>mg/dL</td><td>9.5</td></tr><tr><td>Total Protein</td><td>7.1</td><td></td><td>6.0\u20138.3</td><td>g/dL</td><td>7.0</td></tr><tr><td>Albumin</td><td>4.3</td><td></td><td>3.5\u20135.0</td><td>g/dL</td><td>4.4</td></tr><tr><td>Bilirubin, Total</td><td>0.6</td><td></td><td>0.2\u20131.2</td><td>mg/dL</td><td>0.5</td></tr><tr><td>Alkaline Phosphatase</td><td>78</td><td></td><td>40\u2013129</td><td>U/L</td><td>72</td></tr><tr><td>AST (SGOT)</td><td>24</td><td></td><td>10\u201340</td><td>U/L</td><td>22</td></tr><tr><td>ALT (SGPT)</td><td>27</td><td></td><td>7\u201356</td><td>U/L</td><td>25</td></tr><tr><td colspan=\"6\"><b>COMPLETE BLOOD COUNT WITH DIFFERENTIAL</b></td></tr><tr><td>White Blood Cell Count</td><td>7.9</td><td></td><td>3.8\u201310.8</td><td>10\u00b3/\u03bcL</td><td>7.2</td></tr><tr><td>Red Blood Cell Count</td><td>4.92</td><td></td><td>4.20\u20135.80</td><td>10\u2078/\u03bcL</td><td>4.88</td></tr><tr><td>Hemoglobin</td><td>15.1</td><td></td><td>13.2\u201317.1</td><td>g/dL</td><td>15.0</td></tr><tr><td>Hematocrit</td><td>44.5</td><td></td><td>38.5\u201350.0</td><td>%</td><td>44.1</td></tr><tr><td>MCV</td><td>90</td><td></td><td>80\u2013100</td><td>fL</td><td>90</td></tr><tr><td>Platelet Count</td><td>262</td><td></td><td>140\u2013400</td><td>10\u00b3/\u03bcL</td><td>254</td></tr><tr><td>Neutrophils</td><td>52</td><td></td><td>40\u201370</td><td>%</td><td>55</td></tr><tr><td>Lymphocytes</td><td>32</td><td></td><td>22\u201344</td><td>%</td><td>31</td></tr><tr><td>Monocytes</td><td>6</td><td></td><td>4\u201311</td><td>%</td><td>6</td></tr><tr><td>Eosinophils</td><td>9</td><td>H</td><td>0\u20135</td><td>%</td><td>6</td></tr><tr><td>Basophils</td><td>1</td><td></td><td>0\u20132</td><td>%</td><td>1</td></tr><tr><td>Eosinophils, Absolute</td><td>0.71</td><td>H</td><td>0.00\u20130.50</td><td>10\u00b3/\u03bcL</td><td>0.43</td></tr></table>",
+          "format": "html",
+          "word_confidence_scores": [
+            {
+              "text": "TEST",
+              "confidence": 0.9937183110285177,
+              "start_index": 15
+            },
+            {
+              "text": "RESULT",
+              "confidence": 0.9937183110285177,
+              "start_index": 28
+            },
+            {
+              "text": "FLAG",
+              "confidence": 0.9937183110285177,
+              "start_index": 43
+            },
+            {
+              "text": "REFERENCE",
+              "confidence": 0.9937183110285177,
+              "start_index": 56
+            },
+            {
+              "text": " RANGE",
+              "confidence": 0.9999358019193366,
+              "start_index": 65
+            },
+            {
+              "text": "UNITS",
+              "confidence": 0.9999358019193366,
+              "start_index": 80
+            },
+            {
+              "text": "PRIOR",
+              "confidence": 0.9999358019193366,
+              "start_index": 94
+            },
+            {
+              "text": " (2026-01-06)",
+              "confidence": 0.9993490088994469,
+              "start_index": 99
+            },
+            {
+              "text": "COMPREHENSIVE",
+              "confidence": 0.9471810163250882,
+              "start_index": 145
+            },
+            {
+              "text": " METABOLIC",
+              "confidence": 0.9999890329944924,
+              "start_index": 158
+            },
+            {
+              "text": " PANEL",
+              "confidence": 0.9999993741519632,
+              "start_index": 168
+            },
+            {
+              "text": "Glucose,",
+              "confidence": 0.9999993741519632,
+              "start_index": 196
+            },
+            {
+              "text": " Fasting",
+              "confidence": 0.9993221360444535,
+              "start_index": 204
+            },
+            {
+              "text": "108",
+              "confidence": 0.9993221360444535,
+              "start_index": 221
+            },
+            {
+              "text": "H",
+              "confidence": 0.9993221360444535,
+              "start_index": 233
+            },
+            {
+              "text": "70\u201399",
+              "confidence": 0.9993221360444535,
+              "start_index": 243
+            },
+            {
+              "text": "mg/dL",
+              "confidence": 0.9993221360444535,
+              "start_index": 257
+            },
+            {
+              "text": "96",
+              "confidence": 0.9993221360444535,
+              "start_index": 271
+            },
+            {
+              "text": "Sodium",
+              "confidence": 0.9993221360444535,
+              "start_index": 291
+            },
+            {
+              "text": "140",
+              "confidence": 0.9993221360444535,
+              "start_index": 306
+            },
+            {
+              "text": "136\u2013145",
+              "confidence": 0.9993221360444535,
+              "start_index": 327
+            },
+            {
+              "text": "mmol/L",
+              "confidence": 0.9993221360444535,
+              "start_index": 343
+            },
+            {
+              "text": "139",
+              "confidence": 0.9993221360444535,
+              "start_index": 358
+            },
+            {
+              "text": "Potassium",
+              "confidence": 0.9993221360444535,
+              "start_index": 379
+            },
+            {
+              "text": "5.4",
+              "confidence": 0.9993221360444535,
+              "start_index": 397
+            },
+            {
+              "text": "H",
+              "confidence": 0.9993221360444535,
+              "start_index": 409
+            },
+            {
+              "text": "3.5\u20135.1",
+              "confidence": 0.9993221360444535,
+              "start_index": 419
+            },
+            {
+              "text": "mmol/L",
+              "confidence": 0.9993221360444535,
+              "start_index": 435
+            },
+            {
+              "text": "4.6",
+              "confidence": 0.9993221360444535,
+              "start_index": 450
+            },
+            {
+              "text": "Chloride",
+              "confidence": 0.9993221360444535,
+              "start_index": 471
+            },
+            {
+              "text": "104",
+              "confidence": 0.9993221360444535,
+              "start_index": 488
+            },
+            {
+              "text": "98\u2013107",
+              "confidence": 0.9993221360444535,
+              "start_index": 509
+            },
+            {
+              "text": "mmol/L",
+              "confidence": 0.9993221360444535,
+              "start_index": 524
+            },
+            {
+              "text": "102",
+              "confidence": 0.9993221360444535,
+              "start_index": 539
+            },
+            {
+              "text": "Carbon",
+              "confidence": 0.9993221360444535,
+              "start_index": 560
+            },
+            {
+              "text": " Dioxide",
+              "confidence": 0.9999985098862982,
+              "start_index": 566
+            },
+            {
+              "text": " (CO2)",
+              "confidence": 0.9999950006803742,
+              "start_index": 574
+            },
+            {
+              "text": "24",
+              "confidence": 0.9999950006803742,
+              "start_index": 589
+            },
+            {
+              "text": "22\u201329",
+              "confidence": 0.9999950006803742,
+              "start_index": 609
+            },
+            {
+              "text": "mmol/L",
+              "confidence": 0.9999950006803742,
+              "start_index": 623
+            },
+            {
+              "text": "25",
+              "confidence": 0.9999950006803742,
+              "start_index": 638
+            },
+            {
+              "text": "Urea",
+              "confidence": 0.9999950006803742,
+              "start_index": 658
+            },
+            {
+              "text": " Nitrogen",
+              "confidence": 0.9999989800998351,
+              "start_index": 662
+            },
+            {
+              "text": " (BUN)",
+              "confidence": 0.9999865550126018,
+              "start_index": 671
+            },
+            {
+              "text": "27",
+              "confidence": 0.9999865550126018,
+              "start_index": 686
+            },
+            {
+              "text": "H",
+              "confidence": 0.9999865550126018,
+              "start_index": 697
+            },
+            {
+              "text": "7\u201320",
+              "confidence": 0.9999865550126018,
+              "start_index": 707
+            },
+            {
+              "text": "mg/dL",
+              "confidence": 0.9999865550126018,
+              "start_index": 720
+            },
+            {
+              "text": "18",
+              "confidence": 0.9999865550126018,
+              "start_index": 734
+            },
+            {
+              "text": "Creatinine",
+              "confidence": 0.9999865550126018,
+              "start_index": 754
+            },
+            {
+              "text": "1.44",
+              "confidence": 0.9999865550126018,
+              "start_index": 773
+            },
+            {
+              "text": "H",
+              "confidence": 0.9999865550126018,
+              "start_index": 786
+            },
+            {
+              "text": "0.70\u20131.30",
+              "confidence": 0.9999865550126018,
+              "start_index": 796
+            },
+            {
+              "text": "mg/dL",
+              "confidence": 0.9999865550126018,
+              "start_index": 814
+            },
+            {
+              "text": "1.06",
+              "confidence": 0.9999865550126018,
+              "start_index": 828
+            },
+            {
+              "text": "eGFR",
+              "confidence": 0.9999865550126018,
+              "start_index": 850
+            },
+            {
+              "text": " (CKD-EPI",
+              "confidence": 0.9999203792050355,
+              "start_index": 854
+            },
+            {
+              "text": " 2021)",
+              "confidence": 0.9999674400963754,
+              "start_index": 863
+            },
+            {
+              "text": "54",
+              "confidence": 0.9999674400963754,
+              "start_index": 878
+            },
+            {
+              "text": "L",
+              "confidence": 0.9999674400963754,
+              "start_index": 889
+            },
+            {
+              "text": "\u226560",
+              "confidence": 0.9999674400963754,
+              "start_index": 899
+            },
+            {
+              "text": "mL/min/1.73m\u00b2",
+              "confidence": 0.9999674400963754,
+              "start_index": 911
+            },
+            {
+              "text": "78",
+              "confidence": 0.9999674400963754,
+              "start_index": 933
+            },
+            {
+              "text": "BUN/Creatinine",
+              "confidence": 0.9999674400963754,
+              "start_index": 953
+            },
+            {
+              "text": " Ratio",
+              "confidence": 0.9998884265888677,
+              "start_index": 967
+            },
+            {
+              "text": "19",
+              "confidence": 0.9998884265888677,
+              "start_index": 982
+            },
+            {
+              "text": "9\u201320",
+              "confidence": 0.9998884265888677,
+              "start_index": 1002
+            },
+            {
+              "text": "\u2014",
+              "confidence": 0.9998884265888677,
+              "start_index": 1015
+            },
+            {
+              "text": "17",
+              "confidence": 0.9998884265888677,
+              "start_index": 1025
+            },
+            {
+              "text": "Calcium",
+              "confidence": 0.9998884265888677,
+              "start_index": 1045
+            },
+            {
+              "text": "9.4",
+              "confidence": 0.9998884265888677,
+              "start_index": 1061
+            },
+            {
+              "text": "8.6\u201310.2",
+              "confidence": 0.9998884265888677,
+              "start_index": 1082
+            },
+            {
+              "text": "mg/dL",
+              "confidence": 0.9998884265888677,
+              "start_index": 1099
+            },
+            {
+              "text": "9.5",
+              "confidence": 0.9998884265888677,
+              "start_index": 1113
+            },
+            {
+              "text": "Total",
+              "confidence": 0.9998884265888677,
+              "start_index": 1134
+            },
+            {
+              "text": " Protein",
+              "confidence": 0.9999986120328628,
+              "start_index": 1139
+            },
+            {
+              "text": "7.1",
+              "confidence": 0.9999986120328628,
+              "start_index": 1156
+            },
+            {
+              "text": "6.0\u20138.3",
+              "confidence": 0.9999986120328628,
+              "start_index": 1177
+            },
+            {
+              "text": "g/dL",
+              "confidence": 0.9999986120328628,
+              "start_index": 1193
+            },
+            {
+              "text": "7.0",
+              "confidence": 0.9999986120328628,
+              "start_index": 1206
+            },
+            {
+              "text": "Albumin",
+              "confidence": 0.9999986120328628,
+              "start_index": 1227
+            },
+            {
+              "text": "4.3",
+              "confidence": 0.9999986120328628,
+              "start_index": 1243
+            },
+            {
+              "text": "3.5\u20135.0",
+              "confidence": 0.9999986120328628,
+              "start_index": 1264
+            },
+            {
+              "text": "g/dL",
+              "confidence": 0.9999986120328628,
+              "start_index": 1280
+            },
+            {
+              "text": "4.4",
+              "confidence": 0.9999986120328628,
+              "start_index": 1293
+            },
+            {
+              "text": "Bilirubin,",
+              "confidence": 0.9999986120328628,
+              "start_index": 1314
+            },
+            {
+              "text": " Total",
+              "confidence": 0.9999983499045219,
+              "start_index": 1324
+            },
+            {
+              "text": "0.6",
+              "confidence": 0.9999983499045219,
+              "start_index": 1339
+            },
+            {
+              "text": "0.2\u20131.2",
+              "confidence": 0.9999983499045219,
+              "start_index": 1360
+            },
+            {
+              "text": "mg/dL",
+              "confidence": 0.9999983499045219,
+              "start_index": 1376
+            },
+            {
+              "text": "0.5",
+              "confidence": 0.9999983499045219,
+              "start_index": 1390
+            },
+            {
+              "text": "Alkaline",
+              "confidence": 0.9999983499045219,
+              "start_index": 1411
+            },
+            {
+              "text": " Phosphatase",
+              "confidence": 0.999989683050242,
+              "start_index": 1419
+            },
+            {
+              "text": "78",
+              "confidence": 0.999989683050242,
+              "start_index": 1440
+            },
+            {
+              "text": "40\u2013129",
+              "confidence": 0.999989683050242,
+              "start_index": 1460
+            },
+            {
+              "text": "U/L",
+              "confidence": 0.999989683050242,
+              "start_index": 1475
+            },
+            {
+              "text": "72",
+              "confidence": 0.999989683050242,
+              "start_index": 1487
+            },
+            {
+              "text": "AST",
+              "confidence": 0.999989683050242,
+              "start_index": 1507
+            },
+            {
+              "text": " (SGOT)",
+              "confidence": 0.999998666274976,
+              "start_index": 1510
+            },
+            {
+              "text": "24",
+              "confidence": 0.999998666274976,
+              "start_index": 1526
+            },
+            {
+              "text": "10\u201340",
+              "confidence": 0.999998666274976,
+              "start_index": 1546
+            },
+            {
+              "text": "U/L",
+              "confidence": 0.999998666274976,
+              "start_index": 1560
+            },
+            {
+              "text": "22",
+              "confidence": 0.999998666274976,
+              "start_index": 1572
+            },
+            {
+              "text": "ALT",
+              "confidence": 0.999998666274976,
+              "start_index": 1592
+            },
+            {
+              "text": " (SGPT)",
+              "confidence": 0.9999952765753651,
+              "start_index": 1595
+            },
+            {
+              "text": "27",
+              "confidence": 0.9999952765753651,
+              "start_index": 1611
+            },
+            {
+              "text": "7\u201356",
+              "confidence": 0.9999952765753651,
+              "start_index": 1631
+            },
+            {
+              "text": "U/L",
+              "confidence": 0.9999952765753651,
+              "start_index": 1644
+            },
+            {
+              "text": "25",
+              "confidence": 0.9999952765753651,
+              "start_index": 1656
+            },
+            {
+              "text": "COMPLETE",
+              "confidence": 0.9999980976253747,
+              "start_index": 1691
+            },
+            {
+              "text": " BLOOD",
+              "confidence": 0.999999483426697,
+              "start_index": 1699
+            },
+            {
+              "text": " COUNT",
+              "confidence": 0.9999996423722521,
+              "start_index": 1705
+            },
+            {
+              "text": " WITH",
+              "confidence": 0.999998927117538,
+              "start_index": 1711
+            },
+            {
+              "text": " DIFFERENTIAL",
+              "confidence": 0.999985686464511,
+              "start_index": 1716
+            },
+            {
+              "text": "White",
+              "confidence": 0.999985686464511,
+              "start_index": 1751
+            },
+            {
+              "text": " Blood",
+              "confidence": 0.9999973774024795,
+              "start_index": 1756
+            },
+            {
+              "text": " Cell",
+              "confidence": 0.9999958276922101,
+              "start_index": 1762
+            },
+            {
+              "text": " Count",
+              "confidence": 0.995074411762032,
+              "start_index": 1767
+            },
+            {
+              "text": "7.9",
+              "confidence": 0.995074411762032,
+              "start_index": 1782
+            },
+            {
+              "text": "3.8\u201310.8",
+              "confidence": 0.995074411762032,
+              "start_index": 1803
+            },
+            {
+              "text": "10\u00b3/\u03bcL",
+              "confidence": 0.995074411762032,
+              "start_index": 1820
+            },
+            {
+              "text": "7.2",
+              "confidence": 0.995074411762032,
+              "start_index": 1835
+            },
+            {
+              "text": "Red",
+              "confidence": 0.995074411762032,
+              "start_index": 1856
+            },
+            {
+              "text": " Blood",
+              "confidence": 0.9999821189265068,
+              "start_index": 1859
+            },
+            {
+              "text": " Cell",
+              "confidence": 0.9999927282861518,
+              "start_index": 1865
+            },
+            {
+              "text": " Count",
+              "confidence": 0.9977529512550984,
+              "start_index": 1870
+            },
+            {
+              "text": "4.92",
+              "confidence": 0.9977529512550984,
+              "start_index": 1885
+            },
+            {
+              "text": "4.20\u20135.80",
+              "confidence": 0.9977529512550984,
+              "start_index": 1907
+            },
+            {
+              "text": "10\u2078/\u03bcL",
+              "confidence": 0.9977529512550984,
+              "start_index": 1925
+            },
+            {
+              "text": "4.88",
+              "confidence": 0.9977529512550984,
+              "start_index": 1940
+            },
+            {
+              "text": "Hemoglobin",
+              "confidence": 0.9977529512550984,
+              "start_index": 1962
+            },
+            {
+              "text": "15.1",
+              "confidence": 0.9977529512550984,
+              "start_index": 1981
+            },
+            {
+              "text": "13.2\u201317.1",
+              "confidence": 0.9977529512550984,
+              "start_index": 2003
+            },
+            {
+              "text": "g/dL",
+              "confidence": 0.9977529512550984,
+              "start_index": 2021
+            },
+            {
+              "text": "15.0",
+              "confidence": 0.9977529512550984,
+              "start_index": 2034
+            },
+            {
+              "text": "Hematocrit",
+              "confidence": 0.9977529512550984,
+              "start_index": 2056
+            },
+            {
+              "text": "44.5",
+              "confidence": 0.9977529512550984,
+              "start_index": 2075
+            },
+            {
+              "text": "38.5\u201350.0",
+              "confidence": 0.9977529512550984,
+              "start_index": 2097
+            },
+            {
+              "text": "%",
+              "confidence": 0.9977529512550984,
+              "start_index": 2115
+            },
+            {
+              "text": "44.1",
+              "confidence": 0.9977529512550984,
+              "start_index": 2125
+            },
+            {
+              "text": "MCV",
+              "confidence": 0.9977529512550984,
+              "start_index": 2147
+            },
+            {
+              "text": "90",
+              "confidence": 0.9977529512550984,
+              "start_index": 2159
+            },
+            {
+              "text": "80\u2013100",
+              "confidence": 0.9977529512550984,
+              "start_index": 2179
+            },
+            {
+              "text": "fL",
+              "confidence": 0.9977529512550984,
+              "start_index": 2194
+            },
+            {
+              "text": "90",
+              "confidence": 0.9977529512550984,
+              "start_index": 2205
+            },
+            {
+              "text": "Platelet",
+              "confidence": 0.9977529512550984,
+              "start_index": 2225
+            },
+            {
+              "text": " Count",
+              "confidence": 0.9999948088621603,
+              "start_index": 2233
+            },
+            {
+              "text": "262",
+              "confidence": 0.9999948088621603,
+              "start_index": 2248
+            },
+            {
+              "text": "140\u2013400",
+              "confidence": 0.9999948088621603,
+              "start_index": 2269
+            },
+            {
+              "text": "10\u00b3/\u03bcL",
+              "confidence": 0.9999948088621603,
+              "start_index": 2285
+            },
+            {
+              "text": "254",
+              "confidence": 0.9999948088621603,
+              "start_index": 2300
+            },
+            {
+              "text": "Neutrophils",
+              "confidence": 0.9999948088621603,
+              "start_index": 2321
+            },
+            {
+              "text": "52",
+              "confidence": 0.9999948088621603,
+              "start_index": 2341
+            },
+            {
+              "text": "40\u201370",
+              "confidence": 0.9999948088621603,
+              "start_index": 2361
+            },
+            {
+              "text": "%",
+              "confidence": 0.9999948088621603,
+              "start_index": 2375
+            },
+            {
+              "text": "55",
+              "confidence": 0.9999948088621603,
+              "start_index": 2385
+            },
+            {
+              "text": "Lymphocytes",
+              "confidence": 0.9999948088621603,
+              "start_index": 2405
+            },
+            {
+              "text": "32",
+              "confidence": 0.9999948088621603,
+              "start_index": 2425
+            },
+            {
+              "text": "22\u201344",
+              "confidence": 0.9999948088621603,
+              "start_index": 2445
+            },
+            {
+              "text": "%",
+              "confidence": 0.9999948088621603,
+              "start_index": 2459
+            },
+            {
+              "text": "31",
+              "confidence": 0.9999948088621603,
+              "start_index": 2469
+            },
+            {
+              "text": "Monocytes",
+              "confidence": 0.9999948088621603,
+              "start_index": 2489
+            },
+            {
+              "text": "6",
+              "confidence": 0.9999948088621603,
+              "start_index": 2507
+            },
+            {
+              "text": "4\u201311",
+              "confidence": 0.9999948088621603,
+              "start_index": 2526
+            },
+            {
+              "text": "%",
+              "confidence": 0.9999948088621603,
+              "start_index": 2539
+            },
+            {
+              "text": "6",
+              "confidence": 0.9999948088621603,
+              "start_index": 2549
+            },
+            {
+              "text": "Eosinophils",
+              "confidence": 0.9999948088621603,
+              "start_index": 2568
+            },
+            {
+              "text": "9",
+              "confidence": 0.9999948088621603,
+              "start_index": 2588
+            },
+            {
+              "text": "H",
+              "confidence": 0.9999948088621603,
+              "start_index": 2598
+            },
+            {
+              "text": "0\u20135",
+              "confidence": 0.9999948088621603,
+              "start_index": 2608
+            },
+            {
+              "text": "%",
+              "confidence": 0.9999948088621603,
+              "start_index": 2620
+            },
+            {
+              "text": "6",
+              "confidence": 0.9999948088621603,
+              "start_index": 2630
+            },
+            {
+              "text": "Basophils",
+              "confidence": 0.9999948088621603,
+              "start_index": 2649
+            },
+            {
+              "text": "1",
+              "confidence": 0.9999948088621603,
+              "start_index": 2667
+            },
+            {
+              "text": "0\u20132",
+              "confidence": 0.9999948088621603,
+              "start_index": 2686
+            },
+            {
+              "text": "%",
+              "confidence": 0.9999948088621603,
+              "start_index": 2698
+            },
+            {
+              "text": "1",
+              "confidence": 0.9999948088621603,
+              "start_index": 2708
+            },
+            {
+              "text": "Eosinophils,",
+              "confidence": 0.9999948088621603,
+              "start_index": 2727
+            },
+            {
+              "text": " Absolute",
+              "confidence": 0.9985251995009491,
+              "start_index": 2739
+            },
+            {
+              "text": "0.71",
+              "confidence": 0.9985251995009491,
+              "start_index": 2757
+            },
+            {
+              "text": "H",
+              "confidence": 0.9985251995009491,
+              "start_index": 2770
+            },
+            {
+              "text": "0.00\u20130.50",
+              "confidence": 0.9985251995009491,
+              "start_index": 2780
+            },
+            {
+              "text": "10\u00b3/\u03bcL",
+              "confidence": 0.9985251995009491,
+              "start_index": 2798
+            },
+            {
+              "text": "0.43",
+              "confidence": 0.9985251995009491,
+              "start_index": 2813
+            }
+          ]
+        }
+      ],
+      "hyperlinks": [],
+      "header": null,
+      "footer": null,
+      "confidence_scores": {
+        "average_page_confidence_score": 0.9965107686666501,
+        "minimum_page_confidence_score": 0.5312050880841576,
+        "word_confidence_scores": [
+          {
+            "text": "SYNTHETIC",
+            "confidence": 0.9999558029240139,
+            "start_index": 0
+          },
+          {
+            "text": " DEMO",
+            "confidence": 0.9999175869485932,
+            "start_index": 9
+          },
+          {
+            "text": " DATA",
+            "confidence": 0.9999998807907247,
+            "start_index": 14
+          },
+          {
+            "text": " \u2014",
+            "confidence": 0.9163403084001231,
+            "start_index": 19
+          },
+          {
+            "text": " FICTIONAL",
+            "confidence": 0.9223689970159877,
+            "start_index": 21
+          },
+          {
+            "text": " PATIENT",
+            "confidence": 0.999993801170376,
+            "start_index": 31
+          },
+          {
+            "text": " &",
+            "confidence": 0.9999982118638471,
+            "start_index": 39
+          },
+          {
+            "text": " LABORATORY",
+            "confidence": 0.999992067348747,
+            "start_index": 41
+          },
+          {
+            "text": " \u2014",
+            "confidence": 0.9979699421825751,
+            "start_index": 52
+          },
+          {
+            "text": " NOT",
+            "confidence": 0.9999996423722521,
+            "start_index": 54
+          },
+          {
+            "text": " A",
+            "confidence": 0.9999934435319415,
+            "start_index": 58
+          },
+          {
+            "text": " REAL",
+            "confidence": 0.9999928474936721,
+            "start_index": 60
+          },
+          {
+            "text": " MEDICAL",
+            "confidence": 0.9999990463265931,
+            "start_index": 65
+          },
+          {
+            "text": " RECORD",
+            "confidence": 0.9999986886995842,
+            "start_index": 73
+          },
+          {
+            "text": " \u2014",
+            "confidence": 0.9999552985160037,
+            "start_index": 80
+          },
+          {
+            "text": " AGENTFORGE",
+            "confidence": 0.9263287499702272,
+            "start_index": 82
+          },
+          {
+            "text": " CLINICAL",
+            "confidence": 0.9999994039539257,
+            "start_index": 93
+          },
+          {
+            "text": " CO-PILOT",
+            "confidence": 0.9999583594144039,
+            "start_index": 102
+          },
+          {
+            "text": "#",
+            "confidence": 0.9740423974654552,
+            "start_index": 113
+          },
+          {
+            "text": " Cedar",
+            "confidence": 0.9999727018181879,
+            "start_index": 114
+          },
+          {
+            "text": " Valley",
+            "confidence": 0.9999985694905718,
+            "start_index": 120
+          },
+          {
+            "text": " Reference",
+            "confidence": 0.9999997615814777,
+            "start_index": 127
+          },
+          {
+            "text": " Laboratory",
+            "confidence": 0.9999998807907247,
+            "start_index": 137
+          },
+          {
+            "text": "4120",
+            "confidence": 0.999999821186103,
+            "start_index": 150
+          },
+          {
+            "text": " Meridian",
+            "confidence": 0.9999918673444326,
+            "start_index": 154
+          },
+          {
+            "text": " Park",
+            "confidence": 0.9999982118638471,
+            "start_index": 163
+          },
+          {
+            "text": " Blvd,",
+            "confidence": 0.999689255167411,
+            "start_index": 168
+          },
+          {
+            "text": " Suite",
+            "confidence": 1.0,
+            "start_index": 174
+          },
+          {
+            "text": " 200",
+            "confidence": 0.999999612569971,
+            "start_index": 180
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9763729747398443,
+            "start_index": 184
+          },
+          {
+            "text": " Austin,",
+            "confidence": 0.9998750257956172,
+            "start_index": 186
+          },
+          {
+            "text": " TX",
+            "confidence": 0.9999997615814777,
+            "start_index": 194
+          },
+          {
+            "text": " 78744",
+            "confidence": 0.9999993642176206,
+            "start_index": 197
+          },
+          {
+            "text": "CLIA",
+            "confidence": 0.9999749073233765,
+            "start_index": 205
+          },
+          {
+            "text": " #45D0000000",
+            "confidence": 0.9979049882606076,
+            "start_index": 209
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9911845560812871,
+            "start_index": 221
+          },
+          {
+            "text": " Director:",
+            "confidence": 0.9999766478539632,
+            "start_index": 223
+          },
+          {
+            "text": " Priya",
+            "confidence": 0.9999964237341505,
+            "start_index": 233
+          },
+          {
+            "text": " N.",
+            "confidence": 0.9999960661183872,
+            "start_index": 239
+          },
+          {
+            "text": " Raman,",
+            "confidence": 0.9999608839769111,
+            "start_index": 242
+          },
+          {
+            "text": " MD,",
+            "confidence": 0.9999984204826,
+            "start_index": 249
+          },
+          {
+            "text": " PhD,",
+            "confidence": 0.9999302210670206,
+            "start_index": 253
+          },
+          {
+            "text": " FCAP",
+            "confidence": 0.9999830726361565,
+            "start_index": 258
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9985298107487186,
+            "start_index": 263
+          },
+          {
+            "text": " (512)",
+            "confidence": 0.9999901654084391,
+            "start_index": 265
+          },
+          {
+            "text": " 555-0148",
+            "confidence": 0.9999919998260473,
+            "start_index": 271
+          },
+          {
+            "text": "#",
+            "confidence": 0.9465959112902236,
+            "start_index": 282
+          },
+          {
+            "text": " LABORATORY",
+            "confidence": 0.9999969872668762,
+            "start_index": 283
+          },
+          {
+            "text": " REPORT",
+            "confidence": 0.9999996423722521,
+            "start_index": 294
+          },
+          {
+            "text": "Accession:",
+            "confidence": 0.999952962690057,
+            "start_index": 303
+          },
+          {
+            "text": " CVRL-26-0788143",
+            "confidence": 0.9999957532033923,
+            "start_index": 313
+          },
+          {
+            "text": "Report",
+            "confidence": 0.9999988079084972,
+            "start_index": 331
+          },
+          {
+            "text": " Status:",
+            "confidence": 1.0,
+            "start_index": 337
+          },
+          {
+            "text": " FINAL",
+            "confidence": 0.9999957084838798,
+            "start_index": 345
+          },
+          {
+            "text": "PATIENT",
+            "confidence": 0.9997539165436252,
+            "start_index": 353
+          },
+          {
+            "text": " NAME",
+            "confidence": 0.999993205116773,
+            "start_index": 360
+          },
+          {
+            "text": "Angulo,",
+            "confidence": 0.9997674047880297,
+            "start_index": 367
+          },
+          {
+            "text": " Sergio",
+            "confidence": 0.9999997615814777,
+            "start_index": 374
+          },
+          {
+            "text": "ORDERING",
+            "confidence": 0.9999486987189007,
+            "start_index": 383
+          },
+          {
+            "text": " PROVIDER",
+            "confidence": 0.9999860527088145,
+            "start_index": 391
+          },
+          {
+            "text": "A.",
+            "confidence": 0.9999908210078052,
+            "start_index": 402
+          },
+          {
+            "text": " Mercado,",
+            "confidence": 0.9999992052720346,
+            "start_index": 404
+          },
+          {
+            "text": " MD",
+            "confidence": 0.9999979734461775,
+            "start_index": 413
+          },
+          {
+            "text": "REPORT",
+            "confidence": 0.9999936422118985,
+            "start_index": 418
+          },
+          {
+            "text": " RELEASED",
+            "confidence": 0.9999766091144466,
+            "start_index": 424
+          },
+          {
+            "text": "2026-07-09",
+            "confidence": 0.9999997377396599,
+            "start_index": 435
+          },
+          {
+            "text": " 07:05",
+            "confidence": 0.9999993840859083,
+            "start_index": 445
+          },
+          {
+            "text": "DATE",
+            "confidence": 0.999998927117538,
+            "start_index": 453
+          },
+          {
+            "text": " OF",
+            "confidence": 0.9999991655356624,
+            "start_index": 457
+          },
+          {
+            "text": " BIRTH",
+            "confidence": 0.9999961853306444,
+            "start_index": 460
+          },
+          {
+            "text": " /",
+            "confidence": 0.9999976158197796,
+            "start_index": 466
+          },
+          {
+            "text": " AGE",
+            "confidence": 0.999998927117538,
+            "start_index": 468
+          },
+          {
+            "text": " /",
+            "confidence": 0.9999994039539004,
+            "start_index": 472
+          },
+          {
+            "text": " SEX",
+            "confidence": 0.9999976158197796,
+            "start_index": 474
+          },
+          {
+            "text": "1979-03-14",
+            "confidence": 0.999995923069414,
+            "start_index": 480
+          },
+          {
+            "text": " /",
+            "confidence": 0.9999854566779314,
+            "start_index": 490
+          },
+          {
+            "text": " 47",
+            "confidence": 0.999998768172987,
+            "start_index": 492
+          },
+          {
+            "text": " /",
+            "confidence": 0.9999974966112362,
+            "start_index": 495
+          },
+          {
+            "text": " M",
+            "confidence": 0.9999966621509202,
+            "start_index": 497
+          },
+          {
+            "text": "SPECIMEN",
+            "confidence": 0.9999977648316443,
+            "start_index": 501
+          },
+          {
+            "text": " COLLECTED",
+            "confidence": 0.9999983549151356,
+            "start_index": 509
+          },
+          {
+            "text": "2026-07-08",
+            "confidence": 0.9999997377396634,
+            "start_index": 521
+          },
+          {
+            "text": " 09:40",
+            "confidence": 0.9999996423723113,
+            "start_index": 531
+          },
+          {
+            "text": "SPECIMEN",
+            "confidence": 0.9999985396884346,
+            "start_index": 539
+          },
+          {
+            "text": " TYPE",
+            "confidence": 0.9999963045256735,
+            "start_index": 547
+          },
+          {
+            "text": "Serum",
+            "confidence": 0.9999962806885423,
+            "start_index": 554
+          },
+          {
+            "text": " /",
+            "confidence": 0.9999991655356624,
+            "start_index": 559
+          },
+          {
+            "text": " Whole",
+            "confidence": 0.9999996423722521,
+            "start_index": 561
+          },
+          {
+            "text": " Blood",
+            "confidence": 0.9999994039539004,
+            "start_index": 567
+          },
+          {
+            "text": " (EDTA)",
+            "confidence": 0.9999790541844177,
+            "start_index": 573
+          },
+          {
+            "text": "MRN",
+            "confidence": 0.9999487826694442,
+            "start_index": 582
+          },
+          {
+            "text": "OE-000023",
+            "confidence": 0.9999938541790782,
+            "start_index": 587
+          },
+          {
+            "text": "SPECIMEN",
+            "confidence": 0.9999993145470616,
+            "start_index": 598
+          },
+          {
+            "text": " RECEIVED",
+            "confidence": 0.9999966754129572,
+            "start_index": 606
+          },
+          {
+            "text": "2026-07-08",
+            "confidence": 0.9999998569488912,
+            "start_index": 617
+          },
+          {
+            "text": " 15:12",
+            "confidence": 0.9999999602635756,
+            "start_index": 627
+          },
+          {
+            "text": "FASTING",
+            "confidence": 0.999932926270996,
+            "start_index": 635
+          },
+          {
+            "text": "Yes",
+            "confidence": 0.999997854237364,
+            "start_index": 644
+          },
+          {
+            "text": "[tbl-0.html](tbl-0.html)",
+            "confidence": 0.9987128043425831,
+            "start_index": 649
+          },
+          {
+            "text": "#",
+            "confidence": 0.5312050880841576,
+            "start_index": 675
+          },
+          {
+            "text": " PERFORMING",
+            "confidence": 0.9970618923160085,
+            "start_index": 676
+          },
+          {
+            "text": " LABORATORY",
+            "confidence": 0.9999971173296095,
+            "start_index": 687
+          },
+          {
+            "text": " COMMENT",
+            "confidence": 0.9999976158197796,
+            "start_index": 698
+          },
+          {
+            "text": "Renal",
+            "confidence": 0.9999857905173957,
+            "start_index": 708
+          },
+          {
+            "text": " function",
+            "confidence": 0.9999970197767496,
+            "start_index": 713
+          },
+          {
+            "text": " has",
+            "confidence": 0.9999995231630692,
+            "start_index": 722
+          },
+          {
+            "text": " declined",
+            "confidence": 0.9999915362117302,
+            "start_index": 726
+          },
+          {
+            "text": " since",
+            "confidence": 0.9999998807907247,
+            "start_index": 735
+          },
+          {
+            "text": " the",
+            "confidence": 0.9999971389852362,
+            "start_index": 741
+          },
+          {
+            "text": " prior",
+            "confidence": 0.9999995231630692,
+            "start_index": 745
+          },
+          {
+            "text": " draw:",
+            "confidence": 0.9999668807956341,
+            "start_index": 751
+          },
+          {
+            "text": " creatinine",
+            "confidence": 0.9999937686511938,
+            "start_index": 757
+          },
+          {
+            "text": " 1.06",
+            "confidence": 0.9999970913057507,
+            "start_index": 768
+          },
+          {
+            "text": " \u2192",
+            "confidence": 0.9998206222037653,
+            "start_index": 773
+          },
+          {
+            "text": " 1.44",
+            "confidence": 0.9999996185305594,
+            "start_index": 775
+          },
+          {
+            "text": " mg/dL",
+            "confidence": 0.9999989668546649,
+            "start_index": 780
+          },
+          {
+            "text": " with",
+            "confidence": 0.9999513649749275,
+            "start_index": 786
+          },
+          {
+            "text": " eGFR",
+            "confidence": 0.9999982118645306,
+            "start_index": 791
+          },
+          {
+            "text": " 78",
+            "confidence": 0.9999917349058979,
+            "start_index": 796
+          },
+          {
+            "text": " \u2192",
+            "confidence": 0.9999930859092101,
+            "start_index": 799
+          },
+          {
+            "text": " 54",
+            "confidence": 0.999997019776977,
+            "start_index": 801
+          },
+          {
+            "text": " mL/min/1.73m\u00b2",
+            "confidence": 0.9999960576053286,
+            "start_index": 804
+          },
+          {
+            "text": " (now",
+            "confidence": 0.9994521566585526,
+            "start_index": 818
+          },
+          {
+            "text": " CKD",
+            "confidence": 0.9998998787612112,
+            "start_index": 823
+          },
+          {
+            "text": " stage",
+            "confidence": 0.9999988079084972,
+            "start_index": 827
+          },
+          {
+            "text": " G3a",
+            "confidence": 0.9998555380108095,
+            "start_index": 833
+          },
+          {
+            "text": " range),",
+            "confidence": 0.999993979970485,
+            "start_index": 837
+          },
+          {
+            "text": " accompanied",
+            "confidence": 0.9999994039539004,
+            "start_index": 845
+          },
+          {
+            "text": " by",
+            "confidence": 0.9999996423722521,
+            "start_index": 857
+          },
+          {
+            "text": " potassium",
+            "confidence": 0.9999996423722521,
+            "start_index": 860
+          },
+          {
+            "text": " 5.4",
+            "confidence": 0.999999821186103,
+            "start_index": 870
+          },
+          {
+            "text": " mmol/L",
+            "confidence": 0.9999843328808968,
+            "start_index": 874
+          },
+          {
+            "text": " and",
+            "confidence": 0.9999940395710211,
+            "start_index": 881
+          },
+          {
+            "text": " BUN",
+            "confidence": 0.9999895693488878,
+            "start_index": 885
+          },
+          {
+            "text": " 27",
+            "confidence": 0.9999988476451102,
+            "start_index": 889
+          },
+          {
+            "text": " mg/dL.",
+            "confidence": 0.9999889307135074,
+            "start_index": 892
+          },
+          {
+            "text": " Pattern",
+            "confidence": 0.9999984502816872,
+            "start_index": 899
+          },
+          {
+            "text": " is",
+            "confidence": 0.9999995231630692,
+            "start_index": 907
+          },
+          {
+            "text": " consistent",
+            "confidence": 0.9999973774024795,
+            "start_index": 910
+          },
+          {
+            "text": " with",
+            "confidence": 0.9999992847447459,
+            "start_index": 921
+          },
+          {
+            "text": " a",
+            "confidence": 0.9999928474936721,
+            "start_index": 926
+          },
+          {
+            "text": " pre-renal",
+            "confidence": 0.9998932967918619,
+            "start_index": 928
+          },
+          {
+            "text": " /",
+            "confidence": 0.9997107627427314,
+            "start_index": 938
+          },
+          {
+            "text": " NSAID-related",
+            "confidence": 0.9999981437445071,
+            "start_index": 940
+          },
+          {
+            "text": " effect;",
+            "confidence": 0.9999891971739675,
+            "start_index": 954
+          },
+          {
+            "text": " correlate",
+            "confidence": 0.9999996423722521,
+            "start_index": 962
+          },
+          {
+            "text": " with",
+            "confidence": 0.9999991655356624,
+            "start_index": 972
+          },
+          {
+            "text": " medications",
+            "confidence": 0.9999965429424904,
+            "start_index": 977
+          },
+          {
+            "text": " and",
+            "confidence": 0.9999997615814777,
+            "start_index": 989
+          },
+          {
+            "text": " consider",
+            "confidence": 0.9999995231630692,
+            "start_index": 993
+          },
+          {
+            "text": " repeat",
+            "confidence": 0.9999668609159512,
+            "start_index": 1002
+          },
+          {
+            "text": " renal",
+            "confidence": 1.0,
+            "start_index": 1009
+          },
+          {
+            "text": " panel.",
+            "confidence": 0.999993835216856,
+            "start_index": 1015
+          },
+          {
+            "text": " Peripheral",
+            "confidence": 0.9999820108407877,
+            "start_index": 1022
+          },
+          {
+            "text": " eosinophilia",
+            "confidence": 0.9999918021457481,
+            "start_index": 1033
+          },
+          {
+            "text": " (9%,",
+            "confidence": 0.9999450258375056,
+            "start_index": 1046
+          },
+          {
+            "text": " absolute",
+            "confidence": 1.0,
+            "start_index": 1051
+          },
+          {
+            "text": " 0.71",
+            "confidence": 0.9999829773108382,
+            "start_index": 1060
+          },
+          {
+            "text": " 10\u00b3/\u03bcL)",
+            "confidence": 0.9972287547485607,
+            "start_index": 1065
+          },
+          {
+            "text": " noted",
+            "confidence": 0.9999997615814777,
+            "start_index": 1073
+          },
+          {
+            "text": " \u2014",
+            "confidence": 0.9987725798188345,
+            "start_index": 1079
+          },
+          {
+            "text": " correlate",
+            "confidence": 0.9999184674950152,
+            "start_index": 1081
+          },
+          {
+            "text": " clinically",
+            "confidence": 0.9999893904859,
+            "start_index": 1091
+          },
+          {
+            "text": " with",
+            "confidence": 0.9999953508594287,
+            "start_index": 1102
+          },
+          {
+            "text": " atopic/allergic",
+            "confidence": 0.9997059642412672,
+            "start_index": 1107
+          },
+          {
+            "text": " history.",
+            "confidence": 0.9998242123163984,
+            "start_index": 1123
+          },
+          {
+            "text": " Results",
+            "confidence": 1.0,
+            "start_index": 1132
+          },
+          {
+            "text": " reviewed",
+            "confidence": 0.9999996423722521,
+            "start_index": 1140
+          },
+          {
+            "text": " and",
+            "confidence": 0.9999997615814777,
+            "start_index": 1149
+          },
+          {
+            "text": " released",
+            "confidence": 0.999998927117538,
+            "start_index": 1153
+          },
+          {
+            "text": " by",
+            "confidence": 0.9999997615814777,
+            "start_index": 1162
+          },
+          {
+            "text": " the",
+            "confidence": 0.9999998807907247,
+            "start_index": 1165
+          },
+          {
+            "text": " performing",
+            "confidence": 0.9999538681349789,
+            "start_index": 1169
+          },
+          {
+            "text": " laboratory.",
+            "confidence": 0.9999996821088835,
+            "start_index": 1180
+          },
+          {
+            "text": "Flag",
+            "confidence": 0.9999271684321565,
+            "start_index": 1194
+          },
+          {
+            "text": " key:",
+            "confidence": 0.9999941349379797,
+            "start_index": 1198
+          },
+          {
+            "text": " H",
+            "confidence": 0.999997854237364,
+            "start_index": 1203
+          },
+          {
+            "text": " =",
+            "confidence": 0.9999963045256735,
+            "start_index": 1205
+          },
+          {
+            "text": " above",
+            "confidence": 0.9999995231630692,
+            "start_index": 1207
+          },
+          {
+            "text": " reference",
+            "confidence": 0.9999998807907247,
+            "start_index": 1213
+          },
+          {
+            "text": " range",
+            "confidence": 0.9999994039539004,
+            "start_index": 1223
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9885928796374345,
+            "start_index": 1229
+          },
+          {
+            "text": " L",
+            "confidence": 0.9999988079084972,
+            "start_index": 1231
+          },
+          {
+            "text": " =",
+            "confidence": 0.9999994039539004,
+            "start_index": 1233
+          },
+          {
+            "text": " below",
+            "confidence": 0.9999996423722521,
+            "start_index": 1235
+          },
+          {
+            "text": " reference",
+            "confidence": 0.9999971389852362,
+            "start_index": 1241
+          },
+          {
+            "text": " range.",
+            "confidence": 0.9999977179988349,
+            "start_index": 1251
+          },
+          {
+            "text": " Reference",
+            "confidence": 0.9999990463265931,
+            "start_index": 1258
+          },
+          {
+            "text": " ranges",
+            "confidence": 0.9999997615814777,
+            "start_index": 1268
+          },
+          {
+            "text": " are",
+            "confidence": 0.9999997615814777,
+            "start_index": 1275
+          },
+          {
+            "text": " method-",
+            "confidence": 0.9999521994304124,
+            "start_index": 1279
+          },
+          {
+            "text": " and",
+            "confidence": 0.9999996423722521,
+            "start_index": 1287
+          },
+          {
+            "text": " instrument-specific.",
+            "confidence": 0.9999954019687074,
+            "start_index": 1291
+          },
+          {
+            "text": " Prior",
+            "confidence": 0.9999995231630692,
+            "start_index": 1312
+          },
+          {
+            "text": " values",
+            "confidence": 0.9999998807907247,
+            "start_index": 1318
+          },
+          {
+            "text": " shown",
+            "confidence": 0.9999997615814777,
+            "start_index": 1325
+          },
+          {
+            "text": " for",
+            "confidence": 0.9999977350285647,
+            "start_index": 1331
+          },
+          {
+            "text": " the",
+            "confidence": 0.9999997615814777,
+            "start_index": 1335
+          },
+          {
+            "text": " same",
+            "confidence": 0.9999996423722521,
+            "start_index": 1339
+          },
+          {
+            "text": " analyte",
+            "confidence": 0.9999897779172283,
+            "start_index": 1344
+          },
+          {
+            "text": " from",
+            "confidence": 0.9999971389852362,
+            "start_index": 1352
+          },
+          {
+            "text": " the",
+            "confidence": 0.9999997615814777,
+            "start_index": 1357
+          },
+          {
+            "text": " most",
+            "confidence": 1.0,
+            "start_index": 1361
+          },
+          {
+            "text": " recent",
+            "confidence": 0.9999998807907247,
+            "start_index": 1366
+          },
+          {
+            "text": " available",
+            "confidence": 0.9999945164027223,
+            "start_index": 1373
+          },
+          {
+            "text": " prior",
+            "confidence": 0.9999970197767496,
+            "start_index": 1383
+          },
+          {
+            "text": " specimen",
+            "confidence": 0.9999988079084972,
+            "start_index": 1389
+          },
+          {
+            "text": " (2026-01-06).",
+            "confidence": 0.9999258360345086,
+            "start_index": 1398
+          },
+          {
+            "text": "Electronically",
+            "confidence": 0.9999777085465734,
+            "start_index": 1414
+          },
+          {
+            "text": " signed:",
+            "confidence": 0.9999987930086968,
+            "start_index": 1428
+          },
+          {
+            "text": " Priya",
+            "confidence": 0.9999913375498132,
+            "start_index": 1436
+          },
+          {
+            "text": " N.",
+            "confidence": 0.9999938806396008,
+            "start_index": 1442
+          },
+          {
+            "text": " Raman,",
+            "confidence": 0.9999998467309394,
+            "start_index": 1445
+          },
+          {
+            "text": " MD,",
+            "confidence": 0.9999994933607756,
+            "start_index": 1452
+          },
+          {
+            "text": " PhD,",
+            "confidence": 0.9999982595479804,
+            "start_index": 1456
+          },
+          {
+            "text": " FCAP",
+            "confidence": 0.999998092655369,
+            "start_index": 1461
+          },
+          {
+            "text": " \u2014",
+            "confidence": 0.9989933382376481,
+            "start_index": 1466
+          },
+          {
+            "text": " Laboratory",
+            "confidence": 0.999994397195003,
+            "start_index": 1468
+          },
+          {
+            "text": " Director",
+            "confidence": 0.9999994039539004,
+            "start_index": 1479
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9994258602754904,
+            "start_index": 1488
+          },
+          {
+            "text": " 2026-07-09",
+            "confidence": 0.9999986345173444,
+            "start_index": 1490
+          },
+          {
+            "text": " 07:05",
+            "confidence": 0.9999991059318661,
+            "start_index": 1501
+          },
+          {
+            "text": " CT",
+            "confidence": 0.999671686243446,
+            "start_index": 1507
+          },
+          {
+            "text": "Cedar",
+            "confidence": 0.9999702224190338,
+            "start_index": 1512
+          },
+          {
+            "text": " Valley",
+            "confidence": 0.9999997615814777,
+            "start_index": 1517
+          },
+          {
+            "text": " Reference",
+            "confidence": 1.0,
+            "start_index": 1524
+          },
+          {
+            "text": " Laboratory",
+            "confidence": 1.0,
+            "start_index": 1534
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9994759922546742,
+            "start_index": 1545
+          },
+          {
+            "text": " CLIA",
+            "confidence": 0.9999990940102645,
+            "start_index": 1547
+          },
+          {
+            "text": " #45D0000000",
+            "confidence": 0.9999925892949801,
+            "start_index": 1552
+          },
+          {
+            "text": "Patient:",
+            "confidence": 0.9999992996463157,
+            "start_index": 1566
+          },
+          {
+            "text": " Angulo,",
+            "confidence": 0.9999871405371379,
+            "start_index": 1574
+          },
+          {
+            "text": " Sergio",
+            "confidence": 1.0,
+            "start_index": 1582
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9999496962111042,
+            "start_index": 1589
+          },
+          {
+            "text": " MRN",
+            "confidence": 0.9999296722828338,
+            "start_index": 1591
+          },
+          {
+            "text": " OE-000023",
+            "confidence": 0.9999896646959139,
+            "start_index": 1595
+          },
+          {
+            "text": " \u00b7",
+            "confidence": 0.9999734170346474,
+            "start_index": 1605
+          },
+          {
+            "text": " Acc.",
+            "confidence": 0.9999856474915284,
+            "start_index": 1607
+          },
+          {
+            "text": " CVRL-26-0788143",
+            "confidence": 0.9999987632063433,
+            "start_index": 1612
+          },
+          {
+            "text": "Page",
+            "confidence": 0.9999997615814777,
+            "start_index": 1630
+          },
+          {
+            "text": " 1",
+            "confidence": 0.9999998807907318,
+            "start_index": 1634
+          },
+          {
+            "text": " of",
+            "confidence": 0.9999997615814777,
+            "start_index": 1636
+          },
+          {
+            "text": " 1",
+            "confidence": 0.9999989867222627,
+            "start_index": 1639
+          }
+        ]
+      },
+      "blocks": [
+        {
+          "top_left_x": 94,
+          "top_left_y": 38,
+          "bottom_right_x": 705,
+          "bottom_right_y": 53,
+          "content": "SYNTHETIC DEMO DATA \u2014 FICTIONAL PATIENT & LABORATORY \u2014 NOT A REAL MEDICAL RECORD \u2014 AGENTFORGE CLINICAL CO-PILOT",
+          "type": "header"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 65,
+          "bottom_right_x": 335,
+          "bottom_right_y": 85,
+          "content": "# Cedar Valley Reference Laboratory",
+          "type": "title"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 86,
+          "bottom_right_x": 267,
+          "bottom_right_y": 96,
+          "content": "4120 Meridian Park Blvd, Suite 200 \u00b7 Austin, TX 78744",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 97,
+          "bottom_right_x": 370,
+          "bottom_right_y": 110,
+          "content": "CLIA #45D0000000 \u00b7 Director: Priya N. Raman, MD, PhD, FCAP \u00b7 (512) 555-0148",
+          "type": "text"
+        },
+        {
+          "top_left_x": 596,
+          "top_left_y": 69,
+          "bottom_right_x": 744,
+          "bottom_right_y": 81,
+          "content": "# LABORATORY REPORT",
+          "type": "title"
+        },
+        {
+          "top_left_x": 624,
+          "top_left_y": 83,
+          "bottom_right_x": 745,
+          "bottom_right_y": 93,
+          "content": "Accession: CVRL-26-0788143",
+          "type": "text"
+        },
+        {
+          "top_left_x": 660,
+          "top_left_y": 94,
+          "bottom_right_x": 745,
+          "bottom_right_y": 104,
+          "content": "Report Status: FINAL",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 128,
+          "bottom_right_x": 112,
+          "bottom_right_y": 138,
+          "content": "PATIENT NAME",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 139,
+          "bottom_right_x": 131,
+          "bottom_right_y": 152,
+          "content": "Angulo, Sergio",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 159,
+          "bottom_right_x": 139,
+          "bottom_right_y": 167,
+          "content": "ORDERING PROVIDER",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 170,
+          "bottom_right_x": 137,
+          "bottom_right_y": 182,
+          "content": "A. Mercado, MD",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 187,
+          "bottom_right_x": 129,
+          "bottom_right_y": 198,
+          "content": "REPORT RELEASED",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 200,
+          "bottom_right_x": 142,
+          "bottom_right_y": 211,
+          "content": "2026-07-09 07:05",
+          "type": "text"
+        },
+        {
+          "top_left_x": 288,
+          "top_left_y": 131,
+          "bottom_right_x": 396,
+          "bottom_right_y": 141,
+          "content": "DATE OF BIRTH / AGE / SEX",
+          "type": "text"
+        },
+        {
+          "top_left_x": 288,
+          "top_left_y": 141,
+          "bottom_right_x": 389,
+          "bottom_right_y": 154,
+          "content": "1979-03-14 / 47 / M",
+          "type": "text"
+        },
+        {
+          "top_left_x": 288,
+          "top_left_y": 161,
+          "bottom_right_x": 380,
+          "bottom_right_y": 170,
+          "content": "SPECIMEN COLLECTED",
+          "type": "text"
+        },
+        {
+          "top_left_x": 288,
+          "top_left_y": 172,
+          "bottom_right_x": 376,
+          "bottom_right_y": 182,
+          "content": "2026-07-08 09:40",
+          "type": "text"
+        },
+        {
+          "top_left_x": 288,
+          "top_left_y": 191,
+          "bottom_right_x": 352,
+          "bottom_right_y": 201,
+          "content": "SPECIMEN TYPE",
+          "type": "text"
+        },
+        {
+          "top_left_x": 288,
+          "top_left_y": 202,
+          "bottom_right_x": 435,
+          "bottom_right_y": 215,
+          "content": "Serum / Whole Blood (EDTA)",
+          "type": "text"
+        },
+        {
+          "top_left_x": 524,
+          "top_left_y": 134,
+          "bottom_right_x": 544,
+          "bottom_right_y": 141,
+          "content": "MRN",
+          "type": "text"
+        },
+        {
+          "top_left_x": 524,
+          "top_left_y": 144,
+          "bottom_right_x": 581,
+          "bottom_right_y": 156,
+          "content": "OE-000023",
+          "type": "text"
+        },
+        {
+          "top_left_x": 524,
+          "top_left_y": 164,
+          "bottom_right_x": 607,
+          "bottom_right_y": 172,
+          "content": "SPECIMEN RECEIVED",
+          "type": "text"
+        },
+        {
+          "top_left_x": 524,
+          "top_left_y": 175,
+          "bottom_right_x": 612,
+          "bottom_right_y": 186,
+          "content": "2026-07-08 15:12",
+          "type": "text"
+        },
+        {
+          "top_left_x": 524,
+          "top_left_y": 193,
+          "bottom_right_x": 558,
+          "bottom_right_y": 202,
+          "content": "FASTING",
+          "type": "text"
+        },
+        {
+          "top_left_x": 524,
+          "top_left_y": 203,
+          "bottom_right_x": 543,
+          "bottom_right_y": 215,
+          "content": "Yes",
+          "type": "text"
+        },
+        {
+          "top_left_x": 52,
+          "top_left_y": 223,
+          "bottom_right_x": 742,
+          "bottom_right_y": 748,
+          "content": "<table><tr><th>TEST</th><th>RESULT</th><th>FLAG</th><th>REFERENCE RANGE</th><th>UNITS</th><th>PRIOR (2026-01-06)</th></tr><tr><td colspan=\"6\"><b>COMPREHENSIVE METABOLIC PANEL</b></td></tr><tr><td>Glucose, Fasting</td><td>108</td><td>H</td><td>70\u201399</td><td>mg/dL</td><td>96</td></tr><tr><td>Sodium</td><td>140</td><td></td><td>136\u2013145</td><td>mmol/L</td><td>139</td></tr><tr><td>Potassium</td><td>5.4</td><td>H</td><td>3.5\u20135.1</td><td>mmol/L</td><td>4.6</td></tr><tr><td>Chloride</td><td>104</td><td></td><td>98\u2013107</td><td>mmol/L</td><td>102</td></tr><tr><td>Carbon Dioxide (CO2)</td><td>24</td><td></td><td>22\u201329</td><td>mmol/L</td><td>25</td></tr><tr><td>Urea Nitrogen (BUN)</td><td>27</td><td>H</td><td>7\u201320</td><td>mg/dL</td><td>18</td></tr><tr><td>Creatinine</td><td>1.44</td><td>H</td><td>0.70\u20131.30</td><td>mg/dL</td><td>1.06</td></tr><tr><td>eGFR (CKD-EPI 2021)</td><td>54</td><td>L</td><td>\u226560</td><td>mL/min/1.73m\u00b2</td><td>78</td></tr><tr><td>BUN/Creatinine Ratio</td><td>19</td><td></td><td>9\u201320</td><td>\u2014</td><td>17</td></tr><tr><td>Calcium</td><td>9.4</td><td></td><td>8.6\u201310.2</td><td>mg/dL</td><td>9.5</td></tr><tr><td>Total Protein</td><td>7.1</td><td></td><td>6.0\u20138.3</td><td>g/dL</td><td>7.0</td></tr><tr><td>Albumin</td><td>4.3</td><td></td><td>3.5\u20135.0</td><td>g/dL</td><td>4.4</td></tr><tr><td>Bilirubin, Total</td><td>0.6</td><td></td><td>0.2\u20131.2</td><td>mg/dL</td><td>0.5</td></tr><tr><td>Alkaline Phosphatase</td><td>78</td><td></td><td>40\u2013129</td><td>U/L</td><td>72</td></tr><tr><td>AST (SGOT)</td><td>24</td><td></td><td>10\u201340</td><td>U/L</td><td>22</td></tr><tr><td>ALT (SGPT)</td><td>27</td><td></td><td>7\u201356</td><td>U/L</td><td>25</td></tr><tr><td colspan=\"6\"><b>COMPLETE BLOOD COUNT WITH DIFFERENTIAL</b></td></tr><tr><td>White Blood Cell Count</td><td>7.9</td><td></td><td>3.8\u201310.8</td><td>10\u00b3/\u03bcL</td><td>7.2</td></tr><tr><td>Red Blood Cell Count</td><td>4.92</td><td></td><td>4.20\u20135.80</td><td>10\u2078/\u03bcL</td><td>4.88</td></tr><tr><td>Hemoglobin</td><td>15.1</td><td></td><td>13.2\u201317.1</td><td>g/dL</td><td>15.0</td></tr><tr><td>Hematocrit</td><td>44.5</td><td></td><td>38.5\u201350.0</td><td>%</td><td>44.1</td></tr><tr><td>MCV</td><td>90</td><td></td><td>80\u2013100</td><td>fL</td><td>90</td></tr><tr><td>Platelet Count</td><td>262</td><td></td><td>140\u2013400</td><td>10\u00b3/\u03bcL</td><td>254</td></tr><tr><td>Neutrophils</td><td>52</td><td></td><td>40\u201370</td><td>%</td><td>55</td></tr><tr><td>Lymphocytes</td><td>32</td><td></td><td>22\u201344</td><td>%</td><td>31</td></tr><tr><td>Monocytes</td><td>6</td><td></td><td>4\u201311</td><td>%</td><td>6</td></tr><tr><td>Eosinophils</td><td>9</td><td>H</td><td>0\u20135</td><td>%</td><td>6</td></tr><tr><td>Basophils</td><td>1</td><td></td><td>0\u20132</td><td>%</td><td>1</td></tr><tr><td>Eosinophils, Absolute</td><td>0.71</td><td>H</td><td>0.00\u20130.50</td><td>10\u00b3/\u03bcL</td><td>0.43</td></tr></table>",
+          "type": "table",
+          "table_id": "tbl-0.html"
+        },
+        {
+          "top_left_x": 59,
+          "top_left_y": 755,
+          "bottom_right_x": 240,
+          "bottom_right_y": 766,
+          "content": "# PERFORMING LABORATORY COMMENT",
+          "type": "title"
+        },
+        {
+          "top_left_x": 58,
+          "top_left_y": 770,
+          "bottom_right_x": 724,
+          "bottom_right_y": 817,
+          "content": "Renal function has declined since the prior draw: creatinine 1.06 \u2192 1.44 mg/dL with eGFR 78 \u2192 54 mL/min/1.73m\u00b2 (now CKD stage G3a range), accompanied by potassium 5.4 mmol/L and BUN 27 mg/dL. Pattern is consistent with a pre-renal / NSAID-related effect; correlate with medications and consider repeat renal panel. Peripheral eosinophilia (9%, absolute 0.71 10\u00b3/\u03bcL) noted \u2014 correlate clinically with atopic/allergic history. Results reviewed and released by the performing laboratory.",
+          "type": "text"
+        },
+        {
+          "top_left_x": 44,
+          "top_left_y": 830,
+          "bottom_right_x": 721,
+          "bottom_right_y": 851,
+          "content": "Flag key: H = above reference range \u00b7 L = below reference range. Reference ranges are method- and instrument-specific. Prior values shown for the same analyte from the most recent available prior specimen (2026-01-06).",
+          "type": "text"
+        },
+        {
+          "top_left_x": 44,
+          "top_left_y": 861,
+          "bottom_right_x": 425,
+          "bottom_right_y": 876,
+          "content": "Electronically signed: Priya N. Raman, MD, PhD, FCAP \u2014 Laboratory Director \u00b7 2026-07-09 07:05 CT",
+          "type": "text"
+        },
+        {
+          "top_left_x": 44,
+          "top_left_y": 972,
+          "bottom_right_x": 242,
+          "bottom_right_y": 984,
+          "content": "Cedar Valley Reference Laboratory \u00b7 CLIA #45D0000000",
+          "type": "footer"
+        },
+        {
+          "top_left_x": 348,
+          "top_left_y": 975,
+          "bottom_right_x": 586,
+          "bottom_right_y": 987,
+          "content": "Patient: Angulo, Sergio \u00b7 MRN OE-000023 \u00b7 Acc. CVRL-26-0788143",
+          "type": "footer"
+        },
+        {
+          "top_left_x": 694,
+          "top_left_y": 978,
+          "bottom_right_x": 735,
+          "bottom_right_y": 989,
+          "content": "Page 1 of 1",
+          "type": "footer"
+        }
+      ]
+    }
+  ],
+  "model": "mistral-ocr-latest",
+  "usage_info": {
+    "pages_processed": 1,
+    "doc_size_bytes": 253981
+  },
+  "document_annotation": "{\"results\": [{\"test_name\": \"Glucose, Fasting\", \"value\": \"108\", \"unit\": \"mg/dL\", \"reference_range\": \"70\u201399\", \"collection_date\": \"2026-07-08\", \"abnormal_flag\": \"H\"}, {\"test_name\": \"Sodium\", \"value\": \"140\", \"unit\": \"mmol/L\", \"reference_range\": \"136\u2013145\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Potassium\", \"value\": \"5.4\", \"unit\": \"mmol/L\", \"reference_range\": \"3.5\u20135.1\", \"collection_date\": \"2026-07-08\", \"abnormal_flag\": \"H\"}, {\"test_name\": \"Chloride\", \"value\": \"104\", \"unit\": \"mmol/L\", \"reference_range\": \"98\u2013107\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Carbon Dioxide (CO2)\", \"value\": \"24\", \"unit\": \"mmol/L\", \"reference_range\": \"22\u201329\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Urea Nitrogen (BUN)\", \"value\": \"27\", \"unit\": \"mg/dL\", \"reference_range\": \"7\u201320\", \"collection_date\": \"2026-07-08\", \"abnormal_flag\": \"H\"}, {\"test_name\": \"Creatinine\", \"value\": \"1.44\", \"unit\": \"mg/dL\", \"reference_range\": \"0.70\u20131.30\", \"collection_date\": \"2026-07-08\", \"abnormal_flag\": \"H\"}, {\"test_name\": \"eGFR (CKD-EPI 2021)\", \"value\": \"54\", \"unit\": \"mL/min/1.73m\u00b2\", \"reference_range\": \"\u226560\", \"collection_date\": \"2026-07-08\", \"abnormal_flag\": \"L\"}, {\"test_name\": \"BUN/Creatinine Ratio\", \"value\": \"19\", \"unit\": null, \"reference_range\": \"9\u201320\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Calcium\", \"value\": \"9.4\", \"unit\": \"mg/dL\", \"reference_range\": \"8.6\u201310.2\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Total Protein\", \"value\": \"7.1\", \"unit\": \"g/dL\", \"reference_range\": \"6.0\u20138.3\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Albumin\", \"value\": \"4.3\", \"unit\": \"g/dL\", \"reference_range\": \"3.5\u20135.0\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Bilirubin, Total\", \"value\": \"0.6\", \"unit\": \"mg/dL\", \"reference_range\": \"0.2\u20131.2\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Alkaline Phosphatase\", \"value\": \"78\", \"unit\": \"U/L\", \"reference_range\": \"40\u2013129\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"AST (SGOT)\", \"value\": \"24\", \"unit\": \"U/L\", \"reference_range\": \"10\u201340\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"ALT (SGPT)\", \"value\": \"27\", \"unit\": \"U/L\", \"reference_range\": \"7\u201356\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"White Blood Cell Count\", \"value\": \"7.9\", \"unit\": \"10\u00b3/\u03bcL\", \"reference_range\": \"3.8\u201310.8\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Red Blood Cell Count\", \"value\": \"4.92\", \"unit\": \"10\u2076/\u03bcL\", \"reference_range\": \"4.20\u20135.80\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Hemoglobin\", \"value\": \"15.1\", \"unit\": \"g/dL\", \"reference_range\": \"13.2\u201317.1\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Hematocrit\", \"value\": \"44.5\", \"unit\": \"%\", \"reference_range\": \"38.5\u201350.0\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"MCV\", \"value\": \"90\", \"unit\": \"fL\", \"reference_range\": \"80\u2013100\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Platelet Count\", \"value\": \"262\", \"unit\": \"10\u00b3/\u03bcL\", \"reference_range\": \"140\u2013400\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Neutrophils\", \"value\": \"52\", \"unit\": \"%\", \"reference_range\": \"40\u201370\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Lymphocytes\", \"value\": \"32\", \"unit\": \"%\", \"reference_range\": \"22\u201344\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Monocytes\", \"value\": \"6\", \"unit\": \"%\", \"reference_range\": \"4\u201311\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Eosinophils\", \"value\": \"9\", \"unit\": \"%\", \"reference_range\": \"0\u20135\", \"collection_date\": \"2026-07-08\", \"abnormal_flag\": \"H\"}, {\"test_name\": \"Basophils\", \"value\": \"1\", \"unit\": \"%\", \"reference_range\": \"0\u20132\", \"collection_date\": \"2026-07-08\"}, {\"test_name\": \"Eosinophils, Absolute\", \"value\": \"0.71\", \"unit\": \"10\u00b3/\u03bcL\", \"reference_range\": \"0.00\u20130.50\", \"collection_date\": \"2026-07-08\", \"abnormal_flag\": \"H\"}]}"
+}

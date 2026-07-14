@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cedar Valley Reference Laboratory — Chemistry &amp; Hematology Report</title>
+<style>
+  @page { size: Letter; margin: 0; }
+  :root {
+    --ink: #1a1a1a;
+    --muted: #555;
+    --line: #b8b8b8;
+    --hair: #d8d8d8;
+    --band: #eef1f4;
+    --abn: #fbeceb;
+    --accent: #14324f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+    color: var(--ink);
+    font-size: 10px;
+    line-height: 1.28;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page {
+    width: 8.5in;
+    height: 11in;
+    padding: 0.4in 0.55in 0.35in 0.55in;
+    margin: 0 auto;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* ---- synthetic-data banner ---- */
+  .synthetic {
+    border: 1px dashed #a33;
+    color: #a33;
+    background: #fdf3f3;
+    text-align: center;
+    font-size: 8.5px;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 3px 6px;
+    margin-bottom: 10px;
+  }
+
+  /* ---- lab masthead ---- */
+  .masthead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+  .lab-id .name { font-size: 17px; font-weight: 800; color: var(--accent); letter-spacing: 0.01em; }
+  .lab-id .sub { font-size: 9px; color: var(--muted); margin-top: 2px; }
+  .lab-meta { text-align: right; font-size: 9px; color: var(--muted); }
+  .lab-meta .rep { font-size: 12px; font-weight: 700; color: var(--ink); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* ---- demographics / specimen grid ---- */
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 18px; margin: 10px 0 4px; }
+  .field { border-bottom: 1px solid var(--hair); padding: 3px 0; }
+  .field .k { font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .field .v { font-size: 11px; font-weight: 600; }
+
+  /* ---- results table ---- */
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  thead th {
+    background: var(--accent); color: #fff; font-size: 8px; text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: 700; text-align: left; padding: 4px 6px;
+  }
+  th.num, td.num { text-align: right; }
+  th.ctr, td.ctr { text-align: center; }
+  .panel td {
+    background: var(--band); font-weight: 800; font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: 0.05em; padding: 4px 6px; border-top: 1px solid var(--line);
+  }
+  tbody td { padding: 1.6px 6px; border-bottom: 1px solid var(--hair); }
+  tbody tr.abn td { background: var(--abn); }
+  td.test { font-weight: 600; }
+  td.result { font-variant-numeric: tabular-nums; font-weight: 700; }
+  td.prior { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .flag { display: inline-block; min-width: 1.1em; text-align: center; font-weight: 800; }
+  .flag.H { color: #b5261e; }
+  .flag.L { color: #1451a8; }
+
+  .interp { margin-top: 7px; border: 1px solid var(--line); border-left: 4px solid var(--accent); padding: 6px 10px; background: #fafbfc; }
+  .interp h4 { margin: 0 0 3px; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--accent); }
+  .interp p { margin: 0; font-size: 9.5px; color: #333; }
+
+  .legend { margin-top: 8px; font-size: 8px; color: var(--muted); }
+
+  footer { position: absolute; left: 0.55in; right: 0.55in; bottom: 0.4in; border-top: 1px solid var(--line); padding-top: 5px; font-size: 8px; color: var(--muted); display: flex; justify-content: space-between; }
+  .sig { margin-top: 12px; font-size: 8.5px; color: #333; }
+  .sig .name { font-weight: 700; color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="synthetic">Synthetic demo data — fictional patient &amp; laboratory — not a real medical record — AgentForge Clinical Co-Pilot</div>
+
+  <div class="masthead">
+    <div class="lab-id">
+      <div class="name">Cedar Valley Reference Laboratory</div>
+      <div class="sub">4120 Meridian Park Blvd, Suite 200 &middot; Austin, TX 78744<br />CLIA #45D0000000 &middot; Director: Priya N. Raman, MD, PhD, FCAP &middot; (512) 555-0148</div>
+    </div>
+    <div class="lab-meta">
+      <div class="rep">Laboratory Report</div>
+      <div>Accession: CVRL-26-0788143</div>
+      <div>Report Status: FINAL</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="field"><div class="k">Patient Name</div><div class="v">Angulo, Sergio</div></div>
+    <div class="field"><div class="k">Date of Birth / Age / Sex</div><div class="v">1979-03-14 / 47 / M</div></div>
+    <div class="field"><div class="k">MRN</div><div class="v">OE-000023</div></div>
+
+    <div class="field"><div class="k">Ordering Provider</div><div class="v">A. Mercado, MD</div></div>
+    <div class="field"><div class="k">Specimen Collected</div><div class="v">2026-07-08 09:40</div></div>
+    <div class="field"><div class="k">Specimen Received</div><div class="v">2026-07-08 15:12</div></div>
+
+    <div class="field"><div class="k">Report Released</div><div class="v">2026-07-09 07:05</div></div>
+    <div class="field"><div class="k">Specimen Type</div><div class="v">Serum / Whole Blood (EDTA)</div></div>
+    <div class="field"><div class="k">Fasting</div><div class="v">Yes</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:31%">Test</th>
+        <th class="num" style="width:12%">Result</th>
+        <th class="ctr" style="width:6%">Flag</th>
+        <th style="width:20%">Reference Range</th>
+        <th style="width:13%">Units</th>
+        <th class="num" style="width:18%">Prior (2026-01-06)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="panel"><td colspan="6">Comprehensive Metabolic Panel</td></tr>
+
+      <tr class="abn"><td class="test">Glucose, Fasting</td><td class="result num">108</td><td class="ctr"><span class="flag H">H</span></td><td>70&ndash;99</td><td>mg/dL</td><td class="prior num">96</td></tr>
+      <tr><td class="test">Sodium</td><td class="result num">140</td><td class="ctr"></td><td>136&ndash;145</td><td>mmol/L</td><td class="prior num">139</td></tr>
+      <tr class="abn"><td class="test">Potassium</td><td class="result num">5.4</td><td class="ctr"><span class="flag H">H</span></td><td>3.5&ndash;5.1</td><td>mmol/L</td><td class="prior num">4.6</td></tr>
+      <tr><td class="test">Chloride</td><td class="result num">104</td><td class="ctr"></td><td>98&ndash;107</td><td>mmol/L</td><td class="prior num">102</td></tr>
+      <tr><td class="test">Carbon Dioxide (CO2)</td><td class="result num">24</td><td class="ctr"></td><td>22&ndash;29</td><td>mmol/L</td><td class="prior num">25</td></tr>
+      <tr class="abn"><td class="test">Urea Nitrogen (BUN)</td><td class="result num">27</td><td class="ctr"><span class="flag H">H</span></td><td>7&ndash;20</td><td>mg/dL</td><td class="prior num">18</td></tr>
+      <tr class="abn"><td class="test">Creatinine</td><td class="result num">1.44</td><td class="ctr"><span class="flag H">H</span></td><td>0.70&ndash;1.30</td><td>mg/dL</td><td class="prior num">1.06</td></tr>
+      <tr class="abn"><td class="test">eGFR (CKD-EPI 2021)</td><td class="result num">54</td><td class="ctr"><span class="flag L">L</span></td><td>&ge;60</td><td>mL/min/1.73m&sup2;</td><td class="prior num">78</td></tr>
+      <tr><td class="test">BUN/Creatinine Ratio</td><td class="result num">19</td><td class="ctr"></td><td>9&ndash;20</td><td>&mdash;</td><td class="prior num">17</td></tr>
+      <tr><td class="test">Calcium</td><td class="result num">9.4</td><td class="ctr"></td><td>8.6&ndash;10.2</td><td>mg/dL</td><td class="prior num">9.5</td></tr>
+      <tr><td class="test">Total Protein</td><td class="result num">7.1</td><td class="ctr"></td><td>6.0&ndash;8.3</td><td>g/dL</td><td class="prior num">7.0</td></tr>
+      <tr><td class="test">Albumin</td><td class="result num">4.3</td><td class="ctr"></td><td>3.5&ndash;5.0</td><td>g/dL</td><td class="prior num">4.4</td></tr>
+      <tr><td class="test">Bilirubin, Total</td><td class="result num">0.6</td><td class="ctr"></td><td>0.2&ndash;1.2</td><td>mg/dL</td><td class="prior num">0.5</td></tr>
+      <tr><td class="test">Alkaline Phosphatase</td><td class="result num">78</td><td class="ctr"></td><td>40&ndash;129</td><td>U/L</td><td class="prior num">72</td></tr>
+      <tr><td class="test">AST (SGOT)</td><td class="result num">24</td><td class="ctr"></td><td>10&ndash;40</td><td>U/L</td><td class="prior num">22</td></tr>
+      <tr><td class="test">ALT (SGPT)</td><td class="result num">27</td><td class="ctr"></td><td>7&ndash;56</td><td>U/L</td><td class="prior num">25</td></tr>
+
+      <tr class="panel"><td colspan="6">Complete Blood Count with Differential</td></tr>
+
+      <tr><td class="test">White Blood Cell Count</td><td class="result num">7.9</td><td class="ctr"></td><td>3.8&ndash;10.8</td><td>10&sup3;/&micro;L</td><td class="prior num">7.2</td></tr>
+      <tr><td class="test">Red Blood Cell Count</td><td class="result num">4.92</td><td class="ctr"></td><td>4.20&ndash;5.80</td><td>10&#8310;/&micro;L</td><td class="prior num">4.88</td></tr>
+      <tr><td class="test">Hemoglobin</td><td class="result num">15.1</td><td class="ctr"></td><td>13.2&ndash;17.1</td><td>g/dL</td><td class="prior num">15.0</td></tr>
+      <tr><td class="test">Hematocrit</td><td class="result num">44.5</td><td class="ctr"></td><td>38.5&ndash;50.0</td><td>%</td><td class="prior num">44.1</td></tr>
+      <tr><td class="test">MCV</td><td class="result num">90</td><td class="ctr"></td><td>80&ndash;100</td><td>fL</td><td class="prior num">90</td></tr>
+      <tr><td class="test">Platelet Count</td><td class="result num">262</td><td class="ctr"></td><td>140&ndash;400</td><td>10&sup3;/&micro;L</td><td class="prior num">254</td></tr>
+      <tr><td class="test">Neutrophils</td><td class="result num">52</td><td class="ctr"></td><td>40&ndash;70</td><td>%</td><td class="prior num">55</td></tr>
+      <tr><td class="test">Lymphocytes</td><td class="result num">32</td><td class="ctr"></td><td>22&ndash;44</td><td>%</td><td class="prior num">31</td></tr>
+      <tr><td class="test">Monocytes</td><td class="result num">6</td><td class="ctr"></td><td>4&ndash;11</td><td>%</td><td class="prior num">6</td></tr>
+      <tr class="abn"><td class="test">Eosinophils</td><td class="result num">9</td><td class="ctr"><span class="flag H">H</span></td><td>0&ndash;5</td><td>%</td><td class="prior num">6</td></tr>
+      <tr><td class="test">Basophils</td><td class="result num">1</td><td class="ctr"></td><td>0&ndash;2</td><td>%</td><td class="prior num">1</td></tr>
+      <tr class="abn"><td class="test">Eosinophils, Absolute</td><td class="result num">0.71</td><td class="ctr"><span class="flag H">H</span></td><td>0.00&ndash;0.50</td><td>10&sup3;/&micro;L</td><td class="prior num">0.43</td></tr>
+    </tbody>
+  </table>
+
+  <div class="interp">
+    <h4>Performing Laboratory Comment</h4>
+    <p>Renal function has declined since the prior draw: creatinine 1.06 &rarr; 1.44 mg/dL with eGFR 78 &rarr; 54 mL/min/1.73m&sup2; (now CKD stage G3a range), accompanied by potassium 5.4 mmol/L and BUN 27 mg/dL. Pattern is consistent with a pre-renal / NSAID-related effect; correlate with medications and consider repeat renal panel. Peripheral eosinophilia (9%, absolute 0.71 10&sup3;/&micro;L) noted &mdash; correlate clinically with atopic/allergic history. Results reviewed and released by the performing laboratory.</p>
+  </div>
+
+  <div class="legend"><strong>Flag key:</strong> H = above reference range &nbsp;&middot;&nbsp; L = below reference range. Reference ranges are method- and instrument-specific. Prior values shown for the same analyte from the most recent available prior specimen (2026-01-06).</div>
+
+  <div class="sig">
+    Electronically signed: <span class="name">Priya N. Raman, MD, PhD, FCAP</span> &mdash; Laboratory Director &middot; 2026-07-09 07:05 CT
+  </div>
+
+  <footer>
+    <span>Cedar Valley Reference Laboratory &middot; CLIA #45D0000000</span>
+    <span>Patient: Angulo, Sergio &middot; MRN OE-000023 &middot; Acc. CVRL-26-0788143</span>
+    <span>Page 1 of 1</span>
+  </footer>
+
+</div>
+</body>
+</html>

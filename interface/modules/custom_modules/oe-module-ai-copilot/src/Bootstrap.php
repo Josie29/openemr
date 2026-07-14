@@ -114,9 +114,6 @@ final class Bootstrap
             return $event;
         }
         $scripts = $event->getScripts();
-        // Vendored pdf.js (UMD) must load before the sidebar script so `pdfjsLib` is available for
-        // the JOS-57 click-to-source document preview. Local-only (CSP forbids a CDN).
-        $scripts[] = $this->assetPath('vendor/pdfjs/pdf.min.js');
         $scripts[] = $this->assetPath('js/ai-copilot.js');
         $event->setScripts($scripts);
         return $event;

@@ -38,10 +38,6 @@
     var token = null; // {accessToken, patient, expiresAt}
     var launchInFlight = null;
 
-    // Click-to-source PDF preview (JOS-57). A monotonic id guards against a stale render (a slow PDF
-    // fetch) painting over a newer click; `previewTrigger` is the chip we return focus to on close.
-    var previewRequestId = 0;
-    var previewTrigger = null;
 
     // ---- config / labels -------------------------------------------------
 
@@ -747,7 +743,7 @@
         button.dataset.bbox = JSON.stringify(source.bounding_box);
         button.dataset.docTitle = (source.label && source.label !== source.value)
             ? source.label
-            : (humanizeToken(source.resource_type) || labels.previewSourceFallback);
+            : (humanizeToken(source.resource_type) || labels.viewSource);
         button.addEventListener('click', onViewSourceClick);
         return button;
     }
@@ -763,285 +759,41 @@
         }
         var documentId = button.dataset.documentId;
         var page = parseInt(button.dataset.page, 10);
-        if (!documentId || !bbox || isNaN(page)) {
+        if (!documentId || isNaN(page)) {
             return;
         }
-        previewTrigger = button;
-        openPreview({
-            documentId: documentId,
-            page: page,
-            bbox: bbox,
-            title: button.dataset.docTitle || labels.previewSourceFallback
-        });
+        openSourceInChartTab(documentId, page, bbox, button.dataset.docTitle || labels.viewSource);
     }
 
-    /**
-     * Lazily build the preview pane and cache its parts on `els`. Built once and reused across
-     * clicks; a child of the fixed sidebar so it overlays the transcript without escaping the panel.
-     */
-    function ensurePreviewPane() {
-        if (els.preview) {
-            return;
+    // Open the cited source as a tab in OpenEMR's main content (chart) area, via the
+    // session-authenticated viewer (source-view.php) — it reads the document through the core
+    // document ACL, so no patient-scoped SMART Binary scope is needed. The sidebar runs in the top
+    // window, so top.navigateTab / top.activateTabByName are callable directly.
+    function openSourceInChartTab(documentId, page, bbox, title) {
+        var url = config.sourceViewUrl
+            + '?doc=' + encodeURIComponent(documentId)
+            + '&page=' + encodeURIComponent(page)
+            + '&csrf_token=' + encodeURIComponent(config.csrfToken)
+            + '&label=' + encodeURIComponent(title);
+        if (bbox) {
+            url += '&x=' + encodeURIComponent(bbox.x)
+                + '&y=' + encodeURIComponent(bbox.y)
+                + '&w=' + encodeURIComponent(bbox.width)
+                + '&h=' + encodeURIComponent(bbox.height);
         }
-        var preview = document.createElement('div');
-        preview.className = 'ai-copilot__preview';
-        preview.setAttribute('role', 'dialog');
-        preview.setAttribute('aria-label', labels.previewSourceFallback);
-        preview.setAttribute('aria-hidden', 'true');
-        preview.hidden = true;
-
-        var header = document.createElement('header');
-        header.className = 'ai-copilot__preview-header';
-
-        var title = document.createElement('p');
-        title.className = 'ai-copilot__preview-title';
-        header.appendChild(title);
-
-        var close = document.createElement('button');
-        close.type = 'button';
-        close.className = 'ai-copilot__preview-close';
-        close.setAttribute('aria-label', labels.previewClose);
-        close.textContent = '×'; // U+00D7 multiplication sign -- matches the panel's close glyph
-        header.appendChild(close);
-        preview.appendChild(header);
-
-        var body = document.createElement('div');
-        body.className = 'ai-copilot__preview-body';
-
-        var status = document.createElement('p');
-        status.className = 'ai-copilot__preview-status';
-        status.setAttribute('role', 'status');
-        status.setAttribute('aria-live', 'polite');
-        status.hidden = true;
-        body.appendChild(status);
-
-        var wrap = document.createElement('div');
-        wrap.className = 'ai-copilot__preview-canvas-wrap';
-
-        var canvas = document.createElement('canvas');
-        canvas.className = 'ai-copilot__preview-canvas';
-        wrap.appendChild(canvas);
-
-        var bbox = document.createElement('div');
-        bbox.className = 'ai-copilot__preview-bbox';
-        bbox.setAttribute('aria-hidden', 'true');
-        bbox.hidden = true;
-        wrap.appendChild(bbox);
-
-        body.appendChild(wrap);
-        preview.appendChild(body);
-
-        close.addEventListener('click', closePreview);
-        // Escape closes the pane without collapsing the whole sidebar (stop it reaching a shell handler).
-        preview.addEventListener('keydown', function (event) {
-            if (event.key === 'Escape') {
-                event.stopPropagation();
-                closePreview();
+        var tabName = 'ai_doc_' + documentId;
+        var win = window.top;
+        if (win && typeof win.navigateTab === 'function') {
+            if (typeof win.restoreSession === 'function') {
+                win.restoreSession();
             }
-        });
-
-        els.sidebar.appendChild(preview);
-        els.preview = preview;
-        els.previewTitle = title;
-        els.previewClose = close;
-        els.previewStatus = status;
-        els.previewBody = body;
-        els.previewCanvasWrap = wrap;
-        els.previewCanvas = canvas;
-        els.previewBbox = bbox;
-    }
-
-    /**
-     * Reveal the preview pane for a fresh request, reset its canvas/overlay, and kick off the render.
-     *
-     * @param {{documentId: string, page: number, bbox: object, title: string}} req The source to show.
-     */
-    function openPreview(req) {
-        ensurePreviewPane();
-        var requestId = ++previewRequestId; // supersede any in-flight render
-        els.previewTitle.textContent = req.title;
-        els.preview.hidden = false;
-        els.preview.setAttribute('aria-hidden', 'false');
-        els.previewBbox.hidden = true;
-        clearPreviewCanvas();
-        setPreviewStatus(labels.previewLoading, false);
-        els.previewClose.focus();
-        renderPdfPreview(req, requestId);
-    }
-
-    /**
-     * Close the preview, invalidate any in-flight render, and return focus to the triggering chip.
-     */
-    function closePreview() {
-        previewRequestId++; // any render still resolving will see a stale id and bail
-        if (els.preview) {
-            els.preview.hidden = true;
-            els.preview.setAttribute('aria-hidden', 'true');
-        }
-        if (previewTrigger && typeof previewTrigger.focus === 'function') {
-            previewTrigger.focus();
-        }
-        previewTrigger = null;
-    }
-
-    function setPreviewStatus(message, isError) {
-        els.previewStatus.textContent = message || '';
-        els.previewStatus.hidden = !message;
-        els.previewStatus.classList.toggle('ai-copilot__preview-status--error', Boolean(isError));
-    }
-
-    function clearPreviewCanvas() {
-        var canvas = els.previewCanvas;
-        var ctx = canvas.getContext('2d');
-        if (ctx) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-    }
-
-    // Fetch the PDF bytes for a Binary through the SMART token, same base URL the chat is scoped to.
-    function fetchBinary(documentId, accessToken) {
-        return fetch(config.fhirBaseUrl + '/Binary/' + encodeURIComponent(documentId), {
-            headers: {
-                'Authorization': 'Bearer ' + accessToken,
-                'Accept': 'application/pdf'
-            }
-        });
-    }
-
-    // Fetch, and on a 401 drop the token and re-launch once (mirrors sendTurn's single-retry).
-    function fetchBinaryWithReauth(documentId, accessToken) {
-        return fetchBinary(documentId, accessToken).then(function (response) {
-            if (response.status !== 401) {
-                return response;
-            }
-            token = null;
-            return ensureToken().then(function (fresh) {
-                return fetchBinary(documentId, fresh.accessToken);
+            win.navigateTab(url, tabName, function () {
+                if (typeof win.activateTabByName === 'function') {
+                    win.activateTabByName(tabName, true);
+                }
             });
-        });
-    }
-
-    /**
-     * Fetch the cited PDF and render its page with the vendored pdf.js, then draw the bounding box.
-     * Every step re-checks `requestId` so a superseding click (or a close) abandons this render
-     * instead of clobbering the newer one. Auth/404/parse failures surface inline in the pane.
-     *
-     * @param {{documentId: string, page: number, bbox: object}} req The source to render.
-     * @param {number} requestId This render's generation, compared against `previewRequestId`.
-     */
-    function renderPdfPreview(req, requestId) {
-        var pdfjs = window.pdfjsLib;
-        if (!pdfjs) {
-            setPreviewStatus(labels.previewError, true);
-            return;
-        }
-        if (!config.fhirBaseUrl) {
-            setPreviewStatus(labels.previewError, true);
-            return;
-        }
-
-        // Point pdf.js at the locally-vendored worker (CSP forbids its CDN default). Idempotent.
-        if (config.pdfWorkerUrl && !pdfjs.GlobalWorkerOptions.workerSrc) {
-            pdfjs.GlobalWorkerOptions.workerSrc = config.pdfWorkerUrl;
-        }
-
-        ensureToken()
-            .then(function (fresh) {
-                return fetchBinaryWithReauth(req.documentId, fresh.accessToken);
-            })
-            .then(function (response) {
-                if (!response.ok) {
-                    // Both messages are ours (localized), safe to show; flag them so the catch can tell
-                    // them from a raw fetch/parse failure.
-                    var reason = response.status === 404 ? labels.previewNotFound : labels.previewError;
-                    var httpErr = new Error(reason);
-                    httpErr.controlled = true;
-                    throw httpErr;
-                }
-                return response.arrayBuffer();
-            })
-            .then(function (buffer) {
-                if (requestId !== previewRequestId) {
-                    return null; // a newer click (or close) won the race -- drop this one
-                }
-                return pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-            })
-            .then(function (pdf) {
-                if (!pdf || requestId !== previewRequestId) {
-                    return null;
-                }
-                var pageNum = Math.min(Math.max(req.page, 1), pdf.numPages);
-                return pdf.getPage(pageNum);
-            })
-            .then(function (page) {
-                if (!page || requestId !== previewRequestId) {
-                    return;
-                }
-                paintPage(page, req.bbox, requestId);
-            })
-            .catch(function (err) {
-                if (requestId !== previewRequestId) {
-                    return;
-                }
-                setPreviewStatus(err && err.controlled ? err.message : labels.previewError, true);
-            });
-    }
-
-    /**
-     * Rasterize the page to the canvas at the pane width, then overlay the bounding box.
-     *
-     * The canvas backing store is scaled by devicePixelRatio for a crisp render, while its CSS size
-     * stays in layout pixels so the bbox overlay (also in layout pixels) lines up. The box is given
-     * in native page pixels, which equal the scale-1 viewport's units, so one `scale` maps both.
-     *
-     * @param {object} page A pdf.js PDFPageProxy.
-     * @param {{x: number, y: number, width: number, height: number}} bbox Native-page-pixel rectangle.
-     * @param {number} requestId This render's generation.
-     */
-    function paintPage(page, bbox, requestId) {
-        var cssWidth = els.previewCanvasWrap.clientWidth || els.previewBody.clientWidth;
-        var base = page.getViewport({ scale: 1 });
-        var scale = cssWidth / base.width;
-        var viewport = page.getViewport({ scale: scale });
-        var outputScale = window.devicePixelRatio || 1;
-
-        var canvas = els.previewCanvas;
-        canvas.width = Math.floor(viewport.width * outputScale);
-        canvas.height = Math.floor(viewport.height * outputScale);
-        canvas.style.width = Math.floor(viewport.width) + 'px';
-        canvas.style.height = Math.floor(viewport.height) + 'px';
-
-        var renderTask = page.render({
-            canvasContext: canvas.getContext('2d'),
-            viewport: viewport,
-            // Map the extra device-pixel resolution onto the same viewport (identity when DPR is 1).
-            transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined
-        });
-
-        renderTask.promise.then(function () {
-            if (requestId !== previewRequestId) {
-                return;
-            }
-            setPreviewStatus('', false);
-            positionBbox(bbox, scale);
-        }).catch(function () {
-            if (requestId !== previewRequestId) {
-                return;
-            }
-            setPreviewStatus(labels.previewError, true);
-        });
-    }
-
-    // Place the highlight rectangle over the rendered page and scroll it into view.
-    function positionBbox(bbox, scale) {
-        var box = els.previewBbox;
-        box.style.left = (bbox.x * scale) + 'px';
-        box.style.top = (bbox.y * scale) + 'px';
-        box.style.width = (bbox.width * scale) + 'px';
-        box.style.height = (bbox.height * scale) + 'px';
-        box.hidden = false;
-        if (typeof box.scrollIntoView === 'function') {
-            box.scrollIntoView({ block: 'center', inline: 'nearest' });
+        } else {
+            window.open(url, '_blank');
         }
     }
 
@@ -1314,12 +1066,7 @@
             followUps: els.sidebar.dataset.labelFollowUps,
             // Click-to-source (JOS-57). Defaulted here so the feature works before the PHP config
             // island grows these data-label-* attributes; add them there for localization.
-            viewSource: els.sidebar.dataset.labelViewSource || 'View source',
-            previewClose: els.sidebar.dataset.labelPreviewClose || 'Close source preview',
-            previewSourceFallback: els.sidebar.dataset.labelPreviewSource || 'Source document',
-            previewLoading: els.sidebar.dataset.labelPreviewLoading || 'Loading source document...',
-            previewError: els.sidebar.dataset.labelPreviewError || 'Could not load the source document.',
-            previewNotFound: els.sidebar.dataset.labelPreviewNotFound || 'Source document not found.'
+            viewSource: els.sidebar.dataset.labelViewSource || 'View source'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

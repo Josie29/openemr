@@ -28,12 +28,14 @@ The derived FHIR `Observation` carries the value but **not** the box (no native 
 ## Renderer side (done — for reference)
 
 - `agent/src/copilot/schemas.py` — `SourceRef` extended (backward-compatible).
-- `.../oe-module-ai-copilot/public/assets/js/ai-copilot.js` — `renderCitation` adds a "View source" button when `bounding_box` is present; click → in-panel preview pane → pdf.js render → positioned rectangle.
-- `.../public/assets/css/ai-copilot.css` — `.ai-copilot__preview` + `.ai-copilot__bbox`.
-- `.../public/assets/vendor/pdfjs/` — vendored pdf.js (CSP forbids CDN).
-- `CopilotSidebarController.php` — config island adds `fhirBaseUrl`, `pdfWorkerUrl`.
-- `Bootstrap.php` — enqueues pdf.js before the sidebar script. `version.php` `$v_js_includes` bumped (88→89).
+- `.../oe-module-ai-copilot/public/assets/js/ai-copilot.js` — `renderCitation` adds a "View source" button when `bounding_box` is present; click → opens the source document as a **chart-pane tab** (`top.navigateTab` → `activateTabByName`) at the session-authed viewer.
+- `.../public/source-view.php` — **the viewer**: a session-authenticated page (copies `launch.php`'s bootstrap + CSRF, read-only session) that reads the document by uuid via the core document ACL (`AclMain::aclCheckCore('patients','docs')` + `Document::can_access()` + patient-match against the session pid), streams the bytes (`Document::getDocumentForUuid` → `get_data()`), and renders pdf.js + the bbox. Titles the tab `Source: <value>`.
+- `.../public/assets/vendor/pdfjs/` — vendored pdf.js (CSP forbids CDN), loaded by the viewer page itself.
+- `CopilotSidebarController.php` — config island adds `sourceViewUrl`. `version.php` `$v_js_includes` bumped (88→89).
 - `main.py` — a **removable** stub (`COPILOT_STUB_DOC_ID`) returns a canned document-fact answer for build/verify before the real worker lands.
+
+## Why a session-authed viewer, not a browser Binary fetch
+The obvious approach — the sidebar fetching `GET /fhir/Binary/{id}` with the SMART token — **hits a scope wall**: the patient-scoped Co-Pilot token has `DocumentReference.read` (lists the doc) but no `Binary` read scope, and OpenEMR's Binary endpoint requires `user/Binary.r`, which a patient-launch SMART app cannot obtain. So the document is served by the **session-authenticated `source-view.php`** (the logged-in EHR user's own session ACL), sidestepping SMART Binary entirely. This is the serving mechanism JOS-56 keeps — the producer only stamps the citation fields; no new scope is needed.
 
 ## To wire the real producer (JOS-54/56)
 1. When a claim cites a document-derived `Observation`, stamp `document_id` (the stored `DocumentReference` UUID), `page`, and `bounding_box` (**in points**) from the sidecar onto the `SourceRef`.

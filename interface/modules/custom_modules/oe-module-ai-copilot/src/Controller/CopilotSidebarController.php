@@ -71,15 +71,11 @@ final readonly class CopilotSidebarController
             'chatUrl' => $this->config->chatUrl(),
             // Same-origin (the OpenEMR host), so a web-root-relative path is enough.
             'conversationUrl' => $this->moduleWebPath . '/public/conversation.php',
+            // JOS-57 click-to-source: the session-authed viewer opened as a chart-pane tab.
+            'sourceViewUrl' => $this->moduleWebPath . '/public/source-view.php',
             'csrfToken' => CsrfUtils::collectCsrfToken(session: $session),
             'expectedOrigin' => $urls->origin,
             'messageSource' => TokenRelayView::MESSAGE_SOURCE,
-            // JOS-57 click-to-source: same-origin FHIR base for Binary (source-document) reads,
-            // and the locally-vendored pdf.js worker URL for the preview overlay.
-            // NB: build from the OAuth origin, not ServerConfig::getFhirUrl() — the latter injects a
-            // spurious "/openemr" web-root segment on this stack, giving a 404 for the Binary fetch.
-            'fhirBaseUrl' => $urls->origin . '/apis/default/fhir',
-            'pdfWorkerUrl' => $this->moduleWebPath . '/public/assets/vendor/pdfjs/pdf.worker.min.js',
         ];
 
         // JSON_HEX_TAG closes off the `</script>`-in-a-string escape; the payload is inert data read

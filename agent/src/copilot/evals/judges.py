@@ -53,14 +53,6 @@ Two things are explicitly faithful and must NOT be failed:
 Ignore tone and completeness — judge only whether the summary stays within what the claims
 support, per the rules above."""
 
-_COMPLETENESS_RUBRIC = """You check whether a clinical AI assistant's answer conveys the facts a
-physician needs. You are given the QUESTION, a list of REQUIRED FACTS, and the assistant's ANSWER
-(its summary and claims).
-
-Your only question: does the ANSWER convey every REQUIRED FACT, in substance? Match on meaning, not
-wording (e.g. "no medications on file" satisfies "no medications are recorded"). Fail if any
-required fact is missing or contradicted. Pass only if all required facts are conveyed."""
-
 
 @lru_cache(maxsize=4)
 def _judge_agent(api_key: str, rubric: str) -> Agent[None, JudgeVerdict]:
@@ -114,29 +106,5 @@ async def judge_faithfulness(response: ChatResponse, *, api_key: str) -> JudgeVe
     """
     agent = _judge_agent(api_key, _FAITHFULNESS_RUBRIC)
     prompt = f"CLAIMS:\n{_render_claims(response)}\n\nSUMMARY:\n{response.summary}"
-    result = await agent.run(prompt)
-    return result.output
-
-
-async def judge_completeness(
-    question: str, must_mention: list[str], response: ChatResponse, *, api_key: str
-) -> JudgeVerdict:
-    """Judge whether the answer conveys every required fact for the question.
-
-    Args:
-        question: The physician's question.
-        must_mention: The facts a complete answer must convey.
-        response: The agent's structured answer.
-        api_key: Anthropic API key for the judge model.
-
-    Returns:
-        The judge's pass/fail verdict with reasoning.
-    """
-    agent = _judge_agent(api_key, _COMPLETENESS_RUBRIC)
-    required = "\n".join(f"- {fact}" for fact in must_mention)
-    prompt = (
-        f"QUESTION:\n{question}\n\nREQUIRED FACTS:\n{required}\n\n"
-        f"ANSWER SUMMARY:\n{response.summary}\n\nANSWER CLAIMS:\n{_render_claims(response)}"
-    )
     result = await agent.run(prompt)
     return result.output

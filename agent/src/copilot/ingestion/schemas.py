@@ -73,7 +73,8 @@ class Citation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     quote_or_value: str = Field(
-        description="The value/text EXACTLY as it appears on the source page, copied verbatim."
+        min_length=1,
+        description="The value/text EXACTLY as it appears on the source page, copied verbatim.",
     )
     bounding_box: BoundingBox | None = Field(
         default=None,
@@ -107,10 +108,12 @@ class LabResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     test_name: str = Field(
-        description="Analyte/test name exactly as printed, e.g. 'Hemoglobin A1c'."
+        min_length=1,
+        description="Analyte/test name exactly as printed, e.g. 'Hemoglobin A1c'.",
     )
     value: str = Field(
-        description="Result value verbatim, e.g. '8.2' or 'Positive'. Never round or convert."
+        min_length=1,
+        description="Result value verbatim, e.g. '8.2' or 'Positive'. Never round or convert.",
     )
     unit: str | None = Field(
         default=None, description="Unit as printed, e.g. '%'. Null if unitless/qualitative."
@@ -170,7 +173,7 @@ class CitedText(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    value: str = Field(description="The value verbatim as printed on the form.")
+    value: str = Field(min_length=1, description="The value verbatim as printed on the form.")
     citation: Citation = Field(description="Where on the form this value was read from.")
     confidence: float | None = Field(
         default=None,
@@ -202,7 +205,7 @@ class Medication(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str = Field(description="Medication name as printed, e.g. 'Metformin'.")
+    name: str = Field(min_length=1, description="Medication name as printed, e.g. 'Metformin'.")
     dose: str | None = Field(
         default=None, description="Dose/strength as printed, e.g. '500 mg'. Null if not given."
     )
@@ -223,7 +226,9 @@ class Allergy(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    substance: str = Field(description="Allergen/substance as printed, e.g. 'Penicillin'.")
+    substance: str = Field(
+        min_length=1, description="Allergen/substance as printed, e.g. 'Penicillin'."
+    )
     reaction: str | None = Field(
         default=None, description="Reaction as printed, e.g. 'hives'. Null if not given."
     )
@@ -241,7 +246,9 @@ class FamilyHistoryItem(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    condition: str = Field(description="Condition as printed, e.g. 'Type 2 diabetes'.")
+    condition: str = Field(
+        min_length=1, description="Condition as printed, e.g. 'Type 2 diabetes'."
+    )
     relation: str | None = Field(
         default=None, description="Affected relative, e.g. 'mother'. Null if not given."
     )
@@ -271,9 +278,7 @@ class IntakeForm(BaseModel):
     current_medications: list[Medication] = Field(
         description="Every current medication read from the form, each cited."
     )
-    allergies: list[Allergy] = Field(
-        description="Every allergy read from the form, each cited."
-    )
+    allergies: list[Allergy] = Field(description="Every allergy read from the form, each cited.")
     family_history: list[FamilyHistoryItem] = Field(
         description="Every family-history entry read from the form, each cited."
     )

@@ -105,10 +105,10 @@ def test_falls_back_to_coarse_estimate_without_a_text_layer() -> None:
 
 async def test_fixture_extractor_round_trip() -> None:
     """The DocumentExtractor wires byte-source + OCR backend + geometry end to end."""
-    extractor = DocumentExtractor(
-        ocr=FixtureOcrBackend(str(_LAB_OCR)), byte_source=FixturePdfByteSource(str(_LAB_PDF))
+    extractor = DocumentExtractor(ocr=FixtureOcrBackend(str(_LAB_OCR)))
+    extracted = await extractor.extract(
+        "doc-abc", DocType.LAB_PDF, FixturePdfByteSource(str(_LAB_PDF))
     )
-    extracted = await extractor.extract("doc-abc", DocType.LAB_PDF)
     assert extracted.document_id == "doc-abc"
     assert extracted.doc_type is DocType.LAB_PDF
     potassium = _find(extracted.report, "Potassium")
@@ -203,11 +203,11 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
     claim would be rejected as ungrounded — so this guards the whole tool -> registry -> gate ->
     overlay-stamp path the sidebar depends on.
     """
-    extractor = DocumentExtractor(
-        ocr=FixtureOcrBackend(str(_LAB_OCR)), byte_source=FixturePdfByteSource(str(_LAB_PDF))
-    )
+    extractor = DocumentExtractor(ocr=FixtureOcrBackend(str(_LAB_OCR)))
     deps = GraphDeps(
-        fhir=FixtureFhirClient.from_seed(),
+        # get_document_bytes serves this fixture PDF, so attach_and_extract's FhirBinaryByteSource
+        # exercises the real fetch -> OCR path offline (mirroring the Binary fetch in prod).
+        fhir=FixtureFhirClient.from_seed(str(_LAB_PDF)),
         patient_id="1",
         correlation_id="test-cid",
         retriever=StubRetriever(snippets=()),

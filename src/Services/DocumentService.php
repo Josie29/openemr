@@ -277,11 +277,21 @@ class DocumentService extends BaseService
                 $sql .= " LIMIT " . $limit;
             }
             $username = $this->getSession()?->get('authUser');
+            // A patient-scoped (self-access) caller passes the bound pid; such requests are authorized
+            // by patient ownership + information-blocking rules, not the clinician category ACL which
+            // does not apply to a patient reading their own documents (US Core).
+            $patientPid = isset($options['patientPid']) ? (int) $options['patientPid'] : null;
             $statementResults =  QueryUtils::sqlStatementThrowException($sql, $sqlBindArray);
             while ($row = sqlFetchArray($statementResults)) {
                 // if the current user cannot access the document we do not allow it be passed back as a reference.
                 $document = new \Document($row['id']);
-                if (!$document->can_access($username)) {
+                if ($patientPid !== null) {
+                    // Hard-scope to the bound patient (defense in depth vs the WHERE filters) and defer
+                    // to the patient-access rules for that patient.
+                    if ((int) $row['foreign_id'] !== $patientPid || !$document->can_patient_access($patientPid)) {
+                        continue;
+                    }
+                } elseif (!$document->can_access($username)) {
                     continue;
                 }
                 $resultRecord = $this->createResultRecordFromDatabaseResult($row);

@@ -104,7 +104,11 @@ class FhirDocumentRestController
             }
         }
 
-        if (!$document->can_access($this->session->get('authUser'))) {
+        // For a patient-scoped request, can_patient_access() above is the authoritative gate (patient
+        // self-access + information-blocking rules, per US Core). The clinician category ACL is only
+        // meaningful for staff/admin (non-patient) requests, so only enforce it when there is no bound
+        // patient — otherwise a patient reading their own document is wrongly refused.
+        if (empty($patientUuid) && !$document->can_access($this->session->get('authUser'))) {
             return (new Psr17Factory())->createResponse(StatusCode::UNAUTHORIZED);
         }
 

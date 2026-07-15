@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field
 
 from copilot.config import ExtractorMode, Settings
+from copilot.fhir.client import FhirClient, FhirError
 from copilot.ingestion.pdf_geometry import Word, extract_word_boxes, locate_value_box
 from copilot.ingestion.schemas import (
     AbnormalFlag,
@@ -161,12 +162,12 @@ class FixtureOcrBackend:
 class DocumentByteSource(Protocol):
     """Where the extractor gets a document's bytes, given its id.
 
-    Production fetches the bytes from OpenEMR by document id (deferred — a SMART Binary-scope wall;
-    see the seam spec). The demo slice reads a committed fixture PDF, so the extraction is real
-    while the byte-fetch is stubbed.
+    Production fetches the bytes from OpenEMR by document id over FHIR ``Binary`` (see
+    :class:`FhirBinaryByteSource`); tests can serve a committed fixture PDF. Keyed on the same
+    document UUID the citation + click-to-source viewer use.
     """
 
-    def fetch(self, document_id: str) -> bytes:
+    async def fetch(self, document_id: str) -> bytes:
         """Return the raw bytes for ``document_id``.
 
         Raises:
@@ -175,18 +176,37 @@ class DocumentByteSource(Protocol):
         ...
 
 
-class FixturePdfByteSource:
-    """Serves the bytes of a single committed lab PDF regardless of id (demo byte-source).
+class FhirBinaryByteSource:
+    """Fetches a document's bytes from OpenEMR via the per-request FHIR client (``GET /Binary``).
 
-    The demo has one uploaded lab document; its real ``document_id`` is discovered live (so the
-    citation + chart-pane viewer resolve the actual OpenEMR record), but the bytes fed to OCR come
-    from this fixture until the production OpenEMR fetch lands.
+    The production byte-source: it rides the same patient-scoped SMART token as every other FHIR
+    read, so the bytes are authorized by the open patient's own access rights (the
+    ``patient/Binary`` scope). Works with either FHIR client — the fixture client returns a
+    committed PDF, so the same path exercises the real OCR pipeline offline.
     """
+
+    def __init__(self, fhir: "FhirClient") -> None:
+        self._fhir = fhir
+
+    async def fetch(self, document_id: str) -> bytes:
+        """Fetch the document's bytes by id, mapping FHIR failures to ``ExtractionError``.
+
+        Raises:
+            ExtractionError: If the Binary read fails or returns no content.
+        """
+        try:
+            return await self._fhir.get_document_bytes(document_id)
+        except FhirError as exc:
+            raise ExtractionError(f"could not fetch document bytes for {document_id}") from exc
+
+
+class FixturePdfByteSource:
+    """Serves the bytes of a single committed lab PDF regardless of id (test byte-source)."""
 
     def __init__(self, pdf_path: str) -> None:
         self._pdf_path = Path(pdf_path)
 
-    def fetch(self, document_id: str) -> bytes:
+    async def fetch(self, document_id: str) -> bytes:
         """Return the fixture PDF bytes.
 
         Raises:
@@ -217,18 +237,25 @@ class ExtractedDocument:
 
 
 class DocumentExtractor:
-    """Fetches a document's bytes, OCRs them, and maps the result into a strict ``LabReport``."""
+    """OCRs a document's bytes and maps the result into a strict ``LabReport``.
 
-    def __init__(self, ocr: OcrBackend, byte_source: DocumentByteSource) -> None:
+    The byte-source is supplied per call (not held) so the bytes ride the request's own
+    patient-scoped FHIR client; the OCR backend is app-lifetime and stateless.
+    """
+
+    def __init__(self, ocr: OcrBackend) -> None:
         self._ocr = ocr
-        self._byte_source = byte_source
 
-    async def extract(self, document_id: str, doc_type: DocType) -> ExtractedDocument:
-        """Extract one document end-to-end: bytes -> OCR -> strict ``LabReport`` + page DPI.
+    async def extract(
+        self, document_id: str, doc_type: DocType, byte_source: DocumentByteSource
+    ) -> ExtractedDocument:
+        """Extract one document end-to-end: bytes -> OCR -> strict ``LabReport``.
 
         Args:
-            document_id: The source document's FHIR ``DocumentReference`` id (used for citations).
+            document_id: The source document's FHIR ``DocumentReference`` id (used for citations
+                and to fetch the bytes).
             doc_type: The document schema to extract (``LAB_PDF`` in this slice).
+            byte_source: Where to fetch this document's bytes (the per-request FHIR client in prod).
 
         Returns:
             The parsed :class:`ExtractedDocument`.
@@ -236,7 +263,7 @@ class DocumentExtractor:
         Raises:
             ExtractionError: If the byte fetch, OCR, or mapping fails.
         """
-        pdf_bytes = self._byte_source.fetch(document_id)
+        pdf_bytes = await byte_source.fetch(document_id)
         raw = await self._ocr.process(pdf_bytes, doc_type)
         # The PDF text layer gives exact word boxes (points); empty for a scanned/image-only PDF,
         # in which case the mapper falls back to the coarse OCR row-estimate.
@@ -249,18 +276,16 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
     """Construct the document extractor from settings, or None when extraction is unconfigured.
 
     Returns None (extraction disabled, the intake-extractor simply reports no document) when the
-    byte-source PDF is unset, or when the selected backend lacks its credential/fixture — so a
-    missing key degrades to "no document facts", never a crash.
+    selected OCR backend lacks its credential/fixture — so a missing key degrades to "no document
+    facts", never a crash. The byte-source is supplied per request (the patient-scoped FHIR client),
+    so it is not part of this app-lifetime wiring.
 
     Args:
-        settings: Service settings selecting the extractor mode and paths.
+        settings: Service settings selecting the extractor mode.
 
     Returns:
         A wired :class:`DocumentExtractor`, or None when extraction cannot be configured.
     """
-    if settings.document_pdf_path is None:
-        return None
-    byte_source = FixturePdfByteSource(settings.document_pdf_path)
     if settings.extractor_mode is ExtractorMode.FIXTURE:
         if settings.ocr_fixture_path is None:
             logger.warning("extractor FIXTURE mode without ocr_fixture_path; extraction disabled")
@@ -271,7 +296,7 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
             logger.warning("extractor MISTRAL mode without an API key; extraction disabled")
             return None
         ocr = MistralOcrBackend(settings.mistral_api_key)
-    return DocumentExtractor(ocr, byte_source)
+    return DocumentExtractor(ocr)
 
 
 # --- OCR values + PDF geometry -> strict LabReport ---------------------------------------------

@@ -49,20 +49,30 @@ class FixtureFhirClient:
     :meth:`from_seed`.
     """
 
-    def __init__(self, patients: dict[str, PatientRecord]) -> None:
+    def __init__(
+        self, patients: dict[str, PatientRecord], document_pdf_path: str | None = None
+    ) -> None:
         self._patients = patients
+        # Bytes served by get_document_bytes so the fixture path exercises the real OCR pipeline
+        # (mirrors HttpFhirClient fetching Binary bytes in prod).
+        self._document_pdf_path = document_pdf_path
 
     @classmethod
-    def from_seed(cls) -> "FixtureFhirClient":
+    def from_seed(cls, document_pdf_path: str | None = None) -> "FixtureFhirClient":
         """Build a client from the FHIR fixtures bundled in ``fhir/seed/``.
+
+        Args:
+            document_pdf_path: Optional fixture lab PDF served by ``get_document_bytes``.
 
         Returns:
             A client seeded with every patient found in the seed directory.
         """
-        return cls.from_directory(_SEED_DIR)
+        return cls.from_directory(_SEED_DIR, document_pdf_path)
 
     @classmethod
-    def from_directory(cls, directory: Path) -> "FixtureFhirClient":
+    def from_directory(
+        cls, directory: Path, document_pdf_path: str | None = None
+    ) -> "FixtureFhirClient":
         """Build a client from every FHIR JSON file in a directory.
 
         Each file may be a single ``Patient`` resource or a collection/searchset ``Bundle``
@@ -82,7 +92,7 @@ class FixtureFhirClient:
         for path in sorted(directory.glob("*.json")):
             document = json.loads(path.read_text())
             cls._ingest_document(document, patients, source=str(path))
-        return cls(patients)
+        return cls(patients, document_pdf_path)
 
     @classmethod
     def _ingest_document(
@@ -152,6 +162,14 @@ class FixtureFhirClient:
             for r in self._resources(patient_id, "DocumentReference")
         )
         return [summary for summary in summaries if summary is not None]
+
+    async def get_document_bytes(self, document_id: str) -> bytes:
+        if not self._document_pdf_path:
+            raise FhirError("fixture FHIR client has no document PDF configured")
+        try:
+            return Path(self._document_pdf_path).read_bytes()
+        except OSError as exc:
+            raise FhirError(f"could not read fixture document {self._document_pdf_path}") from exc
 
     async def ping(self) -> None:
         # In-memory fixtures are always reachable.

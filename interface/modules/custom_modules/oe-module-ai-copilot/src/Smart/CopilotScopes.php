@@ -46,6 +46,10 @@ final readonly class CopilotScopes
         'patient/AllergyIntolerance.read',
         'patient/Encounter.read',
         'patient/DocumentReference.read',
+        // Binary read lets the agent fetch an uploaded lab PDF's bytes by document UUID
+        // (GET /fhir/Binary/{id}) for OCR — the production doc-bytes fetch, keyed on the same UUID
+        // the DocumentReference citation + click-to-source viewer use.
+        'patient/Binary.read',
     ];
 
     /** The space-delimited form used in the `scope` query parameter and the client registration. */

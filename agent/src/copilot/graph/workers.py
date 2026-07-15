@@ -6,7 +6,7 @@ from copilot.fhir_tools import register_fhir_read_tools
 from copilot.graph.deps import GraphDeps
 from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
-from copilot.ingestion.extractor import ExtractionError
+from copilot.ingestion.extractor import ExtractionError, FhirBinaryByteSource
 from copilot.ingestion.registry import LabFactHandle
 from copilot.ingestion.schemas import DocType
 from copilot.rag.models import EvidenceSnippet
@@ -167,8 +167,12 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         """
         if ctx.deps.extractor is None:
             return []
+        # Fetch the document's bytes over the request's own patient-scoped FHIR client (Binary),
+        # so the bytes are authorized by the open patient's access rights — keyed on the same id
+        # the citation + click-to-source viewer use.
+        byte_source = FhirBinaryByteSource(ctx.deps.fhir)
         try:
-            extracted = await ctx.deps.extractor.extract(document_id, DocType.LAB_PDF)
+            extracted = await ctx.deps.extractor.extract(document_id, DocType.LAB_PDF, byte_source)
         except ExtractionError:
             # The document could not be read — return no facts so the worker reports the gap
             # rather than fabricating lab values around a failed OCR.

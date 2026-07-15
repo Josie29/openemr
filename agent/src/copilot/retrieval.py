@@ -38,6 +38,21 @@ class ChunkRegistry:
         for snippet in snippets:
             self._snippets[snippet.citation.field_or_chunk_id] = snippet
 
+    def get(self, chunk_id: str) -> EvidenceSnippet | None:
+        """Return the snippet retrieved this conversation for ``chunk_id``, or None if never seen.
+
+        Lets the response serializer rebuild the evidence panel's source cards from the snippet the
+        retriever recorded — carrying the rerank score and presentation metadata that the claim's
+        citation does not.
+
+        Args:
+            chunk_id: The chunk id a final claim cites (its ``SourceRef.resource_id``).
+
+        Returns:
+            The recorded :class:`~copilot.rag.models.EvidenceSnippet`, or None.
+        """
+        return self._snippets.get(chunk_id)
+
     def resolve(self, ref: SourceRef) -> Resolution | None:
         """Ground a guideline citation and identify its chunk in one lookup.
 

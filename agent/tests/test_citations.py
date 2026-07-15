@@ -1,5 +1,33 @@
-from copilot.retrieval import GUIDELINE_RESOURCE_TYPE
-from copilot.schemas import CitationSourceType, SourceRef
+from copilot.main import _build_evidence
+from copilot.rag.models import EvidenceSnippet
+from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
+from copilot.schemas import ChatResponse, CitationSourceType, Claim, GuidelineCitation, SourceRef
+
+
+def _snippet(
+    chunk_id: str, section: str, text: str, score: float, *, year: str = "2022"
+) -> EvidenceSnippet:
+    """A recorded guideline snippet, as the retriever would leave it in the ChunkRegistry."""
+    return EvidenceSnippet(
+        citation=GuidelineCitation(
+            source_id="gina-main-report-2022",
+            page_or_section=section,
+            field_or_chunk_id=chunk_id,
+            quote_or_value=text,
+        ),
+        guideline="asthma",
+        source_url="https://ginasthma.org/2022",
+        year=year,
+        rerank_score=score,
+    )
+
+
+def _guideline_claim(text: str, chunk_id: str, quote: str) -> Claim:
+    """A final claim citing a guideline chunk (as the answerer emits, pre-gate-stamping)."""
+    return Claim(
+        text=text,
+        source=SourceRef(resource_type=GUIDELINE_RESOURCE_TYPE, resource_id=chunk_id, quote=quote),
+    )
 
 # SourceRef.to_citation() projects a GROUNDED (gate-stamped) SourceRef onto the canonical wire
 # Citation. These tests build already-stamped refs (value/label/date set, as the gate leaves them)
@@ -52,3 +80,50 @@ def test_fhir_ref_without_a_field_uses_the_required_fallback() -> None:
     assert citation.source_type is CitationSourceType.FHIR
     assert citation.field_or_chunk_id == "(none)"
     assert citation.quote_or_value == "x"
+
+
+def test_build_evidence_dedupes_by_chunk_and_orders_by_relevance() -> None:
+    # The evidence panel counts distinct SOURCES, not claim sentences: two claims citing the same
+    # chunk collapse to one card, and cards order best-match-first. This is the decoupling that
+    # fixes the "(N) = claim count" defect — a card also carries the score/year/url the claim omits.
+    registry = ChunkRegistry()
+    registry.record_all(
+        [
+            _snippet("c-low", "Key Points", "risk factors for exacerbations", 0.55),
+            _snippet("c-high", "Assessment of asthma", "symptom control has two domains", 0.95),
+        ]
+    )
+    answer = ChatResponse(
+        summary="…",
+        claims=[
+            _guideline_claim("two domains", "c-high", "symptom control has two domains"),
+            _guideline_claim("restates it", "c-high", "symptom control has two domains"),
+            _guideline_claim("exacerbation risks", "c-low", "risk factors for exacerbations"),
+        ],
+    )
+
+    evidence = _build_evidence(answer, registry)
+
+    assert [e["chunk_id"] for e in evidence] == ["c-high", "c-low"]  # deduped, ranked by relevance
+    assert evidence[0]["relevance_score"] == 0.95
+    assert evidence[0]["year"] == "2022"
+    assert evidence[0]["source_url"] == "https://ginasthma.org/2022"
+    assert evidence[0]["quote"] == "symptom control has two domains"
+
+
+def test_build_evidence_excludes_non_guideline_citations() -> None:
+    # Only guideline chunks the answer cites are evidence — a FHIR record claim is a patient fact,
+    # not guideline evidence, so it must not surface as a source card.
+    registry = ChunkRegistry()
+    registry.record_all([_snippet("c1", "Assessment of asthma", "text one", 0.9)])
+    answer = ChatResponse(
+        summary="…",
+        claims=[
+            Claim(
+                text="date of birth",
+                source=SourceRef(resource_type="Patient", resource_id="1", field="birth_date"),
+            )
+        ],
+    )
+
+    assert _build_evidence(answer, registry) == []

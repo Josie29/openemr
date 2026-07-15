@@ -55,6 +55,9 @@ class EvidenceSnippet(BaseModel):
     citation: GuidelineCitation = Field(description="The machine-readable guideline citation")
     guideline: str = Field(description="Topic slug the snippet belongs to")
     source_url: str | None = Field(default=None, description="Public URL of the source guideline")
+    year: str | None = Field(
+        default=None, description="Source publication year (the chunk's `date`), e.g. '2022'"
+    )
     rerank_score: float = Field(
         description="Cohere relevance score in [0, 1]; higher is more relevant to the query"
     )

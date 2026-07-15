@@ -1,6 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.models import Model
@@ -10,8 +11,10 @@ from pydantic_ai.usage import UsageLimits
 
 from copilot.config import ModelTier, Settings, get_settings
 from copilot.fhir.fixtures import FixtureFhirClient
+from copilot.fhir.models import LabDocumentSummary
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
+from copilot.ingestion.extractor import DocumentExtractor, FixtureOcrBackend
 from copilot.ingestion.registry import DocumentFactRegistry
 from copilot.observability import TurnTrace
 from copilot.rag.retriever import FixtureEvidenceRetriever
@@ -23,6 +26,15 @@ logger = logging.getLogger("copilot.evals.runner")
 
 # Override to evaluate a non-default tier (full identifier, e.g. 'anthropic:claude-sonnet-5').
 _EVAL_MODEL_TIER_ENV = "COPILOT_EVAL_MODEL_TIER"
+
+# Committed lab-document fixtures the eval replays for the one both-tools synthesis case, whose
+# patient (Sergio Angulo, pid 23) carries an uploaded lab report. Resolved from the source tree
+# (evals always run from the repo, like the seed bundles under fhir/seed/): parents[3] is the
+# agent/ package root. These are wired ONLY for a patient whose record surfaces a lab document —
+# every other case keeps extraction disabled and unchanged.
+_DOCUMENTS_DIR = Path(__file__).parents[3] / "tests" / "fixtures" / "documents"
+_LAB_PDF_PATH = _DOCUMENTS_DIR / "pdfs" / "sergio-angulo-lab-report.pdf"
+_LAB_OCR_FIXTURE_PATH = _DOCUMENTS_DIR / "extractions" / "sergio-angulo-lab-report.ocr.json"
 
 # The grounding gate exhausted its retries (or the turn hit the tool-call ceiling) without an
 # attributable answer — mirrors the /chat route's refusal so the eval scores the same degraded
@@ -94,6 +106,27 @@ def build_eval_model(settings: Settings) -> Model:
     return AnthropicModel(model_id, provider=provider)
 
 
+def _fixture_extractor_for(lab_documents: list[LabDocumentSummary]) -> DocumentExtractor | None:
+    """Build a deterministic fixture OCR extractor when the patient has an uploaded lab document.
+
+    Keeps evals offline and deterministic: a patient whose record surfaces an uploaded lab report
+    (only Sergio Angulo in the golden set) gets a ``FixtureOcrBackend`` that replays the recorded
+    OCR response — no live Mistral call — so the both-tools synthesis case genuinely exercises
+    ``attach_and_extract``. Every other patient surfaces no lab document, so extraction stays
+    disabled (``None``), unchanged. The single fixture replay is safe because the golden set has
+    exactly one patient with a lab document.
+
+    Args:
+        lab_documents: The patient's uploaded lab-document summaries (from ``get_lab_documents``).
+
+    Returns:
+        A fixture-backed :class:`DocumentExtractor` when a lab document exists, else None.
+    """
+    if not lab_documents:
+        return None
+    return DocumentExtractor(FixtureOcrBackend(str(_LAB_OCR_FIXTURE_PATH)))
+
+
 async def run_case(
     patient_id: str,
     message: str,
@@ -106,8 +139,9 @@ async def run_case(
     Runs the real graph (real Claude model, real grounding gate on every worker + the answer) in
     fixture mode, so the eval exercises genuine model behavior with deterministic, PHI-free data.
     The wiring mirrors ``/chat`` (:mod:`copilot.main`): a fixture FHIR client, a fixture evidence
-    retriever over the in-repo corpus, fresh grounding registries, and the same per-run tool-call
-    ceiling. A degraded turn (gate refusal or tool-call ceiling) is caught and reported as
+    retriever over the in-repo corpus, a fixture OCR extractor for a patient with an uploaded lab
+    document (deterministic replay, no live OCR), fresh grounding registries, and the same per-run
+    tool-call ceiling. A degraded turn (gate refusal or tool-call ceiling) is caught and reported as
     ``refused=True`` rather than raised — a refusal is a scoreable outcome (correct for an
     out-of-scope case, a miss for an answerable one), not a harness error.
 
@@ -121,7 +155,11 @@ async def run_case(
         The composed response, the routing trail, and whether the turn degraded to a refusal.
     """
     settings = settings or get_settings()
-    fhir = fhir or FixtureFhirClient.from_seed()
+    # Serve the fixture lab PDF's bytes so attach_and_extract exercises the real OCR pipeline for
+    # the one patient with an uploaded lab report; harmless for every other patient, whose record
+    # surfaces no lab document to extract. A caller supplying its own fhir client for a lab-document
+    # patient must configure its document_pdf_path likewise.
+    fhir = fhir or FixtureFhirClient.from_seed(document_pdf_path=str(_LAB_PDF_PATH))
     graph = build_graph(build_eval_model(settings))
     deps = GraphDeps(
         fhir=fhir,
@@ -130,11 +168,13 @@ async def run_case(
         retriever=FixtureEvidenceRetriever.from_corpus(settings.rerank_top_n),
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
-        # Evals never process uploaded lab PDFs: an empty document registry and no extractor (the
-        # intake-extractor then reports no document), so runs stay deterministic and make no OCR
-        # calls — matching the fixture-only, PHI-free eval contract.
+        # Extraction is wired deterministically (recorded OCR replay, no live API) only for a
+        # patient whose record surfaces an uploaded lab document — the both-tools synthesis case.
+        # For every other patient the extractor is None, so the intake-extractor reports no document
+        # and the run stays deterministic and OCR-call-free, matching the fixture-only PHI-free
+        # contract.
         documents=DocumentFactRegistry(),
-        extractor=None,
+        extractor=_fixture_extractor_for(await fhir.get_lab_documents(patient_id)),
     )
     try:
         result = await run_graph(

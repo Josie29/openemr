@@ -57,7 +57,7 @@ new capabilities, each a controlled expansion of a Week-1 seam rather than a rep
 | Vector store | **Qdrant** (dedicated Railway service, private networking) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Hybrid retrieval | FastEmbed dense + sparse → Qdrant Universal Query API `Fusion.RRF` | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Reranker | **Cohere Rerank** (`rerank-v4.0-fast`) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
-| Eval gate | 50-case golden set · 5 boolean rubrics · **PR-blocking**, fails on >5% regression | §7 |
+| Eval gate | 51-case golden set · 5 boolean rubrics · **PR-blocking**, fails on >5% regression | §7 |
 | Grounding | Week-1 `output_validator` + `ModelRetry` **ported to each worker + the final answer** | §4; [`ARCHITECTURE.md`](ARCHITECTURE.md) §7 |
 
 **The through-line.** Week 2 is deliberately *narrower than the original spec* — two document
@@ -96,7 +96,7 @@ so this expansion would be additive.
 | **Grounding gate** | One `output_validator` on the single agent's answer | Same gate **ported to each worker** + the final answer |
 | **Services on Railway** | OpenEMR · agent · MySQL | + **Qdrant** service · Cohere API · document storage |
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
-| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **50 cases, 5 boolean rubrics, PR-blocking, >5% = fail** |
+| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **51 cases, 5 boolean rubrics, PR-blocking, >5% = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs, FHIR writes |
 | **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
 
@@ -493,8 +493,10 @@ evaluators, in a **report-only** CI workflow that ran only on `qa → main` prom
 ([`ARCHITECTURE.md`](ARCHITECTURE.md) §11, `should_fail_on_regression: false`). Week 2 hardens
 this into the gate the PRD demands:
 
-- **50-case golden set** exercising extraction, evidence retrieval, citations, refusals, and
-  missing-data behavior.
+- **51-case golden set** exercising extraction, evidence retrieval, citations, refusals, and
+  missing-data behavior — including one both-tools synthesis case (`angulo-lab-ckd-nsaid`) that
+  fires the vision extractor (`attach_and_extract`) and the retriever (`search_guidelines`) in a
+  single turn.
 - **Five boolean rubrics** (booleans, not 1–10 ratings, so failures are actionable):
   `schema_valid` · `citation_present` · `factually_consistent` · `safe_refusal` ·
   `no_phi_in_logs`.
@@ -502,16 +504,18 @@ this into the gate the PRD demands:
   rubric category **regresses by more than 5%** or drops below its pass threshold.
 
 > **As-built (JOS-50).** The eval harness now runs the **supervisor graph** (§4); the Week-1 single
-> agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **50-case golden
+> agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **51-case golden
 > set** lives in `agent/src/copilot/evals/cases.py`, scored by the five rubrics above across the four
 > fixture patients and the 8-topic guideline corpus. Every case is **falsifiable** (a plausible
 > failure tied to a primary rubric — each rubric has a floor of cases that *can* fail it),
 > **fixture-verified** (`verify_cases.py` + its test confirm each case's ground truth against the
 > fixtures/corpus — a free, model-call-free guard, so the set cannot silently rot), **deterministic**
-> (fixture FHIR + fixture retriever), and **non-redundant** (unique primary-rubric × mechanism ×
-> patient × topic). **Cost discipline:** the CI gate runs only the **3-case subset**
-> (`copilot-golden-ci`, ~$0.10/run); the full 50 (`copilot-golden-v1`) is an on-demand,
-> approval-gated run (~$2). Still **report-only** (`should_fail_on_regression: false`) pending one
+> (fixture FHIR + fixture retriever + fixture OCR extractor — the one case with an uploaded lab
+> document replays a recorded OCR response, so extraction is exercised with no live API call), and
+> **non-redundant** (unique primary-rubric × mechanism × patient × topic). **Cost discipline:** the
+> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 51
+> (`copilot-golden-v1`) is an on-demand, approval-gated run (~$2). Still **report-only**
+> (`should_fail_on_regression: false`) pending one
 > approved calibration run to set the thresholds — flipping to the PR-blocking >5% gate above is a
 > single config change.
 
@@ -548,7 +552,7 @@ LLM and Mistral OCR 4 extractor responses against fixture documents.
 | **Integration** | Full **ingestion→answer path** with fixture PDFs/form images and a **stubbed Mistral OCR 4 extractor** (fixture schema-mode responses — typed fields + native bboxes + confidence) | The store→extract→derive→cite chain breaking at a seam (e.g. a derived Observation losing its provenance link, §6; a native bbox failing to thread into the citation record) |
 | **Integration** | RAG pipeline: FastEmbed → Qdrant hybrid → Cohere rerank, against a fixture corpus | Retrieval returning wrong/empty results, or fusion/rerank silently degrading |
 | **Integration** | Supervisor↔worker **contract tests** (typed handoff payloads) | A handoff payload drifting from its Pydantic contract — the interface breaking undetected |
-| **Eval (golden set)** | Agent *behavior* — the 5 rubrics over 50 cases (§7) | The behavioral regressions the hard gate exists to catch |
+| **Eval (golden set)** | Agent *behavior* — the 5 rubrics over 51 cases (§7) | The behavioral regressions the hard gate exists to catch |
 | **CI meta** | Dependency audit + security scan on every PR; **PHI-detection check** on logs/traces/eval data | Vulnerable dependencies shipping; PHI leaking into observability (§9) |
 
 **Not tested, and why:**

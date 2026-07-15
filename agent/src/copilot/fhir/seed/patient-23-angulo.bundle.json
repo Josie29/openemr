@@ -681,6 +681,41 @@
           ]
         }
       }
+    },
+    {
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "labreport-2026-07",
+        "status": "current",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "11502-2",
+              "display": "Laboratory report"
+            }
+          ]
+        },
+        "category": [
+          {
+            "text": "Lab Report"
+          }
+        ],
+        "subject": {
+          "reference": "Patient/23",
+          "type": "Patient"
+        },
+        "date": "2026-07-09T07:05:00Z",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "application/pdf",
+              "title": "Cedar Valley Reference Laboratory - Laboratory Report",
+              "url": "Binary/labreport-2026-07"
+            }
+          }
+        ]
+      }
     }
   ]
 }

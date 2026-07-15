@@ -3,15 +3,15 @@ from pathlib import Path
 
 from copilot.fhir.models import PatientDemographics
 from copilot.ingestion.extractor import ExtractedDocument, map_lab_report
+from copilot.ingestion.pdf_geometry import extract_word_boxes
 from copilot.ingestion.registry import DOCUMENT_FACT_RESOURCE_TYPE, DocumentFactRegistry
 from copilot.ingestion.schemas import BoundingBox, DocType
 from copilot.schemas import Claim, FhirCitation, LabPdfCitation, SourceRef
 from copilot.verification import FetchLog, ground_claims
 
-_LAB_OCR = (
-    Path(__file__).parent
-    / "fixtures/documents/extractions/sergio-angulo-lab-report.ocr.json"
-)
+_DOCS = Path(__file__).parent / "fixtures/documents"
+_LAB_OCR = _DOCS / "extractions/sergio-angulo-lab-report.ocr.json"
+_LAB_PDF = _DOCS / "pdfs/sergio-angulo-lab-report.pdf"
 
 
 def test_stamp_strips_model_authored_box_on_fhir_claim() -> None:
@@ -50,12 +50,11 @@ def test_stamp_keeps_box_on_real_document_fact() -> None:
 
     Confirms fixing the fabricated-box gap does not regress click-to-source for real document facts.
     """
-    report, page_dpi = map_lab_report(json.loads(_LAB_OCR.read_text()))
+    words = extract_word_boxes(_LAB_PDF.read_bytes())
+    report = map_lab_report(json.loads(_LAB_OCR.read_text()), words)
     registry = DocumentFactRegistry()
     handles = registry.record(
-        ExtractedDocument(
-            document_id="doc-1", doc_type=DocType.LAB_PDF, report=report, page_dpi=page_dpi
-        )
+        ExtractedDocument(document_id="doc-1", doc_type=DocType.LAB_PDF, report=report)
     )
     handle = next(h for h in handles if h.test_name == "Creatinine")
     assert handle.resource_type == DOCUMENT_FACT_RESOURCE_TYPE

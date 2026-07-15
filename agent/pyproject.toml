@@ -15,6 +15,10 @@ dependencies = [
     # Hybrid RAG (JOS-53): Qdrant vector store + in-client FastEmbed (dense+sparse), Cohere rerank.
     "qdrant-client[fastembed]>=1.18,<2",
     "cohere>=7.0,<8",
+    # Click-to-source geometry (JOS-54): reads a digital PDF's text layer for exact per-value word
+    # boxes in points. MIT-licensed (pdfminer.six) with no otel deps, so unlike mistralai it is safe
+    # in the base install; extraction still degrades gracefully (coarse OCR estimate) without it.
+    "pdfplumber>=0.11",
 ]
 
 [project.optional-dependencies]
@@ -68,5 +72,5 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 # mistralai is an optional extra (not installed in the agent-test CI, which uses only [dev]) and
 # ships no type stubs; the extractor imports it lazily behind this ignore.
-module = ["fhir.resources.*", "langfuse.*", "mistralai.*"]
+module = ["fhir.resources.*", "langfuse.*", "mistralai.*", "pdfplumber.*"]
 ignore_missing_imports = true

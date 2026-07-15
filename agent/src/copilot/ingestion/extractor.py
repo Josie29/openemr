@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field
 
 from copilot.config import ExtractorMode, Settings
+from copilot.ingestion.pdf_geometry import Word, extract_word_boxes, locate_value_box
 from copilot.ingestion.schemas import (
     AbnormalFlag,
     BoundingBox,
@@ -21,6 +22,8 @@ from copilot.ingestion.schemas import (
 )
 
 logger = logging.getLogger("copilot")
+
+_POINTS_PER_INCH = 72.0
 
 
 class ExtractionError(RuntimeError):
@@ -200,17 +203,17 @@ class FixturePdfByteSource:
 
 @dataclass(frozen=True)
 class ExtractedDocument:
-    """One document's strict extraction plus the page DPI needed to place its boxes.
+    """One document's strict extraction: the cited lab facts, boxed for click-to-source.
 
-    ``report`` carries the cited lab facts with **native-pixel** boxes (per the ingestion schema);
-    ``page_dpi`` maps each 1-based page to its render DPI so the document-fact registry can convert
-    those boxes to the PDF points the click-to-source overlay expects (the JOS-57 seam).
+    ``report`` carries each lab fact with its ``bounding_box`` already in **PDF points** (top-left
+    origin) — the exact space the overlay renders in — so nothing downstream converts coordinates
+    (the JOS-57 seam). Boxes come from the PDF text layer where present, else the coarse OCR
+    row-estimate.
     """
 
     document_id: str
     doc_type: DocType
     report: LabReport
-    page_dpi: dict[int, float]
 
 
 class DocumentExtractor:
@@ -235,10 +238,11 @@ class DocumentExtractor:
         """
         pdf_bytes = self._byte_source.fetch(document_id)
         raw = await self._ocr.process(pdf_bytes, doc_type)
-        report, page_dpi = map_lab_report(raw)
-        return ExtractedDocument(
-            document_id=document_id, doc_type=doc_type, report=report, page_dpi=page_dpi
-        )
+        # The PDF text layer gives exact word boxes (points); empty for a scanned/image-only PDF,
+        # in which case the mapper falls back to the coarse OCR row-estimate.
+        words = extract_word_boxes(pdf_bytes)
+        report = map_lab_report(raw, words)
+        return ExtractedDocument(document_id=document_id, doc_type=doc_type, report=report)
 
 
 def build_extractor(settings: Settings) -> DocumentExtractor | None:
@@ -270,25 +274,25 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
     return DocumentExtractor(ocr, byte_source)
 
 
-# --- OCR response -> strict LabReport mapping --------------------------------------------------
+# --- OCR values + PDF geometry -> strict LabReport ---------------------------------------------
 #
-# Mistral OCR 4 returns the field VALUES in `document_annotation` (schema mode) but only WHOLE-TABLE
-# geometry — the lab table is a single `table` block; the HTML table output carries no per-cell
-# coordinates. So a per-value box is ESTIMATED: split the table block's y-range by the table's row
-# order (from its HTML) and give each value a full-width band at its row (the chosen strategy — a
-# correct row band, not a tight box). Boxes are emitted in native page pixels per the ingestion
-# schema; the document-fact registry converts them to PDF points using the page DPI.
+# Mistral OCR gives the field VALUES (`document_annotation`, schema mode) but only whole-table
+# geometry. Exact per-value boxes come from the PDF's own TEXT LAYER (pdfplumber, points): each
+# Mistral value is matched to its word on the row its test name anchors (see pdf_geometry). When the
+# PDF has no text layer (a scan), we fall back to the coarse OCR row-estimate (native pixels)
+# converted to points here. Every emitted box is in PDF points — the space the overlay renders in.
 
 
-def map_lab_report(ocr: dict[str, Any]) -> tuple[LabReport, dict[int, float]]:
-    """Map a raw Mistral OCR response into a strict ``LabReport`` with estimated per-row boxes.
+def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
+    """Map a Mistral OCR response + PDF word boxes into a strict ``LabReport`` (boxes in points).
 
     Args:
         ocr: The raw OCR response dict (``document_annotation`` + ``pages[].blocks``/``tables``).
+        words: The PDF text-layer words (from :func:`extract_word_boxes`); empty for a scanned PDF,
+            in which case each value falls back to the coarse OCR row-estimate.
 
     Returns:
-        A ``(LabReport, page_dpi)`` pair — ``page_dpi`` maps each 1-based page to its render DPI so
-        the registry can convert the native-pixel boxes to PDF points.
+        The strict :class:`LabReport`; every ``LabResult``'s ``bounding_box`` is in PDF points.
 
     Raises:
         ExtractionError: If the response has no usable page, or ``document_annotation`` is present
@@ -312,15 +316,14 @@ def map_lab_report(ocr: dict[str, Any]) -> tuple[LabReport, dict[int, float]]:
     page = pages[0]
     page_no = int(page.get("index", 0)) + 1  # `index` is 0-based; BoundingBox.page is 1-based.
     dims = page.get("dimensions") or {}
-    dpi = float(dims.get("dpi") or 72.0)
+    dpi = float(dims.get("dpi") or _POINTS_PER_INCH)
 
+    # Fallback geometry (native pixels), used only where the text layer has no word for a value.
     table_box = _find_table_box(page)
-    # Coarse whole-page box, used only when there is no table block to locate rows on (finding #4):
-    # surface the values on a page-wide overlay rather than dropping the clinical facts entirely.
     fallback_box = _page_box(page, page_no)
-    if table_box is None and raw_results:
+    if not words and raw_results:
         logger.warning(
-            "OCR response has no table block; using a whole-page fallback box for lab values",
+            "PDF has no text layer; using the coarse OCR row-estimate for box geometry",
             extra={"result_count": len(raw_results)},
         )
     rows = _parse_table_rows(_table_html(page))
@@ -328,22 +331,49 @@ def map_lab_report(ocr: dict[str, Any]) -> tuple[LabReport, dict[int, float]]:
     total_rows = len(rows) or 1
 
     results: list[LabResult] = []
+    cursor = 0  # advances through `words` so repeated test names map to successive rows, in order.
     for ordinal, raw in enumerate(raw_results):
         if not isinstance(raw, dict):
             continue  # skip a malformed (non-object) result entry rather than crashing the turn
-        box = _estimate_row_box(
-            str(raw.get("test_name", "")), ordinal, len(raw_results),
-            table_box, name_to_index, total_rows, page_no,
-        ) or fallback_box
-        if box is None:
-            # No table geometry and no usable page dimensions — drop rather than fabricate a box.
-            logger.warning(
-                "dropping lab result with no locatable box",
-                extra={"test": raw.get("test_name")},
+        test_name = str(raw.get("test_name", ""))
+        value = str(raw.get("value", "")).strip()
+        box: BoundingBox | None
+        # PRIMARY: the exact box from the PDF text layer, already in points.
+        located = locate_value_box(test_name, value, words, cursor)
+        if located is not None:
+            box, cursor = located
+        else:
+            # FALLBACK: the coarse OCR row-estimate (native pixels), converted to points.
+            estimate = (
+                _estimate_row_box(
+                    test_name, ordinal, len(raw_results),
+                    table_box, name_to_index, total_rows, page_no,
+                )
+                or fallback_box
             )
+            box = _px_to_points(estimate, dpi) if estimate is not None else None
+        if box is None:
+            # No text-layer word, no table geometry, no page box — drop rather than fabricate.
+            logger.warning("dropping lab result with no locatable box", extra={"test": test_name})
             continue
         results.append(_build_lab_result(raw, box, page))
-    return LabReport(results=results), {page_no: dpi}
+    return LabReport(results=results)
+
+
+def _px_to_points(box: BoundingBox, dpi: float) -> BoundingBox:
+    """Convert a native-pixel box (OCR render space) to PDF points: ``point = pixel * 72 / dpi``.
+
+    Only the fallback OCR row-estimate needs this — text-layer boxes are already in points. Keeps
+    every emitted box in one coordinate space (points) so nothing downstream converts again.
+    """
+    scale = _POINTS_PER_INCH / dpi if dpi else 1.0
+    return BoundingBox(
+        page=box.page,
+        x=box.x * scale,
+        y=box.y * scale,
+        width=box.width * scale,
+        height=box.height * scale,
+    )
 
 
 def _build_lab_result(raw: dict[str, Any], box: BoundingBox, page: dict[str, Any]) -> LabResult:

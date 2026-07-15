@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from copilot.fhir.models import ResourceIdentity
 from copilot.ingestion.extractor import ExtractedDocument
-from copilot.ingestion.schemas import BoundingBox, LabResult
+from copilot.ingestion.schemas import LabResult
 from copilot.schemas import SourceRef
 from copilot.verification import Resolution
 
@@ -15,8 +15,6 @@ from copilot.verification import Resolution
 # resource type is unique to document facts and never collides with the FetchLog. `to_citation`
 # routes a stamped SourceRef to a LabPdfCitation on the presence of the bounding box, not this tag.
 DOCUMENT_FACT_RESOURCE_TYPE = "Observation"
-
-_POINTS_PER_INCH = 72.0
 
 
 class LabFactHandle(BaseModel):
@@ -41,11 +39,10 @@ class LabFactHandle(BaseModel):
 
 @dataclass(frozen=True)
 class _RecordedFact:
-    """One extracted lab fact plus the context needed to ground and locate it."""
+    """One extracted lab fact plus the source document it grounds against."""
 
     result: LabResult
     document_id: str
-    dpi: float
 
 
 @dataclass
@@ -58,7 +55,8 @@ class DocumentFactRegistry:
     grounding gate that checks FHIR and guideline claims also checks document facts. A claim grounds
     only when it cites a fact recorded this turn; its value is stamped from the recorded fact (never
     the model's say-so), and the click-to-source overlay provenance — document id, page, and box
-    **converted to PDF points** — is stamped alongside it for the sidebar (the JOS-57 seam).
+    (already in PDF points from the extractor) — is stamped alongside it for the sidebar (the JOS-57
+    seam).
     """
 
     _facts: dict[str, _RecordedFact] = field(default_factory=dict)
@@ -67,7 +65,7 @@ class DocumentFactRegistry:
         """Record an extracted document's lab facts and return their citable handles.
 
         Args:
-            extracted: One document's strict extraction (report + per-page DPI).
+            extracted: One document's strict extraction (a cited ``LabReport``).
 
         Returns:
             One :class:`LabFactHandle` per lab fact, for the model to state and cite.
@@ -75,10 +73,8 @@ class DocumentFactRegistry:
         handles: list[LabFactHandle] = []
         for ordinal, result in enumerate(extracted.report.results):
             resource_id = f"{extracted.document_id}#{ordinal}"
-            dpi = extracted.page_dpi.get(result.citation.bounding_box.page, _POINTS_PER_INCH) \
-                if result.citation.bounding_box is not None else _POINTS_PER_INCH
             self._facts[resource_id] = _RecordedFact(
-                result=result, document_id=extracted.document_id, dpi=dpi
+                result=result, document_id=extracted.document_id
             )
             handles.append(
                 LabFactHandle(
@@ -110,7 +106,7 @@ class DocumentFactRegistry:
         if fact is None:
             return None
         result = fact.result
-        box = result.citation.bounding_box
+        box = result.citation.bounding_box  # already in PDF points from the extractor
         return Resolution(
             value=result.value,
             identity=ResourceIdentity(
@@ -120,23 +116,5 @@ class DocumentFactRegistry:
             ),
             document_id=fact.document_id,
             page=box.page if box is not None else None,
-            bounding_box=_to_points(box, fact.dpi) if box is not None else None,
+            bounding_box=box,
         )
-
-
-def _to_points(box: BoundingBox, dpi: float) -> BoundingBox:
-    """Convert a native-pixel box to PDF points (``point = pixel * 72 / dpi``).
-
-    The overlay renders the page with pdf.js and scales as if the box is in PDF user-space points
-    (72-DPI), so the extractor's native-pixel geometry is converted here at the grounding seam — the
-    ingestion ``BoundingBox`` stays native-pixel per its schema, the stamped ``SourceRef`` carries
-    points (the JOS-57 coordinate-space decision).
-    """
-    scale = _POINTS_PER_INCH / dpi if dpi else 1.0
-    return BoundingBox(
-        page=box.page,
-        x=box.x * scale,
-        y=box.y * scale,
-        width=box.width * scale,
-        height=box.height * scale,
-    )

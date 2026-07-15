@@ -6,6 +6,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from copilot.fhir.fixtures import FixtureFhirClient
+from copilot.fhir.models import LabDocumentSummary
 from copilot.graph.deps import GraphDeps
 from copilot.graph.outputs import ExtractorOutput
 from copilot.graph.workers import build_intake_extractor
@@ -215,6 +216,8 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
         documents=DocumentFactRegistry(),
+        # Pre-seed discovery: attach_and_extract only extracts a doc list_lab_documents returned.
+        lab_documents_cache=[LabDocumentSummary(resource_id="doc-1", title="lab.pdf")],
     )
 
     state = {"extracted": False}
@@ -250,6 +253,93 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
     assert source.document_id == "doc-1"
     assert source.bounding_box is not None
     assert source.to_citation().source_type is CitationSourceType.LAB_PDF
+
+
+class _SpyExtractor(DocumentExtractor):
+    """A DocumentExtractor that counts extract() calls, delegating to the fixture pipeline."""
+
+    def __init__(self) -> None:
+        super().__init__(ocr=FixtureOcrBackend(str(_LAB_OCR)))
+        self.calls = 0
+
+    async def extract(
+        self, document_id: str, doc_type: DocType, byte_source: object
+    ) -> ExtractedDocument:
+        self.calls += 1
+        return await super().extract(document_id, doc_type, byte_source)  # type: ignore[arg-type]
+
+
+def _extractor_deps(extractor: DocumentExtractor, cache: list[LabDocumentSummary]) -> GraphDeps:
+    return GraphDeps(
+        fhir=FixtureFhirClient.from_seed(str(_LAB_PDF)),
+        patient_id="1",
+        correlation_id="test-cid",
+        retriever=StubRetriever(snippets=()),
+        extractor=extractor,
+        fetched=FetchLog(),
+        chunks=ChunkRegistry(),
+        documents=DocumentFactRegistry(),
+        lab_documents_cache=cache,
+    )
+
+
+async def test_attach_and_extract_ignores_undiscovered_document() -> None:
+    """A document_id list_lab_documents never surfaced is a no-op: no Binary fetch, no OCR, no fact.
+
+    Guards against the model guessing an id and wasting the expensive extraction hop.
+    """
+    spy = _SpyExtractor()
+    deps = _extractor_deps(spy, [LabDocumentSummary(resource_id="real-doc", title="lab.pdf")])
+    state = {"tried": False}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if not state["tried"]:
+            state["tried"] = True
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="attach_and_extract", args={"document_id": "ghost"})]
+            )
+        out = ExtractorOutput(summary="No lab document available.", claims=[])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=_final_tool_name(info), args=out.model_dump(mode="json"))]
+        )
+
+    result = await build_intake_extractor(FunctionModel(respond)).run("synthesize", deps=deps)
+    assert spy.calls == 0  # never fetched/OCR'd the guessed id
+    assert result.output.claims == []  # nothing fabricated
+
+
+async def test_attach_and_extract_memoizes_per_document() -> None:
+    """Re-extracting the same document in a turn returns the recorded handles — OCR runs once."""
+    spy = _SpyExtractor()
+    deps = _extractor_deps(spy, [LabDocumentSummary(resource_id="doc-1", title="lab.pdf")])
+    state = {"i": 0}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        state["i"] += 1
+        if state["i"] <= 2:  # call attach_and_extract twice on the same doc
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="attach_and_extract", args={"document_id": "doc-1"})]
+            )
+        out = ExtractorOutput(
+            summary="Glucose high.",
+            claims=[
+                Claim(
+                    text="Fasting glucose 108 (high).",
+                    source=SourceRef(
+                        resource_type=DOCUMENT_FACT_RESOURCE_TYPE,
+                        resource_id="doc-1#0",
+                        field="value",
+                    ),
+                )
+            ],
+        )
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=_final_tool_name(info), args=out.model_dump(mode="json"))]
+        )
+
+    result = await build_intake_extractor(FunctionModel(respond)).run("synthesize", deps=deps)
+    assert spy.calls == 1  # extracted once despite two attach_and_extract calls
+    assert result.output.claims[0].source.value == "108"  # the memoized fact still grounds
 
 
 def _ocr_with(results: object, blocks: list[dict[str, object]]) -> dict[str, object]:

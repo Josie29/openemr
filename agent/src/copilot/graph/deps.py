@@ -1,9 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from copilot.fhir.client import FhirClient
 from copilot.fhir.models import LabDocumentSummary
 from copilot.ingestion.extractor import DocumentExtractor
-from copilot.ingestion.registry import DocumentFactRegistry
+from copilot.ingestion.registry import DocumentFactRegistry, LabFactHandle
 from copilot.rag.retriever import EvidenceRetriever
 from copilot.retrieval import ChunkRegistry
 from copilot.verification import FetchLog
@@ -41,3 +41,6 @@ class GraphDeps:
     # Per-turn memo for list_lab_documents: the discovery FHIR read happens once, so repeated tool
     # calls (e.g. a model retrying on an empty result) are cheap cache hits, not extra round-trips.
     lab_documents_cache: list[LabDocumentSummary] | None = None
+    # Per-turn memo for attach_and_extract, keyed by document id: OCR (Binary fetch + Mistral) is
+    # the expensive hop, so re-extracting the same document in a turn returns the recorded handles.
+    extracted_documents: dict[str, list[LabFactHandle]] = field(default_factory=dict)

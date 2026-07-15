@@ -1,10 +1,11 @@
 from contextlib import ExitStack
 
 import pytest
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.usage import UsageLimits
 
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.graph.deps import GraphDeps
@@ -160,9 +161,11 @@ async def test_supervisor_routes_workers_and_composes_grounded_answer() -> None:
     deps = _deps()
 
     with ExitStack() as stack:
-        stack.enter_context(graph.router.override(model=_router_model(
-            [Route.EXTRACT_INTAKE, Route.RETRIEVE_EVIDENCE, Route.ANSWER]
-        )))
+        stack.enter_context(
+            graph.router.override(
+                model=_router_model([Route.EXTRACT_INTAKE, Route.RETRIEVE_EVIDENCE, Route.ANSWER])
+            )
+        )
         stack.enter_context(graph.extractor.override(model=_extractor_model()))
         stack.enter_context(graph.retriever.override(model=_retriever_model(_GUIDELINE_QUOTE)))
         stack.enter_context(graph.answerer.override(model=_answerer_model()))
@@ -180,6 +183,30 @@ async def test_supervisor_routes_workers_and_composes_grounded_answer() -> None:
     assert fhir_claim.source.value == "1958-03-12"  # stamped from the fetched Patient record
     assert guideline_claim.source.value == _GUIDELINE_QUOTE  # matched in the retrieved chunk
     assert guideline_claim.source.label == "ada-soc-2025"  # chunk identity (source id) stamped
+
+
+async def test_tool_call_ceiling_is_enforced_per_turn() -> None:
+    """The tool-call ceiling caps the whole TURN, not each agent run.
+
+    The extractor and retriever each make exactly one real tool call, so their cumulative (2) trips
+    a per-turn limit of 1 — whereas the old behavior (fresh limit per agent run) would let every
+    single-call run through, letting a runaway spend ~max_hops x the limit before degrading.
+    """
+    graph = build_graph(TestModel())
+    deps = _deps()
+    with ExitStack() as stack:
+        stack.enter_context(
+            graph.router.override(
+                model=_router_model([Route.EXTRACT_INTAKE, Route.RETRIEVE_EVIDENCE, Route.ANSWER])
+            )
+        )
+        stack.enter_context(graph.extractor.override(model=_extractor_model()))
+        stack.enter_context(graph.retriever.override(model=_retriever_model(_GUIDELINE_QUOTE)))
+        stack.enter_context(graph.answerer.override(model=_answerer_model()))
+        with pytest.raises(UsageLimitExceeded):
+            await run_graph(
+                graph, "q", deps, TurnTrace(None), usage_limits=UsageLimits(tool_calls_limit=1)
+            )
 
 
 async def test_evidence_worker_gate_rejects_ungrounded_quote() -> None:

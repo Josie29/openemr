@@ -103,31 +103,35 @@ async def run_graph(
     """
     reports: list[WorkerReport] = []
     routes: list[RouteDecision] = []
+    # One shared usage accumulator threaded into every agent run this turn, so usage_limits (the
+    # tool-call ceiling) is enforced against the cumulative total — a per-TURN cap, not a fresh
+    # budget per router hop / worker (which made the effective ceiling ~max_hops x the limit). It
+    # also sums token usage across runs for pricing, so nothing needs to be added afterwards.
     usage = RunUsage()
 
     for _ in range(max_hops):
         routing = await graph.router.run(
-            _router_input(message, reports), deps=deps, usage_limits=usage_limits
+            _router_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
         )
-        usage += routing.usage
         decision = routing.output
         routes.append(decision)
         turn.routed(decision.route.value, decision.reason)
         if decision.route is Route.ANSWER:
             break
         if decision.route is Route.EXTRACT_INTAKE:
-            extracted = await graph.extractor.run(message, deps=deps, usage_limits=usage_limits)
-            usage += extracted.usage
+            extracted = await graph.extractor.run(
+                message, deps=deps, usage=usage, usage_limits=usage_limits
+            )
             reports.append(("intake-extractor", extracted.output))
         elif decision.route is Route.RETRIEVE_EVIDENCE:
-            retrieved = await graph.retriever.run(message, deps=deps, usage_limits=usage_limits)
-            usage += retrieved.usage
+            retrieved = await graph.retriever.run(
+                message, deps=deps, usage=usage, usage_limits=usage_limits
+            )
             reports.append(("evidence-retriever", retrieved.output))
 
     answered = await graph.answerer.run(
-        _answerer_input(message, reports), deps=deps, usage_limits=usage_limits
+        _answerer_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
     )
-    usage += answered.usage
     return GraphResult(answer=answered.output, routes=routes, usage=usage)
 
 

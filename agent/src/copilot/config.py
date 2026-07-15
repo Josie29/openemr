@@ -30,6 +30,18 @@ class FhirClientMode(StrEnum):
     HTTP = "http"
 
 
+class ExtractorMode(StrEnum):
+    """Which document-extraction backend the service wires up (JOS-54, W2_ARCH §3.1).
+
+    ``MISTRAL`` runs live Mistral OCR (``mistral-ocr-latest``) in schema mode against the document
+    bytes. ``FIXTURE`` replays a recorded OCR response (``*.ocr.json``) with no live API call — for
+    tests and offline dev, mirroring ``FhirClientMode.FIXTURE`` / ``RetrievalMode.FIXTURE``.
+    """
+
+    MISTRAL = "mistral"
+    FIXTURE = "fixture"
+
+
 class RetrievalMode(StrEnum):
     """Which ``EvidenceRetriever`` implementation the service wires up (JOS-53, W2_ARCH §5).
 
@@ -120,6 +132,31 @@ class Settings(BaseSettings):
     # tune empirically once the 50-case eval set exists.
     retrieval_prefetch_k: int = 20
     rerank_top_n: int = 5
+
+    # Document extraction (JOS-54 — W2_ARCHITECTURE.md §3.1). The intake-extractor's
+    # attach_and_extract tool OCRs an uploaded lab PDF into cited lab facts. Defaults to MISTRAL so
+    # the deployed service runs real OCR; tests/offline dev opt into FIXTURE (replays a recorded
+    # response) via the settings override. Accept the Mistral SDK's native MISTRAL_API_KEY as well
+    # as the COPILOT_-prefixed form, matching the anthropic/cohere key handling above.
+    extractor_mode: ExtractorMode = ExtractorMode.MISTRAL
+    mistral_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MISTRAL_API_KEY", "COPILOT_MISTRAL_API_KEY"),
+    )
+    # The document byte-source for the demo slice: the committed lab PDF whose bytes are fed to the
+    # OCR backend when a lab document is extracted. Production fetches the bytes from OpenEMR by
+    # document id (deferred — a scope wall, see the seam spec); until then the real document id is
+    # discovered live but the bytes come from this fixture. Null disables extraction.
+    document_pdf_path: str | None = Field(
+        default=None,
+        description="Path to the demo lab PDF used as the extractor's byte-source.",
+    )
+    # FIXTURE mode only: the recorded Mistral OCR response (`*.ocr.json`) the FixtureOcrBackend
+    # replays instead of calling the live API, so extraction tests are deterministic and offline.
+    ocr_fixture_path: str | None = Field(
+        default=None,
+        description="Path to a recorded OCR response replayed in FIXTURE extractor mode.",
+    )
 
     # Hard ceiling on tool calls in a single agent turn. Bounds cost/latency: without it the agent
     # can loop a tool (e.g. brute-forcing get_encounter_note across a patient with 90+ encounters)

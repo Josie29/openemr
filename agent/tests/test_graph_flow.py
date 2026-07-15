@@ -12,6 +12,7 @@ from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.graph.routing import Route, RouteDecision
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import build_evidence_retriever
+from copilot.ingestion.registry import DocumentFactRegistry
 from copilot.observability import TurnTrace
 from copilot.rag.models import EvidenceSnippet
 from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
@@ -51,8 +52,10 @@ def _deps() -> GraphDeps:
         patient_id="1",
         correlation_id="test-cid",
         retriever=StubRetriever(snippets=(_SNIPPET,)),
+        extractor=None,
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
+        documents=DocumentFactRegistry(),
     )
 
 

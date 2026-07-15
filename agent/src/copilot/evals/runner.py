@@ -12,6 +12,7 @@ from copilot.config import ModelTier, Settings, get_settings
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
+from copilot.ingestion.registry import DocumentFactRegistry
 from copilot.observability import TurnTrace
 from copilot.rag.retriever import FixtureEvidenceRetriever
 from copilot.retrieval import ChunkRegistry
@@ -129,6 +130,11 @@ async def run_case(
         retriever=FixtureEvidenceRetriever.from_corpus(settings.rerank_top_n),
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
+        # Evals never process uploaded lab PDFs: an empty document registry and no extractor (the
+        # intake-extractor then reports no document), so runs stay deterministic and make no OCR
+        # calls — matching the fixture-only, PHI-free eval contract.
+        documents=DocumentFactRegistry(),
+        extractor=None,
     )
     try:
         result = await run_graph(

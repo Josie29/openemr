@@ -141,14 +141,20 @@ class FhirPatientDocumentReferenceService extends FhirServiceBase
 
             unset($openEMRSearchParameters['category']);
         }
-        if (isset($openEMRSearchParameters['patient'])) {
-            // make sure that no other modifier such as NOT_EQUALS, OR missing=true is sent which would let system file names be
-            // leaked out in the API
-            $openEMRSearchParameters['patient']->setModifier(SearchModifier::EXACT);
+        // The patient-context search field is keyed by its ServiceField name ('puuid'), not 'patient'
+        // (see getPatientContextSearchField()). Checking 'patient' here never matched, so a
+        // patient-scoped request always fell through to the else branch below and added the
+        // puuid-MISSING filter. On MySQL that filter's `CAST(puuid AS CHAR) != ''` evaluates to false
+        // for a BINARY(16) uuid (the cast yields an empty string), silently dropping EVERY uploaded
+        // document from the patient's DocumentReference results. (MariaDB casts the bytes, hiding it.)
+        if (isset($openEMRSearchParameters['puuid'])) {
+            // A patient-scoped request: force EXACT so no NOT_EQUALS/missing modifier can leak system
+            // files, and skip the fallback filter below.
+            $openEMRSearchParameters['puuid']->setModifier(SearchModifier::EXACT);
         } else {
-            // make sure we only return documents that are tied to patients
-            $openEMRSearchParameters['patient'] = new TokenSearchField('puuid', [new TokenSearchValue(false, null)]);
-            $openEMRSearchParameters['patient']->setModifier(SearchModifier::MISSING);
+            // No patient filter (a non-patient request): restrict to documents tied to a patient.
+            $openEMRSearchParameters['puuid'] = new TokenSearchField('puuid', [new TokenSearchValue(false, null)]);
+            $openEMRSearchParameters['puuid']->setModifier(SearchModifier::MISSING);
         }
         // we need to exclude the adi codes here as those are handled by another service
         // going to use a NOT_EQUALS_EXACT modifier on a string field for this

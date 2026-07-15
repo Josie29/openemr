@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from copilot.fhir.client import FhirClient
+from copilot.fhir.models import LabDocumentSummary
 from copilot.ingestion.extractor import DocumentExtractor
 from copilot.ingestion.registry import DocumentFactRegistry
 from copilot.rag.retriever import EvidenceRetriever
@@ -37,3 +38,6 @@ class GraphDeps:
     chunks: ChunkRegistry
     documents: DocumentFactRegistry
     extractor: DocumentExtractor | None
+    # Per-turn memo for list_lab_documents: the discovery FHIR read happens once, so repeated tool
+    # calls (e.g. a model retrying on an empty result) are cheap cache hits, not extra round-trips.
+    lab_documents_cache: list[LabDocumentSummary] | None = None

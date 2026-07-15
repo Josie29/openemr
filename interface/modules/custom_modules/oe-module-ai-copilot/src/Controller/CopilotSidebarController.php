@@ -71,6 +71,8 @@ final readonly class CopilotSidebarController
             'chatUrl' => $this->config->chatUrl(),
             // Same-origin (the OpenEMR host), so a web-root-relative path is enough.
             'conversationUrl' => $this->moduleWebPath . '/public/conversation.php',
+            // JOS-57 click-to-source: the session-authed viewer opened as a chart-pane tab.
+            'sourceViewUrl' => $this->moduleWebPath . '/public/source-view.php',
             'csrfToken' => CsrfUtils::collectCsrfToken(session: $session),
             'expectedOrigin' => $urls->origin,
             'messageSource' => TokenRelayView::MESSAGE_SOURCE,

@@ -1,0 +1,729 @@
+<title>Week 2 Architecture Defense — Multimodal Evidence Agent</title>
+<style>
+  :root {
+    --paper: #f5f7f8;
+    --surface: #ffffff;
+    --surface-2: #eef2f4;
+    --ink: #10181c;
+    --ink-soft: #47565d;
+    --ink-faint: #7c8a90;
+    --line: #dce3e6;
+    --line-strong: #c4ced2;
+    --accent: #0e7490;
+    --accent-strong: #0b5c72;
+    --decided: #15803d;
+    --pending: #b45309;
+    --gate: #b91c1c;
+    --task: #5b53c9;
+
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+    --maxw: 68rem;
+    --pad: clamp(1.5rem, 5vw, 5rem);
+    --radius: 0.5rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0d1417;
+      --surface: #121c20;
+      --surface-2: #17242a;
+      --ink: #e9eff1;
+      --ink-soft: #93a4ab;
+      --ink-faint: #647880;
+      --line: #22323a;
+      --line-strong: #33474f;
+      --accent: #22b8cf;
+      --accent-strong: #56d3e4;
+      --decided: #35d07f;
+      --pending: #f0a02a;
+      --gate: #f2706e;
+      --task: #a89bf5;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0d1417;
+    --surface: #121c20;
+    --surface-2: #17242a;
+    --ink: #e9eff1;
+    --ink-soft: #93a4ab;
+    --ink-faint: #647880;
+    --line: #22323a;
+    --line-strong: #33474f;
+    --accent: #22b8cf;
+    --accent-strong: #56d3e4;
+    --decided: #35d07f;
+    --pending: #f0a02a;
+    --gate: #f2706e;
+    --task: #a89bf5;
+  }
+  :root[data-theme="light"] {
+    --paper: #f5f7f8;
+    --surface: #ffffff;
+    --surface-2: #eef2f4;
+    --ink: #10181c;
+    --ink-soft: #47565d;
+    --ink-faint: #7c8a90;
+    --line: #dce3e6;
+    --line-strong: #c4ced2;
+    --accent: #0e7490;
+    --accent-strong: #0b5c72;
+    --decided: #15803d;
+    --pending: #b45309;
+    --gate: #b91c1c;
+    --task: #5b53c9;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+
+  .deck {
+    height: 100dvh;
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    scrollbar-width: none;
+  }
+  .deck::-webkit-scrollbar { display: none; }
+
+  .slide {
+    min-height: 100dvh;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(3rem, 7vh, 5rem) var(--pad) clamp(4rem, 9vh, 6rem);
+    position: relative;
+    border-bottom: 1px solid var(--line);
+  }
+  .slide__inner {
+    width: 100%;
+    max-width: var(--maxw);
+    margin: 0 auto;
+  }
+
+  /* ---- typography ---- */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    margin: 0 0 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .eyebrow .num {
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.5vw, 3.9rem);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    margin: 0 0 1.25rem;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: clamp(1.6rem, 3.6vw, 2.6rem);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    font-weight: 700;
+    margin: 0 0 1rem;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: clamp(1.05rem, 1.9vw, 1.4rem);
+    color: var(--ink-soft);
+    max-width: 42ch;
+    margin: 0 0 1.5rem;
+    text-wrap: pretty;
+  }
+  p { margin: 0 0 1rem; }
+  strong { font-weight: 650; color: var(--ink); }
+  .accent { color: var(--accent-strong); }
+
+  /* ---- decision chips ---- */
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 600;
+    padding: 0.28rem 0.6rem;
+    border-radius: 100px;
+    border: 1px solid;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+    line-height: 1;
+  }
+  .chip::before {
+    content: "";
+    width: 0.5rem; height: 0.5rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .chip--decided { color: var(--decided); border-color: color-mix(in srgb, var(--decided) 40%, transparent); background: color-mix(in srgb, var(--decided) 10%, transparent); }
+  .chip--pending { color: var(--pending); border-color: color-mix(in srgb, var(--pending) 40%, transparent); background: color-mix(in srgb, var(--pending) 10%, transparent); }
+  .chip--partial { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .chip--gate { color: var(--gate); border-color: color-mix(in srgb, var(--gate) 40%, transparent); background: color-mix(in srgb, var(--gate) 10%, transparent); }
+  .chip--task { color: var(--task); border-color: color-mix(in srgb, var(--task) 40%, transparent); background: color-mix(in srgb, var(--task) 10%, transparent); }
+
+  /* ---- generic blocks ---- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem 2rem; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 46rem) {
+    .grid2, .grid3 { grid-template-columns: 1fr; }
+  }
+
+  ul.clean { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.7rem; }
+  ul.clean li { display: flex; gap: 0.7rem; align-items: baseline; color: var(--ink-soft); }
+  ul.clean li::before {
+    content: "";
+    flex: none;
+    width: 0.5rem; height: 0.5rem;
+    margin-top: 0.5rem;
+    border-radius: 1px;
+    background: var(--accent);
+    transform: rotate(45deg);
+  }
+  ul.clean li strong { color: var(--ink); font-weight: 600; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.2rem;
+  }
+  .card h3 {
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 650;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .card p { margin: 0; font-size: 0.9rem; color: var(--ink-soft); }
+  .card .lbl {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .options {
+    display: flex; flex-wrap: wrap; gap: 0.5rem;
+    font-family: var(--font-mono); font-size: 0.82rem;
+  }
+  .options .opt {
+    padding: 0.35rem 0.7rem;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius);
+    color: var(--ink-soft);
+    background: var(--surface-2);
+  }
+  .options .opt.lead { border-style: solid; border-color: var(--accent); color: var(--accent-strong); font-weight: 600; }
+
+  .axes { font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-faint); letter-spacing: 0.02em; margin-top: 0.9rem; }
+  .axes b { color: var(--ink-soft); font-weight: 600; }
+
+  .cmp { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 0.25rem 0 0.6rem; }
+  .cmp th, .cmp td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .cmp thead th { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+  .cmp tbody th { font-weight: 600; color: var(--ink); font-size: 0.82rem; white-space: nowrap; }
+  .cmp td { color: var(--ink-soft); }
+  .cmp .win { color: var(--ink); background: color-mix(in srgb, var(--decided) 9%, transparent); box-shadow: inset 2px 0 0 var(--decided); }
+  .footnote { font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-faint); margin: 0.6rem 0 0; }
+  .cmp.wrap tbody th { white-space: normal; }
+
+  .task-line {
+    margin-top: 1.3rem;
+    display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+    font-family: var(--font-mono); font-size: 0.82rem; color: var(--ink-soft);
+    padding-top: 1rem; border-top: 1px solid var(--line);
+  }
+
+  /* ---- diagram ---- */
+  .diagram { display: flex; flex-direction: column; gap: 0.8rem; font-family: var(--font-mono); }
+  .drow { display: grid; gap: 0.8rem; align-items: stretch; }
+  .node {
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    padding: 0.75rem 0.9rem;
+    font-size: 0.82rem;
+    display: flex; flex-direction: column; gap: 0.25rem;
+    min-width: 0;
+  }
+  .node .n-t { font-weight: 650; color: var(--ink); letter-spacing: -0.01em; }
+  .node .n-s { font-size: 0.72rem; color: var(--ink-faint); line-height: 1.3; }
+  .node--accent { border-color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .node--gate { border-color: color-mix(in srgb, var(--gate) 55%, var(--line-strong)); }
+  .node--muted { background: var(--surface-2); }
+  .conn { text-align: center; color: var(--ink-faint); font-size: 0.9rem; line-height: 1; }
+
+  /* ---- title slide ---- */
+  .title-slide .kicker {
+    font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--accent-strong);
+    display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.75rem;
+  }
+  .title-slide .rule { height: 1px; flex: 1; background: linear-gradient(90deg, var(--accent), transparent); }
+  .title-slide h1 { font-size: clamp(2.6rem, 8vw, 5.2rem); }
+  .meta-row {
+    margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-faint);
+    display: flex; gap: 1.5rem 2rem; flex-wrap: wrap; letter-spacing: 0.02em;
+  }
+  .note-banner {
+    margin-top: 1.5rem;
+    font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-soft);
+    background: color-mix(in srgb, var(--pending) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--pending) 35%, transparent);
+    border-radius: var(--radius); padding: 0.7rem 0.9rem;
+    display: inline-flex; align-items: center; gap: 0.6rem;
+  }
+  .note-banner b { color: var(--pending); }
+
+  /* ---- persistent UI ---- */
+  .hud {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.6rem clamp(1rem, 4vw, 2.5rem);
+    pointer-events: none;
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-faint);
+    background: linear-gradient(0deg, var(--paper) 30%, transparent);
+  }
+  .hud .wordmark { letter-spacing: 0.08em; }
+  .hud .wordmark b { color: var(--ink-soft); }
+  .counter { font-variant-numeric: tabular-nums; letter-spacing: 0.1em; }
+  .counter .cur { color: var(--accent-strong); }
+  .progress {
+    position: fixed; top: 0; left: 0; height: 3px; z-index: 31;
+    background: var(--accent); width: 0;
+    transition: width 0.25s ease;
+  }
+  @media (prefers-reduced-motion: reduce) { .progress { transition: none; } }
+
+  .legend {
+    position: fixed; top: 0.9rem; right: clamp(1rem, 4vw, 2rem); z-index: 30;
+    display: flex; gap: 0.4rem; flex-wrap: wrap; pointer-events: none;
+  }
+  .legend .chip { font-size: 0.6rem; padding: 0.22rem 0.5rem; background: var(--surface); }
+  @media (max-width: 52rem) { .legend { display: none; } }
+
+  .theme-toggle {
+    position: fixed; top: 0.9rem; left: clamp(1rem, 4vw, 2rem); z-index: 32;
+    pointer-events: auto;
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    background: var(--surface); color: var(--ink-soft);
+    border: 1px solid var(--line); border-radius: 100px;
+    padding: 0.35rem 0.7rem; cursor: pointer;
+  }
+  .theme-toggle:focus-visible, .navbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .kbd-hint {
+    position: fixed; bottom: 0.6rem; left: 50%; transform: translateX(-50%); z-index: 30;
+    font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-faint);
+    pointer-events: none; letter-spacing: 0.05em;
+  }
+  .kbd-hint kbd {
+    font-family: inherit; border: 1px solid var(--line-strong); border-radius: 4px;
+    padding: 0.05rem 0.35rem; color: var(--ink-soft);
+  }
+  @media (max-width: 46rem) { .kbd-hint { display: none; } }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    padding: 0.2rem 0 0.2rem 1rem;
+    color: var(--ink);
+    font-size: clamp(1.05rem, 2vw, 1.35rem);
+    max-width: 52ch;
+  }
+  .callout.gate { border-color: var(--gate); }
+</style>
+
+<div class="progress" id="progress"></div>
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle light or dark theme">◐ Theme</button>
+<div class="legend" aria-hidden="true">
+  <span class="chip chip--decided">Decided</span>
+  <span class="chip chip--partial">Partial</span>
+  <span class="chip chip--pending">Pending</span>
+  <span class="chip chip--gate">Hard gate</span>
+</div>
+
+<main class="deck" id="deck">
+
+  <!-- 1 · TITLE -->
+  <section class="slide title-slide" id="s1">
+    <div class="slide__inner">
+      <div class="kicker">Architecture Defense · Week 2 <span class="rule"></span></div>
+      <h1>The Multimodal<br>Evidence Agent</h1>
+      <p class="lede">Teaching the Clinical Co-Pilot to <strong>see</strong> clinical documents, route work across a small graph, and gate every change with evals.</p>
+      <div class="note-banner"><b>LIVE</b> — framework + vector DB decided; VLM, data model &amp; eval-gate still open. Each decision is a task under JOS-43.</div>
+      <div class="meta-row">
+        <span>AgentForge · Clinical Co-Pilot</span>
+        <span>OpenEMR fork</span>
+        <span>Gauntlet AI — Austin Track</span>
+        <span>2026-07-13</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · SCENARIO -->
+  <section class="slide" id="s2">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">01</span> · The scenario</div>
+      <h2>The signal is buried in the documents</h2>
+      <p class="lede">A physician is prepping a follow-up visit. The chart has structured OpenEMR data — but the recent, important information sits in a <strong>scanned lab PDF</strong> and a <strong>front-desk intake form</strong>.</p>
+      <div class="callout">"What changed, what should I pay attention to, and what evidence supports the recommendation?"</div>
+      <ul class="clean" style="margin-top:1.5rem">
+        <li><strong>See documents</strong> — ingest a lab PDF and an intake form, extract structured facts.</li>
+        <li><strong>Separate fact from evidence</strong> — patient-record facts vs. guideline evidence, each cited.</li>
+        <li><strong>Stay grounded when it's messy</strong> — imperfect scan, incomplete record, follow-up questions.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 3 · WEEK 1 BASELINE -->
+  <section class="slide" id="s3">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">02</span> · What compounds from Week 1 <span class="chip chip--decided">Shipped</span></div>
+      <h2>The baseline we build on</h2>
+      <div class="grid2" style="margin-top:0.5rem">
+        <ul class="clean">
+          <li><strong>Single Pydantic AI agent</strong> — 6 patient-scoped FHIR read tools.</li>
+          <li><strong>Grounding output-validator</strong> — <code>ModelRetry</code> rejects any claim it didn't actually read. The verification seam.</li>
+          <li><strong>Langfuse observability</strong> — OTel auto-instrument, correlation IDs, cost/latency scores.</li>
+        </ul>
+        <ul class="clean">
+          <li><strong>Eval harness</strong> — Langfuse Experiments, deterministic + LLM-judge scorers.</li>
+          <li><strong>Deployed on Railway</strong> — OpenEMR (PHP) + separate Python/FastAPI agent + MySQL.</li>
+          <li><strong>Tiered Claude</strong> — Sonnet 5 workhorse; Haiku 4.5 judge; Opus 4.8 reserved.</li>
+        </ul>
+      </div>
+      <p style="margin-top:1.5rem;color:var(--ink-soft)">Good Week-1 architecture should <strong>compound</strong> here. Week-2 extends these seams rather than replacing them.</p>
+    </div>
+  </section>
+
+  <!-- 4 · THE TRIPWIRE -->
+  <section class="slide" id="s4">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">03</span> · The framing</div>
+      <h2>The single-agent tripwire has fired</h2>
+      <p class="lede">Week 1 chose a single agent <strong>bottom-up, not by default</strong> — <code>ARCHITECTURE.md §6.1</code> pre-registered the exact conditions that would flip it to multi-agent.</p>
+      <div class="grid2" style="margin-top:0.5rem">
+        <div class="card">
+          <span class="lbl">Pre-registered tripwires</span>
+          <ul class="clean" style="margin-top:0.6rem">
+            <li>Independent workers with distinct responsibilities</li>
+            <li>Routing decisions that must be inspectable</li>
+            <li>Explicit, logged handoffs between steps</li>
+          </ul>
+        </div>
+        <div class="card" style="border-color:color-mix(in srgb, var(--accent) 45%, var(--line))">
+          <span class="lbl">Week 2 requires</span>
+          <ul class="clean" style="margin-top:0.6rem">
+            <li>Supervisor + intake-extractor + evidence-retriever</li>
+            <li>Inspectable supervisor routing</li>
+            <li>Explicit worker handoffs</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:1.5rem">Not a reversal of a Week-1 mistake — a <strong>pre-planned expansion firing on schedule.</strong></div>
+    </div>
+  </section>
+
+  <!-- 5 · TARGET ARCHITECTURE -->
+  <section class="slide" id="s5">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">04</span> · Target architecture <span class="chip chip--partial">Shape decided · parts pending</span></div>
+      <h2>Supervisor + two workers, one grounding gate</h2>
+      <div class="diagram" style="margin-top:0.5rem">
+        <div class="drow" style="grid-template-columns:1fr">
+          <div class="node node--muted"><span class="n-t">Physician panel</span><span class="n-s">Native chat in the OpenEMR module · SSE stream</span></div>
+        </div>
+        <div class="conn">▼</div>
+        <div class="drow" style="grid-template-columns:1fr">
+          <div class="node node--accent"><span class="n-t">Supervisor</span><span class="n-s">Decides: extract? retrieve evidence? answer ready? — logged, inspectable handoffs</span></div>
+        </div>
+        <div class="conn">▼</div>
+        <div class="drow" style="grid-template-columns:1fr 1fr">
+          <div class="node"><span class="n-t">Intake-Extractor worker</span><span class="n-s">VLM → strict schema → citations · lab PDF + intake form</span></div>
+          <div class="node"><span class="n-t">Evidence-Retriever worker</span><span class="n-s">Hybrid RAG + rerank over guideline corpus</span></div>
+        </div>
+        <div class="conn">▼</div>
+        <div class="drow" style="grid-template-columns:1fr">
+          <div class="node node--gate"><span class="n-t">Grounding gate (output-validator)</span><span class="n-s">Every clinical claim carries machine-readable citation metadata, or it's rejected</span></div>
+        </div>
+        <div class="conn">▼</div>
+        <div class="drow" style="grid-template-columns:1fr 1fr 1fr">
+          <div class="node node--muted"><span class="n-t">FHIR R4</span><span class="n-s">Reads + derived Observations, round-tripped</span></div>
+          <div class="node node--muted"><span class="n-t">Qdrant + Cohere rerank</span><span class="n-s">Hybrid guideline evidence</span></div>
+          <div class="node node--muted"><span class="n-t">Langfuse</span><span class="n-s">Spans, cost, eval scores</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 · DECISION 1 · FRAMEWORK -->
+  <section class="slide" id="s6">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">05</span> · Decision 1 — Agent framework <span class="chip chip--decided">Decided · Pydantic AI</span></div>
+      <h2>Pydantic AI over LangGraph — concretely</h2>
+      <p class="lede">LangGraph is a reasonable multi-agent default and owns one thing outright: a rendered graph. But our flow is shallow, and our verification gate is already first-class in Pydantic AI.</p>
+      <div style="overflow-x:auto">
+        <table class="cmp">
+          <thead><tr><th>Criterion</th><th>Pydantic AI</th><th>LangGraph</th></tr></thead>
+          <tbody>
+            <tr><th>Our flow<br>supervisor → 2 workers → verify</th><td class="win">Delegation + hand-off express it directly</td><td>A full <code>StateGraph</code> for a shallow, near-linear flow</td></tr>
+            <tr><th>Verification gate</th><td class="win"><code>@output_validator</code> + <code>ModelRetry</code> — one hook, self-correcting</td><td>Rebuild it: a validate node + conditional edge + retry counter in graph state</td></tr>
+            <tr><th>Migration from today's agent</th><td class="win">Near-zero — tools, deps, contracts, Langfuse carry over</td><td>Rewrite the turn loop; port every tool to a node</td></tr>
+            <tr><th>Inspectable routing (PRD)</th><td>Structured route events + Langfuse child spans</td><td class="win">Native graph object — its real edge</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">The gate decides it. LangGraph makes us <strong>rebuild</strong> self-correcting verification that Pydantic AI gives as one decorator — and PRD Core Req 4 accepts "another inspectable orchestration framework," i.e. inspectable <em>handoffs</em>, not a rendered graph.</div>
+      <p class="footnote">OpenAI Agents SDK also considered — rejected: Claude second-class via LiteLLM, and its guardrails halt rather than self-correct.</p>
+      <div class="task-line"><span class="chip chip--decided">JOS-45</span> <b>When LangGraph wins:</b> durable resumable state or human-in-the-loop mid-flow (§6.1 tripwires #1/#2 — not present today). In-framework escalation is <code>pydantic-graph</code> first, before any cross-framework move.</div>
+    </div>
+  </section>
+
+  <!-- 7 · DECISION 2 · INGESTION + VLM -->
+  <section class="slide" id="s7">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">06</span> · Decision 2 — Document ingestion + VLM <span class="chip chip--partial">Partial</span></div>
+      <h2>See the document without inventing facts</h2>
+      <p class="lede"><code>attach_and_extract(patient_id, file, doc_type)</code> for <strong>lab_pdf</strong> and <strong>intake_form</strong>.</p>
+      <div class="grid2">
+        <div class="card" style="border-color:color-mix(in srgb, var(--decided) 40%, var(--line))">
+          <h3><span class="chip chip--decided">Decided</span></h3>
+          <ul class="clean" style="margin-top:0.4rem">
+            <li>Strict <strong>Pydantic schema is the canonical contract</strong> — raw VLM output never bypasses validation.</li>
+            <li>Citation shape: <code>{source_type, source_id, page_or_section, field_or_chunk_id, quote_or_value}</code></li>
+            <li>PDF <strong>bounding-box overlay</strong> required.</li>
+          </ul>
+        </div>
+        <div class="card" style="border-color:color-mix(in srgb, var(--pending) 40%, var(--line))">
+          <h3><span class="chip chip--pending">Pending</span></h3>
+          <ul class="clean" style="margin-top:0.4rem">
+            <li>Which <strong>VLM</strong> — Claude vision vs. dedicated extractor.</li>
+            <li>How <strong>extraction confidence</strong> surfaces unsupported fields.</li>
+            <li>Store source in OpenEMR (<code>DocumentReference</code>) + FHIR round-trip for derived Observations.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="task-line"><span class="chip chip--task">→ Task</span> Schema design + VLM pick + FHIR write path.</div>
+    </div>
+  </section>
+
+  <!-- 8 · DECISION 3 · HYBRID RAG -->
+  <section class="slide" id="s8">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">07</span> · Decision 3 — Hybrid RAG + rerank <span class="chip chip--decided">Decided · Qdrant</span></div>
+      <h2>Ground the answer in guideline evidence</h2>
+      <p class="lede"><strong>Qdrant</strong> (dedicated Railway service) · hybrid in one Universal Query API call · <strong>Cohere Rerank</strong> on the fused top-k · only top grounded snippets reach the answer model.</p>
+      <div class="options" style="margin:0.5rem 0 1rem">
+        <span class="opt lead">Qdrant ✓</span>
+        <span class="opt">LanceDB — runner-up</span>
+        <span class="opt">pgvector — rejected (MySQL, not Postgres)</span>
+        <span class="opt">Weaviate · Chroma</span>
+      </div>
+      <ul class="clean">
+        <li><strong>Native sparse + dense + RRF fusion</strong> in one API call — rank-based fusion sidesteps the BM25-vs-cosine score-scale problem (no alpha to tune or defend).</li>
+        <li><strong>One added service, not two</strong> — FastEmbed folds embedding + sparse encoding into the client; yields a real <code>/ready</code> vector-index dependency an in-process store can't.</li>
+        <li><strong>Reranker</strong> — Cohere <code>rerank-v4.0-fast</code>, the PRD-named default (~$2/1k, negligible on a small corpus).</li>
+      </ul>
+      <div class="task-line"><span class="chip chip--decided">JOS-46</span> <b>Switch to LanceDB</b> (embedded) if a second always-on service isn't worth it for a few-hundred-chunk static corpus.</div>
+    </div>
+  </section>
+
+  <!-- 9 · RAG STRATEGY -->
+  <section class="slide" id="s9">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">08</span> · RAG strategy <span class="chip chip--decided">Decided scope</span></div>
+      <h2>Match the RAG strategy to the problem</h2>
+      <p class="lede">Pair solution complexity with problem complexity — don't default to the fanciest RAG. <span style="color:var(--ink-faint)">— Gallant</span></p>
+      <div style="overflow-x:auto">
+        <table class="cmp wrap">
+          <thead><tr><th>Rung</th><th>Us</th></tr></thead>
+          <tbody>
+            <tr><th>Naive vector search</th><td>baseline</td></tr>
+            <tr><th>Metadata filtering</th><td class="win">✓ scope to guideline / source / section</td></tr>
+            <tr><th>Hybrid: vector + BM25 keyword, RRF-fused</th><td class="win">✓</td></tr>
+            <tr><th>Rerank the fused candidates</th><td class="win">✓ Cohere</td></tr>
+            <tr><th>Query rewriting / multi-hop</th><td>defer — PRD-optional; add if evals show misses</td></tr>
+            <tr><th>Graph RAG (entity-relationship maps)</th><td>not needed — small, flat corpus</td></tr>
+            <tr><th>Agentic RAG (route to retrieval tools)</th><td class="win">✓ earned from the multi-agent decision</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">We land at <strong>hybrid + metadata + rerank</strong>, exposed as tools the supervisor routes to — that routing <em>is</em> the Agentic-RAG rung. We stop short of Graph RAG / multi-hop on purpose: cost, latency, and reduced determinism with no payoff on a small corpus.</div>
+      <p class="footnote">"Graph" here = the agent orchestration graph (supervisor → workers), not Graph RAG (a knowledge graph). Our retrieval is hybrid, not entity-graph.</p>
+    </div>
+  </section>
+
+  <!-- 10 · INFRASTRUCTURE & DATA OWNERSHIP -->
+  <section class="slide" id="s10">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">09</span> · Decision 4 — Infrastructure &amp; data ownership <span class="chip chip--partial">Partial</span></div>
+      <h2>One new service, four data types — each with a home</h2>
+      <div class="grid2">
+        <div>
+          <span style="font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)">On Railway</span>
+          <ul class="clean" style="margin-top:0.6rem">
+            <li><strong>Today</strong> — OpenEMR (PHP) · Python/FastAPI agent · MySQL.</li>
+            <li><strong>Adds</strong> — Qdrant service (private net) · Cohere Rerank API · document storage. Agent stays one Pydantic AI service.</li>
+            <li><strong><code>/ready</code> dependency-aware</strong> — doc storage, vector index, reranker → <em>degraded</em>, not binary.</li>
+          </ul>
+        </div>
+        <div>
+          <span style="font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)">Data authority — one source of truth each</span>
+          <ul class="clean" style="margin-top:0.6rem">
+            <li><strong>Lab observations</strong> → FHIR Observation, round-tripped.</li>
+            <li><strong>Intake facts</strong> — demographics, meds, allergies, family history.</li>
+            <li><strong>Guideline chunks</strong> — versioned corpus, reproducible from repo.</li>
+            <li><strong>Citation records</strong> — every claim → a source.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:1.2rem">No silent overwrites — documents + derived observations round-trip through OpenEMR <strong>without duplicate or untraceable records.</strong></div>
+      <div class="task-line"><span class="chip chip--task">JOS-48 · JOS-49</span> Finalize storage + <code>/ready</code> checks; data-model + lineage + access-control spec.</div>
+    </div>
+  </section>
+
+  <!-- 11 · EVAL HARD GATE -->
+  <section class="slide" id="s11">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">10</span> · The eval gate <span class="chip chip--gate">Hard gate</span></div>
+      <h2>CI that can actually block a regression</h2>
+      <p class="lede">Graders will inject a small regression and confirm the CI gate fails. A demo that can't block regressions has not met the Week-2 bar.</p>
+      <div class="grid2">
+        <div class="card">
+          <span class="lbl">Today</span>
+          <ul class="clean" style="margin-top:0.5rem">
+            <li><strong>7 cases</strong>, report-only CI (<code>should_fail_on_regression: false</code>)</li>
+            <li>Runs only on <code>qa → main</code> promotion PRs</li>
+          </ul>
+        </div>
+        <div class="card" style="border-color:color-mix(in srgb, var(--gate) 40%, var(--line))">
+          <span class="lbl">Week 2 target</span>
+          <ul class="clean" style="margin-top:0.5rem">
+            <li><strong>50 cases</strong>, boolean rubrics</li>
+            <li><strong>PR-blocking git hook</strong> — fails if any category regresses &gt;5% or drops below threshold</li>
+          </ul>
+        </div>
+      </div>
+      <div class="options" style="margin-top:1.1rem">
+        <span class="opt">schema_valid</span><span class="opt">citation_present</span><span class="opt">factually_consistent</span><span class="opt">safe_refusal</span><span class="opt">no_phi_in_logs</span>
+      </div>
+      <div class="task-line"><span class="chip chip--task">→ Task</span> Direction decided; build the 50-case set + flip CI to enforcing.</div>
+    </div>
+  </section>
+
+  <!-- 12 · OBSERVABILITY + COST -->
+  <section class="slide" id="s12">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">11</span> · Observability &amp; cost/latency <span class="chip chip--decided">Extend existing</span></div>
+      <h2>Trace the whole graph; watch the new cost</h2>
+      <div class="grid2">
+        <ul class="clean">
+          <li><strong>Per-worker spans</strong> as children of the supervisor span.</li>
+          <li><strong>New metrics</strong> — ingestion latency, extraction confidence, retrieval hit rate, routing decisions.</li>
+          <li><strong>Correlation ID</strong> propagates into ingestion, handoffs, VLM/retrieval calls, FHIR writes.</li>
+        </ul>
+        <ul class="clean">
+          <li><strong>New cost drivers</strong> — VLM pass + embedding + rerank + extra inference hops.</li>
+          <li><strong>The lever</strong> — tiered routing (Haiku / Sonnet / Opus) keeps the &lt;15s budget and the cost curve defensible.</li>
+          <li><strong>PHI-free</strong> — no raw document text or identifiers in traces, evals, or cost reports.</li>
+        </ul>
+      </div>
+      <div class="task-line"><span class="chip chip--task">→ Task</span> Extend the Langfuse dashboard + SLOs for Week-2 flows.</div>
+    </div>
+  </section>
+
+  <!-- 13 · WHAT WE DEFEND / NEXT -->
+  <section class="slide" id="s14">
+    <div class="slide__inner">
+      <div class="eyebrow"><span class="num">12</span> · What we'll defend</div>
+      <h2>The decided-vs-open map</h2>
+      <div class="grid3" style="margin-bottom:1.4rem">
+        <div class="card"><h3><span class="chip chip--decided">Decided</span></h3><p style="margin-top:.5rem">Framework (Pydantic AI) · vector DB (Qdrant + Cohere) · RAG scope (hybrid, restrained) · verification gate · Pydantic contracts · Langfuse · Claude tiers · eval direction · citation shape</p></div>
+        <div class="card"><h3><span class="chip chip--partial">Partial</span></h3><p style="margin-top:.5rem">Architecture shape · ingestion &amp; VLM · infrastructure &amp; data ownership</p></div>
+        <div class="card"><h3><span class="chip chip--pending">Pending</span></h3><p style="margin-top:.5rem">VLM model · data-model spec · eval-gate build</p></div>
+      </div>
+      <ul class="clean">
+        <li><strong>Working method</strong> — this deck is the skeleton; each pending slide becomes a task under <strong>JOS-43</strong>; decisions flow back into these slides and <code>W2_ARCHITECTURE.md</code>.</li>
+        <li><strong>Checkpoints (CT)</strong> — Architecture Defense (now) → MVP Tue → Early Thu → Final Sun, 2026-07-19.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<div class="hud">
+  <span class="wordmark"><b>AgentForge</b> · W2 Architecture Defense</span>
+  <span class="counter"><span class="cur" id="cur">01</span> / <span id="total">14</span></span>
+</div>
+<div class="kbd-hint"><kbd>↑</kbd> <kbd>↓</kbd> or <kbd>Space</kbd> to navigate</div>
+
+<script>
+  (function () {
+    var deck = document.getElementById('deck');
+    var slides = Array.prototype.slice.call(deck.querySelectorAll('.slide'));
+    var cur = document.getElementById('cur');
+    var total = document.getElementById('total');
+    var progress = document.getElementById('progress');
+    total.textContent = String(slides.length).padStart(2, '0');
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var idx = 0;
+
+    // active slide tracking
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          idx = slides.indexOf(e.target);
+          cur.textContent = String(idx + 1).padStart(2, '0');
+          progress.style.width = ((idx + 1) / slides.length * 100) + '%';
+        }
+      });
+    }, { threshold: 0.55 });
+    slides.forEach(function (s) { io.observe(s); });
+
+    function go(n) {
+      n = Math.max(0, Math.min(slides.length - 1, n));
+      slides[n].scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ' || e.key === 'ArrowRight') {
+        e.preventDefault(); go(idx + 1);
+      } else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowLeft') {
+        e.preventDefault(); go(idx - 1);
+      } else if (e.key === 'Home') { e.preventDefault(); go(0); }
+      else if (e.key === 'End') { e.preventDefault(); go(slides.length - 1); }
+    });
+
+    // theme toggle
+    var root = document.documentElement;
+    document.getElementById('themeToggle').addEventListener('click', function () {
+      var isDark = getComputedStyle(root).getPropertyValue('--paper').trim().indexOf('#0') === 0;
+      var explicit = root.getAttribute('data-theme');
+      if (explicit) { root.setAttribute('data-theme', explicit === 'dark' ? 'light' : 'dark'); }
+      else { root.setAttribute('data-theme', isDark ? 'light' : 'dark'); }
+    });
+  })();
+</script>

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Riverbend Family Medicine — New / Returning Patient Intake &amp; Health History</title>
+<style>
+  @page { size: Letter; margin: 0; }
+  :root {
+    --ink: #1a1a1a;
+    --muted: #555;
+    --line: #9a9a9a;
+    --hair: #cfcfcf;
+    --band: #eef1f4;
+    --accent: #204a63;
+    --pen: #16307a;      /* ballpoint blue for patient entries */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+    color: var(--ink);
+    font-size: 10px;
+    line-height: 1.25;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page { width: 8.5in; height: 11in; padding: 0.4in 0.55in 0.3in; margin: 0 auto; position: relative; overflow: hidden; }
+
+  /* patient handwriting */
+  .hand {
+    font-family: "Bradley Hand", "Bradley Hand ITC", "Segoe Print", "Marker Felt", "Comic Sans MS", cursive;
+    color: var(--pen);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .hand.sm { font-size: 12px; }
+  .mark { font-family: "Bradley Hand", "Marker Felt", cursive; color: var(--pen); font-weight: 700; }
+
+  .synthetic {
+    border: 1px dashed #a33; color: #a33; background: #fdf3f3; text-align: center;
+    font-size: 8px; letter-spacing: 0.05em; font-weight: 700; text-transform: uppercase;
+    padding: 3px 6px; margin-bottom: 9px;
+  }
+
+  header.clinic { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--accent); padding-bottom: 7px; }
+  .clinic .name { font-size: 16px; font-weight: 800; color: var(--accent); }
+  .clinic .sub { font-size: 8.5px; color: var(--muted); margin-top: 2px; }
+  .clinic .doc { text-align: right; }
+  .clinic .doc .t { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .clinic .doc .i { font-size: 8px; color: var(--muted); }
+
+  h3.sec {
+    background: var(--accent); color: #fff; font-size: 8.5px; text-transform: uppercase;
+    letter-spacing: 0.06em; margin: 9px 0 0; padding: 3px 7px; font-weight: 700;
+  }
+  .note { font-size: 7.5px; color: var(--muted); font-style: italic; }
+
+  /* labeled fill-in fields */
+  .fields { display: grid; grid-template-columns: 1.6fr 1fr 0.8fr; gap: 0; border: 1px solid var(--hair); border-top: none; }
+  .fld { border-right: 1px solid var(--hair); border-bottom: 1px solid var(--hair); padding: 3px 7px 4px; min-height: 34px; }
+  .fld:nth-child(3n) { border-right: none; }
+  .fld .k { font-size: 7px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .fld .v { margin-top: 3px; }
+  .box { display: inline-block; width: 11px; height: 11px; border: 1.2px solid var(--muted); vertical-align: -1px; text-align: center; line-height: 9px; margin-right: 2px; }
+  .box .x { font-size: 12px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { background: var(--band); font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.04em; text-align: left; padding: 3px 7px; border: 1px solid var(--hair); }
+  td { border: 1px solid var(--hair); padding: 4px 7px; height: 22px; vertical-align: middle; }
+  td.lbl { width: 34%; }
+
+  .reason { border: 1px solid var(--hair); border-top: none; padding: 6px 8px; min-height: 46px; }
+  .reason .hand { line-height: 1.5; }
+
+  .fhx { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--hair); border-top: none; }
+  .fhx .row { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-bottom: 1px solid var(--hair); }
+  .fhx .row .cond { width: 42%; font-weight: 600; font-size: 9px; }
+  .fhx .row .rel { color: var(--pen); }
+
+  .sign { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 12px; }
+  .sign .line { border-bottom: 1px solid var(--ink); width: 46%; padding-bottom: 1px; }
+  .sign .cap { font-size: 7.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+  .sig-hand { font-family: "Snell Roundhand", "Bradley Hand", cursive; color: var(--pen); font-size: 18px; font-weight: 600; }
+
+  footer { position: absolute; left: 0.55in; right: 0.55in; bottom: 0.25in; border-top: 1px solid var(--line); padding-top: 4px; font-size: 7.5px; color: var(--muted); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="synthetic">Synthetic demo data — fictional patient &amp; clinic — not a real medical record — AgentForge Clinical Co-Pilot</div>
+
+  <header class="clinic">
+    <div>
+      <div class="name">Riverbend Family Medicine</div>
+      <div class="sub">1809 Wells Branch Pkwy, Austin, TX 78728 &middot; (512) 555-0170 &middot; fax (512) 555-0171</div>
+    </div>
+    <div class="doc">
+      <div class="t">Patient Intake &amp;<br />Health History</div>
+      <div class="i">Form INT-04 &middot; Please print clearly</div>
+    </div>
+  </header>
+
+  <h3 class="sec">1. Patient Information</h3>
+  <div class="fields">
+    <div class="fld"><div class="k">Patient Name (Last, First)</div><div class="v hand">Angulo, Sergio</div></div>
+    <div class="fld"><div class="k">Date of Birth</div><div class="v hand">03 / 14 / 1979</div></div>
+    <div class="fld"><div class="k">Sex</div><div class="v"><span class="box"><span class="x mark">&#10005;</span></span><span style="font-size:9px">Male</span> &nbsp; <span class="box"></span><span style="font-size:9px">Female</span></div></div>
+
+    <div class="fld"><div class="k">Home Address</div><div class="v hand sm">2117 Cypress Bend Dr, Austin, TX 78745</div></div>
+    <div class="fld"><div class="k">Phone</div><div class="v hand">(512) 555-0192</div></div>
+    <div class="fld"><div class="k">Date of Visit</div><div class="v hand">07 / 14 / 2026</div></div>
+
+    <div class="fld"><div class="k">Preferred Pharmacy</div><div class="v hand sm">Wells Branch Pharmacy</div></div>
+    <div class="fld"><div class="k">MRN (office use)</div><div class="v hand">OE-000023</div></div>
+    <div class="fld"><div class="k">Primary Provider</div><div class="v hand sm">Dr. Mercado</div></div>
+  </div>
+
+  <h3 class="sec">2. Reason for Today's Visit <span class="note">— in your own words</span></h3>
+  <div class="reason">
+    <div class="hand">Here for my 6-month check-up. My lower back has been sore for a few months so I've been taking Advil and Aleve pretty often for it. Also I've been using my rescue inhaler more than usual — almost every day this past week.</div>
+  </div>
+
+  <h3 class="sec">3. Current Medications <span class="note">— include over-the-counter &amp; as-needed</span></h3>
+  <table>
+    <thead><tr><th style="width:38%">Medication</th><th style="width:20%">Dose / Strength</th><th>How often do you take it?</th></tr></thead>
+    <tbody>
+      <tr><td class="hand">Budesonide inhaler</td><td class="hand">1 puff</td><td class="hand">twice a day (controller)</td></tr>
+      <tr><td class="hand">Albuterol (Ventolin) inhaler</td><td class="hand">as needed</td><td class="hand">4&ndash;5x / week lately</td></tr>
+      <tr><td class="hand">Fexofenadine (Allegra)</td><td class="hand">180 mg</td><td class="hand">once daily</td></tr>
+      <tr><td class="hand">EpiPen (epinephrine)</td><td class="hand">0.3 mg</td><td class="hand">carry for emergencies</td></tr>
+      <tr><td class="hand">Advil (ibuprofen)</td><td class="hand">400 mg</td><td class="hand">3&ndash;4x / week for back pain</td></tr>
+      <tr><td class="hand">Aleve (naproxen)</td><td class="hand">220 mg</td><td class="hand">weekends when back is bad</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec">4. Allergies <span class="note">— medication, food &amp; environmental</span></h3>
+  <table>
+    <thead><tr><th style="width:34%">Allergy / Substance</th><th>Reaction</th></tr></thead>
+    <tbody>
+      <tr><td class="lbl hand">Aspirin</td><td class="hand">hives + wheezing / trouble breathing</td></tr>
+      <tr><td class="lbl hand">Peanuts</td><td class="hand">throat swelling &mdash; used EpiPen before</td></tr>
+      <tr><td class="lbl hand">Fish</td><td class="hand">hives, trouble breathing</td></tr>
+      <tr><td class="lbl hand">Pollen, dust, mold, cats</td><td class="hand">sneezing, congestion, itchy watery eyes</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec">5. Family History <span class="note">— check all that apply &amp; note the relative</span></h3>
+  <div class="fhx">
+    <div class="row"><span class="box"><span class="x mark">&#10005;</span></span><span class="cond">Asthma</span><span class="rel hand">Mother, Brother</span></div>
+    <div class="row"><span class="box"><span class="x mark">&#10005;</span></span><span class="cond">Allergies / Eczema</span><span class="rel hand">Mother</span></div>
+    <div class="row"><span class="box"><span class="x mark">&#10005;</span></span><span class="cond">High Blood Pressure</span><span class="rel hand">Father</span></div>
+    <div class="row"><span class="box"><span class="x mark">&#10005;</span></span><span class="cond">Kidney Disease</span><span class="rel hand">Father &mdash; on dialysis</span></div>
+    <div class="row"><span class="box"><span class="x mark">&#10005;</span></span><span class="cond">Diabetes (Type 2)</span><span class="rel hand">Father</span></div>
+    <div class="row"><span class="box"></span><span class="cond">Heart Disease</span><span class="rel hand"></span></div>
+    <div class="row"><span class="box"></span><span class="cond">Cancer</span><span class="rel hand"></span></div>
+    <div class="row"><span class="box"></span><span class="cond">Stroke</span><span class="rel hand"></span></div>
+  </div>
+
+  <div class="sign">
+    <div>
+      <div class="line"><span class="sig-hand">Sergio Angulo</span></div>
+      <div class="cap">Patient / Guardian Signature</div>
+    </div>
+    <div style="width:30%">
+      <div class="line hand" style="text-align:center">07 / 14 / 2026</div>
+      <div class="cap" style="text-align:center">Date</div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Riverbend Family Medicine &middot; Patient Intake &amp; Health History (Form INT-04)</span>
+    <span>Angulo, Sergio &middot; DOB 03/14/1979 &middot; MRN OE-000023</span>
+    <span>Page 1 of 1</span>
+  </footer>
+
+</div>
+</body>
+</html>

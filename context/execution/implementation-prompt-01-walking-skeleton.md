@@ -30,7 +30,7 @@ Do not start coding until these are read — every decision below traces to them
    the code must match it, not diverge from it. Everything else on this list is supporting
    detail *behind* this document. If your implementation would deviate from `ARCHITECTURE.md`,
    stop and flag it — do not silently drift.
-2. `PRD.md` — the north star. Agent / Verification / Observability / Eval requirements
+2. `PRD-week-1.md` — the north star. Agent / Verification / Observability / Eval requirements
    (§ "Agent Requirements") and the **Engineering Requirements** section (correlation IDs,
    canonical schemas, `/health` vs `/ready`, dashboards, alerts) are acceptance criteria,
    not aspirations.

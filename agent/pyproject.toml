@@ -12,6 +12,13 @@ dependencies = [
     "httpx>=0.27",
     "fhir.resources>=8.0",
     "langfuse>=4",
+    # Hybrid RAG (JOS-53): Qdrant vector store + in-client FastEmbed (dense+sparse), Cohere rerank.
+    "qdrant-client[fastembed]>=1.18,<2",
+    "cohere>=7.0,<8",
+    # Click-to-source geometry (JOS-54): reads a digital PDF's text layer for exact per-value word
+    # boxes in points. MIT-licensed (pdfminer.six) with no otel deps, so unlike mistralai it is safe
+    # in the base install; extraction still degrades gracefully (coarse OCR estimate) without it.
+    "pdfplumber>=0.11",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +27,17 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
     "mypy>=1.13",
+]
+# Document extraction (JOS-54 intake-extractor OCR). OPTIONAL extra: mistralai 2.x pins
+# opentelemetry-semantic-conventions<0.61, which conflicts with langfuse's 0.63b1 — keeping it out
+# of the base install stops a plain `pip install -e .` from breaking langfuse tracing. The extractor
+# imports mistralai lazily (inside MistralOcrBackend.process), so the base install and the agent-test
+# CI (which installs only [dev]) run fine without it; FIXTURE extractor mode needs no live SDK.
+# Install for live OCR with `pip install -e .[extraction]`, then force otel back to 0.63b1
+# (`pip install opentelemetry-semantic-conventions==0.63b1`). Pinned >=2 for the 2.x namespace
+# layout the OCR client uses (`from mistralai.client import Mistral`).
+extraction = [
+    "mistralai>=2",
 ]
 # Load/stress testing the deployed /chat endpoint (agent/loadtest/, JOS-18).
 # Installed into an isolated venv by run.sh; recorded here for provenance.
@@ -52,5 +70,7 @@ files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["fhir.resources.*", "langfuse.*"]
+# mistralai is an optional extra (not installed in the agent-test CI, which uses only [dev]) and
+# ships no type stubs; the extractor imports it lazily behind this ignore.
+module = ["fhir.resources.*", "langfuse.*", "mistralai.*", "pdfplumber.*"]
 ignore_missing_imports = true

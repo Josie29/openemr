@@ -3,9 +3,13 @@ name: Agent evals (report-only)
 # The paid eval: makes real Anthropic API calls (agent + judges) and writes a run to Langfuse, so
 # it costs money per run. It therefore runs ONLY on release-promotion PRs into main
 # (qa/integration -> main; main = prod) and on manual dispatch — NOT on feature -> qa/integration
-# PRs. Free deterministic agent tests (pytest/ruff/mypy) run on every PR via agent-tests.yml.
+# PRs. Free deterministic agent tests (pytest/ruff/mypy, incl. the golden-set ground-truth guard)
+# run on every PR via agent-tests.yml.
+# COST: this gate runs only the 3-case CI subset (copilot-golden-ci, ~$0.10/run) — NOT the full
+# 50-case set (copilot-golden-v1), which is an on-demand, approval-gated run (~$2). Author/verify of
+# all 50 is free; only running the graph to score rubrics costs money.
 # REPORT-ONLY: results are posted as a PR comment but never fail the job (see should_fail_on_*
-# below). To turn this into an enforcing gate once the judges are calibrated, flip
+# below). To turn this into an enforcing gate once the rubrics are calibrated, flip
 # should_fail_on_regression to "true" — the thresholds already live in evals/experiment.py.
 
 on:
@@ -51,7 +55,8 @@ jobs:
           langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
           langfuse_base_url: ${{ secrets.LANGFUSE_BASE_URL }}
           experiment_path: agent/src/copilot/evals/experiment.py
-          dataset_name: copilot-grounding-v1
+          # The cheap 3-case CI subset, not the full 50 (copilot-golden-v1 is on-demand only).
+          dataset_name: copilot-golden-ci
           should_skip_sdk_installation: "true"
           # Report-only: comment on the PR, but do not fail the job on regression or script error.
           should_fail_on_regression: "false"

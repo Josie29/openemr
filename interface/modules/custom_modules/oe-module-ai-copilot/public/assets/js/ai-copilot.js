@@ -38,6 +38,7 @@
     var token = null; // {accessToken, patient, expiresAt}
     var launchInFlight = null;
 
+
     // ---- config / labels -------------------------------------------------
 
     function readConfig() {
@@ -648,10 +649,16 @@
     // each supporting).
     function renderCitation(source) {
         source = source || {};
-        if (source.resource_type === 'DocumentReference') {
-            return renderDocumentCitation(source);
+        var cite = source.resource_type === 'DocumentReference'
+            ? renderDocumentCitation(source)
+            : renderCodedCitation(source);
+        // Click-to-source (JOS-57): only when the agent stamped a bounding box -- i.e. the fact was
+        // derived from an uploaded PDF. Absent a bbox the chip stands exactly as before; a rectangle
+        // is never fabricated.
+        if (hasBoundingBox(source)) {
+            cite.appendChild(buildViewSourceButton(source));
         }
-        return renderCodedCitation(source);
+        return cite;
     }
 
     function renderClaim(claim) {
@@ -673,6 +680,121 @@
         }
 
         return item;
+    }
+
+    // ---- click-to-source PDF preview (JOS-57) ----------------------------
+    //
+    // When a citation carries a `bounding_box`, the fact was read off an uploaded PDF. The chip gets a
+    // "View source" button that opens a preview pane inside this docked panel (never a Bootstrap
+    // modal -- it stays a child of the fixed panel, well below the 1050+ dialog band), fetches the
+    // Binary through the same SMART token the chat uses, renders the cited page with the vendored
+    // pdf.js, and draws the cited rectangle over it.
+
+    /**
+     * Narrow, defensive check that a citation carries a usable bounding box: the box object plus a
+     * document id and four finite numeric edges. Anything malformed falls back to "no rectangle".
+     *
+     * @param {object} source The citation's SourceRef.
+     * @returns {boolean} True when a click-to-source affordance should be rendered.
+     */
+    function hasBoundingBox(source) {
+        var bb = source && source.bounding_box;
+        if (!bb || typeof bb !== 'object' || !source.document_id) {
+            return false;
+        }
+        return isFiniteNumber(bb.x) && isFiniteNumber(bb.y)
+            && isFiniteNumber(bb.width) && isFiniteNumber(bb.height);
+    }
+
+    function isFiniteNumber(value) {
+        return typeof value === 'number' && isFinite(value);
+    }
+
+    /**
+     * Resolve the 1-based page to render: prefer the SourceRef's `page`, fall back to the box's own
+     * `page`, else page 1. Floored so a fractional value can't index a fractional page.
+     *
+     * @param {object} source The citation's SourceRef.
+     * @returns {number} A 1-based, integral page number.
+     */
+    function normalizePage(source) {
+        var page = source.page;
+        if (!isFiniteNumber(page) || page < 1) {
+            var boxPage = source.bounding_box && source.bounding_box.page;
+            page = (isFiniteNumber(boxPage) && boxPage >= 1) ? boxPage : 1;
+        }
+        return Math.floor(page);
+    }
+
+    /**
+     * Build the "View source" button appended to a bbox-bearing citation. The document id, page, and
+     * serialized box ride on the button's dataset so the click handler is self-contained.
+     *
+     * @param {object} source The citation's SourceRef (already passed hasBoundingBox).
+     * @returns {HTMLButtonElement} The keyboard-accessible affordance.
+     */
+    function buildViewSourceButton(source) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-copilot__view-source';
+        button.textContent = labels.viewSource;
+        button.dataset.documentId = String(source.document_id);
+        button.dataset.page = String(normalizePage(source));
+        button.dataset.bbox = JSON.stringify(source.bounding_box);
+        button.dataset.docTitle = (source.label && source.label !== source.value)
+            ? source.label
+            : (humanizeToken(source.resource_type) || labels.viewSource);
+        button.addEventListener('click', onViewSourceClick);
+        return button;
+    }
+
+    // Read the request off the clicked chip and hand it to the preview pane.
+    function onViewSourceClick(event) {
+        var button = event.currentTarget;
+        var bbox = null;
+        try {
+            bbox = JSON.parse(button.dataset.bbox);
+        } catch (err) {
+            bbox = null;
+        }
+        var documentId = button.dataset.documentId;
+        var page = parseInt(button.dataset.page, 10);
+        if (!documentId || isNaN(page)) {
+            return;
+        }
+        openSourceInChartTab(documentId, page, bbox, button.dataset.docTitle || labels.viewSource);
+    }
+
+    // Open the cited source as a tab in OpenEMR's main content (chart) area, via the
+    // session-authenticated viewer (source-view.php) — it reads the document through the core
+    // document ACL, so no patient-scoped SMART Binary scope is needed. The sidebar runs in the top
+    // window, so top.navigateTab / top.activateTabByName are callable directly.
+    function openSourceInChartTab(documentId, page, bbox, title) {
+        var url = config.sourceViewUrl
+            + '?doc=' + encodeURIComponent(documentId)
+            + '&page=' + encodeURIComponent(page)
+            + '&csrf_token=' + encodeURIComponent(config.csrfToken)
+            + '&label=' + encodeURIComponent(title);
+        if (bbox) {
+            url += '&x=' + encodeURIComponent(bbox.x)
+                + '&y=' + encodeURIComponent(bbox.y)
+                + '&w=' + encodeURIComponent(bbox.width)
+                + '&h=' + encodeURIComponent(bbox.height);
+        }
+        var tabName = 'ai_doc_' + documentId;
+        var win = window.top;
+        if (win && typeof win.navigateTab === 'function') {
+            if (typeof win.restoreSession === 'function') {
+                win.restoreSession();
+            }
+            win.navigateTab(url, tabName, function () {
+                if (typeof win.activateTabByName === 'function') {
+                    win.activateTabByName(tabName, true);
+                }
+            });
+        } else {
+            window.open(url, '_blank');
+        }
     }
 
     // ---- SMART launch + chat (reused mechanism) --------------------------
@@ -941,7 +1063,10 @@
             clearConfirm: els.sidebar.dataset.labelClearConfirm,
             thinking: els.sidebar.dataset.labelThinking,
             hasConversation: els.sidebar.dataset.labelHasConversation,
-            followUps: els.sidebar.dataset.labelFollowUps
+            followUps: els.sidebar.dataset.labelFollowUps,
+            // Click-to-source (JOS-57). Defaulted here so the feature works before the PHP config
+            // island grows these data-label-* attributes; add them there for localization.
+            viewSource: els.sidebar.dataset.labelViewSource || 'View source'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

@@ -1,0 +1,31 @@
+from copilot.ingestion.schemas import (
+    AbnormalFlag,
+    Allergy,
+    BoundingBox,
+    Citation,
+    CitedText,
+    Demographics,
+    DocType,
+    FamilyHistoryItem,
+    IntakeForm,
+    LabReport,
+    LabResult,
+    Medication,
+    SourceType,
+)
+
+__all__ = [
+    "AbnormalFlag",
+    "Allergy",
+    "BoundingBox",
+    "Citation",
+    "CitedText",
+    "Demographics",
+    "DocType",
+    "FamilyHistoryItem",
+    "IntakeForm",
+    "LabReport",
+    "LabResult",
+    "Medication",
+    "SourceType",
+]

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from copilot.config import FhirClientMode, ModelTier, Settings
+from copilot.config import FhirClientMode, ModelTier, RetrievalMode, Settings
 from copilot.fhir.fixtures import FixtureFhirClient
 
 _FIXTURE_PATIENT = Path(__file__).parent / "fixtures" / "patient.json"
@@ -31,13 +31,14 @@ def seed_client() -> FixtureFhirClient:
 
 @pytest.fixture
 def settings() -> Settings:
-    """Deterministic settings: fixture FHIR, no LLM key, no Langfuse.
+    """Deterministic settings: fixture FHIR, fixture retrieval, no LLM key, no Langfuse.
 
     No real network dependency, so the whole service is exercised offline.
     """
     return Settings(
         model_tier=ModelTier.SONNET,
         fhir_client_mode=FhirClientMode.FIXTURE,
+        retrieval_mode=RetrievalMode.FIXTURE,
         anthropic_api_key=None,
         langfuse_public_key=None,
         langfuse_secret_key=None,

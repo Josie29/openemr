@@ -101,7 +101,7 @@ Extend these; don't just restate them:
 - **Write the deliverable to:** `context/planning/cost-analysis.md`.
 - **Cross-link:** `ARCHITECTURE.md` §12 (the architectural view that defers "the full numbers" to
   this deliverable) — and update §12's pointer if the filename changes.
-- **Requirement source:** `PRD.md` → Submission Requirements → *AI Cost Analysis* ("Actual dev spend
+- **Requirement source:** `PRD-week-1.md` → Submission Requirements → *AI Cost Analysis* ("Actual dev spend
   and projected production costs at 100 / 1K / 10K / 100K users, plus architectural changes needed at
   each level. Not simply cost-per-token × n users.").
 

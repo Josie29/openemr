@@ -643,3 +643,39 @@ body.ai-copilot-resizing {
         transition: none;
     }
 }
+
+/* ---- Click-to-source (JOS-57) ----
+ *
+ * A citation whose fact was read off an uploaded PDF carries a "View source" button; clicking it
+ * opens the in-panel preview pane (below) with the cited page and a highlight over the cited span.
+ * Only bbox-bearing citations get this — ordinary coded/note chips are untouched.
+ */
+
+.ai-copilot__view-source {
+    /* Sit on its own line at the foot of the chip: full-basis so it wraps below the coded chip's
+       row, and last-in-column for note chips. */
+    flex-basis: 100%;
+    align-self: flex-start;
+    margin-top: var(--copilot-space-1);
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: var(--copilot-font-sm);
+    font-weight: 600;
+    color: var(--copilot-accent);
+    cursor: pointer;
+    text-align: left;
+}
+
+.ai-copilot__view-source::after {
+    content: "\00a0\25B8"; /* nbsp + U+25B8 right-pointing triangle: "open the source" */
+    opacity: 0.8;
+}
+
+.ai-copilot__view-source:hover,
+.ai-copilot__view-source:focus-visible {
+    color: var(--copilot-accent-strong);
+    text-decoration: underline;
+    outline: none;
+}
+

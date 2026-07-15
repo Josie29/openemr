@@ -30,6 +30,31 @@ class FhirClientMode(StrEnum):
     HTTP = "http"
 
 
+class ExtractorMode(StrEnum):
+    """Which document-extraction backend the service wires up (JOS-54, W2_ARCH §3.1).
+
+    ``MISTRAL`` runs live Mistral OCR (``mistral-ocr-latest``) in schema mode against the document
+    bytes. ``FIXTURE`` replays a recorded OCR response (``*.ocr.json``) with no live API call — for
+    tests and offline dev, mirroring ``FhirClientMode.FIXTURE`` / ``RetrievalMode.FIXTURE``.
+    """
+
+    MISTRAL = "mistral"
+    FIXTURE = "fixture"
+
+
+class RetrievalMode(StrEnum):
+    """Which ``EvidenceRetriever`` implementation the service wires up (JOS-53, W2_ARCH §5).
+
+    ``QDRANT`` runs the live hybrid pipeline (FastEmbed dense+sparse -> Qdrant RRF -> Cohere
+    rerank) against a reachable Qdrant + Cohere. ``FIXTURE`` runs an in-process keyword
+    retriever over the in-repo corpus — no network, no Docker — for tests and offline dev,
+    mirroring ``FhirClientMode.FIXTURE``.
+    """
+
+    QDRANT = "qdrant"
+    FIXTURE = "fixture"
+
+
 class Settings(BaseSettings):
     """Service configuration, sourced entirely from environment variables.
 
@@ -68,12 +93,83 @@ class Settings(BaseSettings):
     fhir_timeout_seconds: float = 10.0
     fhir_max_retries: int = 2
 
+    # Hybrid RAG evidence retrieval (JOS-53 — W2_ARCHITECTURE.md §5). Qdrant holds ONLY the
+    # non-PHI guideline corpus and Cohere reranks guideline text against the clinical question; no
+    # patient identifiers or specific values are sent — the query carries only the de-identified
+    # clinical topic (patient facts come from the FHIR tools, not the query). See
+    # context/specs/hybrid-rag-pipeline.md. Defaults to QDRANT so the deployed service uses the
+    # real pipeline; local dev/tests opt into FIXTURE via .env / the settings override.
+    retrieval_mode: RetrievalMode = RetrievalMode.QDRANT
+    # Accept the bare QDRANT_URL / QDRANT_API_KEY (what the Railway deploy sets, incl. via a
+    # ${{Qdrant.RAILWAY_PRIVATE_DOMAIN}} reference) as well as the COPILOT_-prefixed form.
+    qdrant_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("QDRANT_URL", "COPILOT_QDRANT_URL"),
+        description="Qdrant REST base URL, e.g. http://qdrant.railway.internal:6333 (plain http)",
+    )
+    qdrant_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("QDRANT_API_KEY", "COPILOT_QDRANT_API_KEY"),
+        description="Qdrant API key (QDRANT__SERVICE__API_KEY on the Qdrant service)",
+    )
+    qdrant_collection: str = "guidelines"
+    # Accept the Cohere SDK's native CO_API_KEY as well as COHERE_API_KEY and our prefixed form,
+    # so a key copied from Cohere or set by convention works without renaming (matches the
+    # anthropic/langfuse key handling above).
+    cohere_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CO_API_KEY", "COHERE_API_KEY", "COPILOT_COHERE_API_KEY"
+        ),
+    )
+    # FastEmbed model ids (embedded in qdrant-client; no separate embedding service). Dense =
+    # semantic, sparse = lexical; fused by Qdrant RRF. Must match between indexer and retriever.
+    dense_embedding_model: str = "BAAI/bge-small-en-v1.5"  # 384-dim
+    sparse_embedding_model: str = "Qdrant/bm25"
+    rerank_model: str = "rerank-v4.0-fast"  # Cohere; v3.5 is deprecated (pin a v4.0 model)
+    # Per-leg prefetch depth (dense and sparse each fetch this many before RRF); reranked down to
+    # rerank_top_n grounded snippets fed to the answer model. Defaults per the decision doc;
+    # tune empirically once the 50-case eval set exists.
+    retrieval_prefetch_k: int = 20
+    rerank_top_n: int = 5
+
+    # Document extraction (JOS-54 — W2_ARCHITECTURE.md §3.1). The intake-extractor's
+    # attach_and_extract tool OCRs an uploaded lab PDF into cited lab facts. Defaults to MISTRAL so
+    # the deployed service runs real OCR; tests/offline dev opt into FIXTURE (replays a recorded
+    # response) via the settings override. Accept the Mistral SDK's native MISTRAL_API_KEY as well
+    # as the COPILOT_-prefixed form, matching the anthropic/cohere key handling above.
+    extractor_mode: ExtractorMode = ExtractorMode.MISTRAL
+    mistral_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MISTRAL_API_KEY", "COPILOT_MISTRAL_API_KEY"),
+    )
+    # The document byte-source for the demo slice: the committed lab PDF whose bytes are fed to the
+    # OCR backend when a lab document is extracted. Production fetches the bytes from OpenEMR by
+    # document id (deferred — a scope wall, see the seam spec); until then the real document id is
+    # discovered live but the bytes come from this fixture. Null disables extraction.
+    document_pdf_path: str | None = Field(
+        default=None,
+        description="Path to the demo lab PDF used as the extractor's byte-source.",
+    )
+    # FIXTURE mode only: the recorded Mistral OCR response (`*.ocr.json`) the FixtureOcrBackend
+    # replays instead of calling the live API, so extraction tests are deterministic and offline.
+    ocr_fixture_path: str | None = Field(
+        default=None,
+        description="Path to a recorded OCR response replayed in FIXTURE extractor mode.",
+    )
+
     # Hard ceiling on tool calls in a single agent turn. Bounds cost/latency: without it the agent
     # can loop a tool (e.g. brute-forcing get_encounter_note across a patient with 90+ encounters)
     # up to pydantic-ai's default request_limit of 50, spending 50 model calls on one question.
     # A legitimate turn reads a handful of resources; hitting this cap means the turn ran away, and
     # /chat degrades it to a refusal rather than letting the cost run.
     agent_tool_calls_limit: int = 12
+
+    # Hard ceiling on supervisor routing hops in one turn (Week-2 multi-agent graph). Each hop is a
+    # route decision + at most one worker dispatch; a normal turn resolves in 2-3 (extract,
+    # retrieve, answer). Bounding it means a router that never says "answer" still terminates and
+    # answer rather than looping worker calls. See copilot.graph.supervisor.run_graph.
+    agent_max_hops: int = 4
 
     # Browser origins allowed to call /chat directly (ARCHITECTURE.md §4: the chat XHR goes from the
     # physician's browser to this service, not proxied through PHP). Empty means no browser may call

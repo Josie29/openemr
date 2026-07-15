@@ -6,6 +6,7 @@ from copilot.fhir.client import FhirError
 from copilot.fhir.models import (
     Allergy,
     Encounter,
+    LabDocumentSummary,
     Medication,
     NoteContent,
     PatientDemographics,
@@ -144,6 +145,13 @@ class FixtureFhirClient:
     async def get_encounter_note(self, patient_id: str, encounter_id: str) -> list[NoteContent]:
         notes = [NoteContent.from_fhir(r) for r in self._resources(patient_id, "DocumentReference")]
         return [note for note in notes if note.encounter_id == encounter_id]
+
+    async def get_lab_documents(self, patient_id: str) -> list[LabDocumentSummary]:
+        summaries = (
+            LabDocumentSummary.try_from_fhir(r)
+            for r in self._resources(patient_id, "DocumentReference")
+        )
+        return [summary for summary in summaries if summary is not None]
 
     async def ping(self) -> None:
         # In-memory fixtures are always reachable.

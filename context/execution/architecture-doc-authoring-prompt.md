@@ -32,7 +32,7 @@ Do not write a word of the deliverable until these are read. Every section you w
 trace to them; where they conflict with each other, the **PRD wins**, then the deliverables
 (`AUDIT.md`, `USERS.md`), then the `/context` evidence.
 
-1. **`PRD.md`** — the north star. Anchor especially on: Stage 5 ("Develop the AI
+1. **`PRD-week-1.md`** — the north star. Anchor especially on: Stage 5 ("Develop the AI
    Integration Plan") and its hard-gate wording; the **Agent Requirements** (agentic
    chatbot / verification / observability / eval); the **Engineering Requirements**
    (correlation IDs, canonical schemas, `/health` vs `/ready`, dashboards, alerts,

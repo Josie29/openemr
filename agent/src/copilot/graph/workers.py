@@ -150,10 +150,16 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     async def list_lab_documents(ctx: RunContext[GraphDeps]) -> list[LabDocumentSummary]:
         """List the patient's uploaded lab-report documents (id, title, date) for extraction.
 
+        Memoized per turn: the FHIR discovery read runs once, so repeated calls (a model retrying on
+        an empty list) return the cached result instead of hammering FHIR.
+
         Args:
             ctx: The run context (holds the patient-scoped FHIR client).
         """
-        return await ctx.deps.fhir.get_lab_documents(ctx.deps.patient_id)
+        if ctx.deps.lab_documents_cache is None:
+            deps = ctx.deps
+            deps.lab_documents_cache = await deps.fhir.get_lab_documents(deps.patient_id)
+        return ctx.deps.lab_documents_cache
 
     @agent.tool
     async def attach_and_extract(

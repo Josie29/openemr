@@ -11,7 +11,9 @@
       "Bash(docker compose version)",
       "mcp__claude-in-chrome__navigate",
       "mcp__claude-in-chrome__get_page_text",
-      "mcp__claude-in-chrome__tabs_context_mcp"
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__railway__docs_fetch",
+      "mcp__railway__docs_search"
     ]
   }
 }

@@ -13,13 +13,15 @@ name: Agent evals (report-only)
 # should_fail_on_regression to "true" — the thresholds already live in evals/experiment.py.
 
 on:
-  pull_request:
-    # Base-branch filter: only PRs targeting main (i.e. qa/integration -> main promotions).
-    branches:
-      - main
-    paths:
-      - "agent/**"
-      - ".github/workflows/evals.yml"
+  # TEMPORARILY DISABLED (2026-07-15) to save Anthropic API cost during pre-final iteration.
+  # RE-ENABLE BEFORE FINAL SUBMISSION — uncomment the pull_request trigger below.
+  # pull_request:
+  #   # Base-branch filter: only PRs targeting main (i.e. qa/integration -> main promotions).
+  #   branches:
+  #     - main
+  #   paths:
+  #     - "agent/**"
+  #     - ".github/workflows/evals.yml"
   workflow_dispatch:
 
 permissions:

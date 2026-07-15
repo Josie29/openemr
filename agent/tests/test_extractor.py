@@ -143,9 +143,14 @@ def test_registry_passes_the_points_box_through_unchanged() -> None:
 def test_registry_ignores_unrecorded_and_foreign_citations() -> None:
     """A claim citing a fact the turn did not extract must not ground (no fabricated provenance)."""
     registry = DocumentFactRegistry()  # empty — nothing recorded this turn
-    assert registry.resolve(
-        SourceRef(resource_type=DOCUMENT_FACT_RESOURCE_TYPE, resource_id="never#0", field="value")
-    ) is None
+    assert (
+        registry.resolve(
+            SourceRef(
+                resource_type=DOCUMENT_FACT_RESOURCE_TYPE, resource_id="never#0", field="value"
+            )
+        )
+        is None
+    )
     # A FHIR citation is not this registry's to resolve — it defers (returns None) to the FetchLog.
     fhir_ref = SourceRef(resource_type="Condition", resource_id="c1", field="x")
     assert registry.resolve(fhir_ref) is None
@@ -245,3 +250,49 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
     assert source.document_id == "doc-1"
     assert source.bounding_box is not None
     assert source.to_citation().source_type is CitationSourceType.LAB_PDF
+
+
+def _ocr_with(results: object, blocks: list[dict[str, object]]) -> dict[str, object]:
+    """Build a minimal OCR response with the given annotation results and page blocks."""
+    return {
+        "document_annotation": json.dumps({"results": results}),
+        "pages": [
+            {
+                "index": 0,
+                "dimensions": {"dpi": 93, "width": 791, "height": 1023},
+                "blocks": blocks,
+                "tables": [],
+            }
+        ],
+    }
+
+
+def test_blank_value_or_name_rows_are_skipped_not_crashed() -> None:
+    """A row with a blank value/name is dropped, not crashed on (schema min_length regression).
+
+    Live OCR emits spacer/subtotal/pending rows with an empty value or test name. Since the schema
+    now enforces min_length=1 on LabResult.value/test_name and Citation.quote_or_value, building a
+    fact from such a row raises a ValidationError that escapes map_lab_report's ExtractionError
+    contract and crashes the physician's whole /chat turn. The mapper must skip these rows instead.
+    """
+    ocr = _ocr_with(
+        [
+            {"test_name": "Glucose", "value": "108", "abnormal_flag": "H"},
+            {"test_name": "", "value": "  ", "abnormal_flag": "no"},  # spacer/subtotal row
+            {"test_name": "Potassium", "value": "", "abnormal_flag": "no"},  # pending result
+            {"test_name": "Sodium", "value": "140", "abnormal_flag": "no"},
+        ],
+        [
+            {
+                "type": "table",
+                "content": "<table><tr><td>Glucose</td><td>108</td></tr></table>",
+                "top_left_x": 10,
+                "top_left_y": 10,
+                "bottom_right_x": 100,
+                "bottom_right_y": 40,
+            }
+        ],
+    )
+    # Empty words = scanned-PDF path (coarse OCR row-estimate). Must not raise a ValidationError.
+    report = map_lab_report(ocr, [])
+    assert [r.test_name for r in report.results] == ["Glucose", "Sodium"]

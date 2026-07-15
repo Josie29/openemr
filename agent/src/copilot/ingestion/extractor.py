@@ -337,6 +337,15 @@ def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
             continue  # skip a malformed (non-object) result entry rather than crashing the turn
         test_name = str(raw.get("test_name", ""))
         value = str(raw.get("value", "")).strip()
+        if not test_name.strip() or not value:
+            # A spacer/subtotal/pending row (or a degraded scan) yields a blank name or value,
+            # which is not a citable analyte+value fact. Skip it — emitting it would violate the
+            # schema's min_length guard and raise a ValidationError that escapes ExtractionError.
+            logger.warning(
+                "dropping lab row with a blank test name or value",
+                extra={"test_name": raw.get("test_name"), "value": raw.get("value")},
+            )
+            continue
         box: BoundingBox | None
         # PRIMARY: the exact box from the PDF text layer, already in points.
         located = locate_value_box(test_name, value, words, cursor)
@@ -346,8 +355,13 @@ def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
             # FALLBACK: the coarse OCR row-estimate (native pixels), converted to points.
             estimate = (
                 _estimate_row_box(
-                    test_name, ordinal, len(raw_results),
-                    table_box, name_to_index, total_rows, page_no,
+                    test_name,
+                    ordinal,
+                    len(raw_results),
+                    table_box,
+                    name_to_index,
+                    total_rows,
+                    page_no,
                 )
                 or fallback_box
             )
@@ -535,7 +549,8 @@ def _value_confidence(value: str, page: dict[str, Any]) -> float | None:
         matched = [
             float(w["confidence"])
             for w in words
-            if isinstance(w, dict) and _norm(str(w.get("text", ""))) == target
+            if isinstance(w, dict)
+            and _norm(str(w.get("text", ""))) == target
             and isinstance(w.get("confidence"), (int, float))
         ]
         if matched:

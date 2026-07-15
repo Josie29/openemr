@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from copilot.graph.workers import build_intake_extractor
 from copilot.ingestion.extractor import (
     DocumentExtractor,
     ExtractedDocument,
+    ExtractionError,
     FixtureOcrBackend,
     FixturePdfByteSource,
     map_lab_report,
@@ -226,3 +228,76 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
     assert source.document_id == "doc-1"
     assert source.bounding_box is not None
     assert source.to_citation().source_type is CitationSourceType.LAB_PDF
+
+
+def _ocr_with(results: object, blocks: list[dict[str, object]]) -> dict[str, object]:
+    """Build a minimal OCR response with the given annotation results and page blocks."""
+    return {
+        "document_annotation": json.dumps({"results": results}),
+        "pages": [
+            {
+                "index": 0,
+                "dimensions": {"dpi": 93, "width": 791, "height": 1023},
+                "blocks": blocks,
+                "tables": [],
+            }
+        ],
+    }
+
+
+def test_malformed_document_annotation_raises_extraction_error() -> None:
+    """A truncated/invalid OCR JSON must raise ExtractionError, not a raw JSONDecodeError.
+
+    attach_and_extract only catches ExtractionError; if the mapping leaked a JSONDecodeError the
+    physician's whole /chat turn would 500 instead of degrading to 'no lab facts'.
+    """
+    bad = {"document_annotation": "{not valid json", "pages": [{"index": 0, "dimensions": {}}]}
+    with pytest.raises(ExtractionError):
+        map_lab_report(bad)
+
+
+def test_malformed_table_block_does_not_crash() -> None:
+    """A table block missing its coordinate keys must not raise (finding #1 KeyError path).
+
+    Live OCR can return a table block without the flat top_left_x etc.; the mapper must skip it and
+    fall back, never crash the turn.
+    """
+    ocr = _ocr_with(
+        [{"test_name": "Glucose", "value": "108", "abnormal_flag": "H"}],
+        [{"type": "table", "content": "<table><tr><td>Glucose</td><td>108</td></tr></table>"}],
+    )
+    report, _ = map_lab_report(ocr)  # must not raise despite the coordinate-less table block
+    assert len(report.results) == 1
+
+
+def test_non_dict_result_entry_is_skipped() -> None:
+    """A non-object entry in results is skipped, not crashed on (finding #1 AttributeError path)."""
+    ocr = _ocr_with(
+        ["garbage", {"test_name": "Sodium", "value": "140", "abnormal_flag": "no"}],
+        [{"type": "table", "content": "<table><tr><td>Sodium</td><td>140</td></tr></table>",
+          "top_left_x": 10, "top_left_y": 10, "bottom_right_x": 100, "bottom_right_y": 40}],
+    )
+    report, _ = map_lab_report(ocr)
+    assert [r.test_name for r in report.results] == ["Sodium"]
+
+
+def test_no_table_block_falls_back_to_whole_page_box() -> None:
+    """A non-tabular OCR layout must still surface its values, not silently drop them (finding #4).
+
+    Without a fallback the Co-Pilot would tell the physician it found no labs even though the report
+    plainly contains them; the fallback highlights the whole page instead of losing the fact.
+    """
+    ocr = _ocr_with(
+        [
+            {"test_name": "Glucose", "value": "108", "abnormal_flag": "H"},
+            {"test_name": "Creatinine", "value": "1.44", "abnormal_flag": "H"},
+        ],
+        [{"type": "text", "content": "Glucose 108  Creatinine 1.44",
+          "top_left_x": 5, "top_left_y": 5, "bottom_right_x": 50, "bottom_right_y": 20}],
+    )
+    report, _ = map_lab_report(ocr)
+    assert len(report.results) == 2  # values survived despite no table block
+    box = report.results[0].citation.bounding_box
+    assert box is not None
+    # Whole-page fallback: native-pixel box spanning the full page dimensions.
+    assert (box.x, box.y, box.width, box.height) == (0, 0, 791, 1023)

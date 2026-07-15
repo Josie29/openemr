@@ -284,13 +284,11 @@ def _stamp(resolver: CitationResolver, ref: SourceRef) -> SourceRef | None:
         update["label"] = resolution.identity.label
         update["date"] = resolution.identity.date
         update["date_label"] = resolution.identity.date_label
-    # Document-extraction facts also carry the click-to-source overlay provenance (JOS-54/57).
-    # Stamped by code from the extraction sidecar, never model-authored — `to_citation` then
-    # projects them onto the wire `LabPdfCitation` the sidebar draws.
-    if resolution.document_id is not None:
-        update["document_id"] = resolution.document_id
-    if resolution.page is not None:
-        update["page"] = resolution.page
-    if resolution.bounding_box is not None:
-        update["bounding_box"] = resolution.bounding_box
+    # Click-to-source overlay provenance (JOS-54/57) is ALWAYS system-set from the resolution —
+    # written unconditionally (None for a non-document fact) so any model-authored box is stripped,
+    # never trusted. `to_citation` routes to a LabPdfCitation purely on `bounding_box is not None`,
+    # so leaving a fabricated box here would draw an overlay on a fact that isn't document-derived.
+    update["document_id"] = resolution.document_id
+    update["page"] = resolution.page
+    update["bounding_box"] = resolution.bounding_box
     return ref.model_copy(update=update)

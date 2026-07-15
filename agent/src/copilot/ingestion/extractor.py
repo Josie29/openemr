@@ -291,35 +291,52 @@ def map_lab_report(ocr: dict[str, Any]) -> tuple[LabReport, dict[int, float]]:
         the registry can convert the native-pixel boxes to PDF points.
 
     Raises:
-        ExtractionError: If the response has no pages to place boxes on.
+        ExtractionError: If the response has no usable page, or ``document_annotation`` is present
+            but not valid JSON. Any mapping failure surfaces as this one type so the caller can
+            degrade to "no facts" rather than crashing the turn.
     """
     annotation = ocr.get("document_annotation")
     if isinstance(annotation, str):
-        annotation = json.loads(annotation)
-    raw_results = list((annotation or {}).get("results") or [])
+        try:
+            annotation = json.loads(annotation)
+        except ValueError as exc:  # JSONDecodeError subclasses ValueError
+            raise ExtractionError("OCR document_annotation is not valid JSON") from exc
+    if not isinstance(annotation, dict):
+        annotation = {}
+    raw_annotation_results = annotation.get("results")
+    raw_results = raw_annotation_results if isinstance(raw_annotation_results, list) else []
 
     pages = ocr.get("pages") or []
-    if not pages:
-        raise ExtractionError("OCR response carries no pages")
+    if not pages or not isinstance(pages[0], dict):
+        raise ExtractionError("OCR response carries no usable page")
     page = pages[0]
     page_no = int(page.get("index", 0)) + 1  # `index` is 0-based; BoundingBox.page is 1-based.
     dims = page.get("dimensions") or {}
     dpi = float(dims.get("dpi") or 72.0)
 
     table_box = _find_table_box(page)
+    # Coarse whole-page box, used only when there is no table block to locate rows on (finding #4):
+    # surface the values on a page-wide overlay rather than dropping the clinical facts entirely.
+    fallback_box = _page_box(page, page_no)
+    if table_box is None and raw_results:
+        logger.warning(
+            "OCR response has no table block; using a whole-page fallback box for lab values",
+            extra={"result_count": len(raw_results)},
+        )
     rows = _parse_table_rows(_table_html(page))
     name_to_index = {_norm(cells[0]): i for i, cells in enumerate(rows) if cells}
     total_rows = len(rows) or 1
 
     results: list[LabResult] = []
     for ordinal, raw in enumerate(raw_results):
+        if not isinstance(raw, dict):
+            continue  # skip a malformed (non-object) result entry rather than crashing the turn
         box = _estimate_row_box(
-            raw.get("test_name", ""), ordinal, len(raw_results),
+            str(raw.get("test_name", "")), ordinal, len(raw_results),
             table_box, name_to_index, total_rows, page_no,
-        )
+        ) or fallback_box
         if box is None:
-            # No table geometry to place this value on — drop it rather than fabricate a box
-            # (PRD Core Req 5; the schema would reject it anyway).
+            # No table geometry and no usable page dimensions — drop rather than fabricate a box.
             logger.warning(
                 "dropping lab result with no locatable box",
                 extra={"test": raw.get("test_name")},
@@ -383,16 +400,43 @@ def _estimate_row_box(
 
 
 def _find_table_box(page: dict[str, Any]) -> tuple[float, float, float, float] | None:
-    """Return the (x0, y0, x1, y1) box of the page's first ``table`` block, or None."""
+    """Return the (x0, y0, x1, y1) box of the page's first ``table`` block, or None.
+
+    Tolerant of a malformed block (missing or non-numeric corner keys): such a block is skipped
+    rather than raising, so a bad OCR payload degrades to "no table box" instead of crashing.
+    """
+    corners = ("top_left_x", "top_left_y", "bottom_right_x", "bottom_right_y")
     for block in page.get("blocks") or []:
-        if block.get("type") == "table":
-            return (
-                float(block["top_left_x"]),
-                float(block["top_left_y"]),
-                float(block["bottom_right_x"]),
-                float(block["bottom_right_y"]),
-            )
+        if not isinstance(block, dict) or block.get("type") != "table":
+            continue
+        nums = [c for c in (block.get(key) for key in corners) if isinstance(c, (int, float))]
+        if len(nums) != 4:
+            continue
+        x0, y0, x1, y1 = (float(nums[0]), float(nums[1]), float(nums[2]), float(nums[3]))
+        # Require a sane box (positive extent); an inverted/degenerate one would produce a negative
+        # row-band coordinate that fails BoundingBox validation — fall through to the page box.
+        if x1 > x0 and y1 > y0 and x0 >= 0 and y0 >= 0:
+            return (x0, y0, x1, y1)
     return None
+
+
+def _page_box(page: dict[str, Any], page_no: int) -> BoundingBox | None:
+    """A whole-page native-pixel box — the coarse fallback when no table rows can be located.
+
+    Returns None when the page carries no usable dimensions (so the caller drops the value rather
+    than emit a zero-area box the schema would reject).
+    """
+    dims = page.get("dimensions") or {}
+    width = dims.get("width")
+    height = dims.get("height")
+    if not (
+        isinstance(width, (int, float))
+        and isinstance(height, (int, float))
+        and width > 0
+        and height > 0
+    ):
+        return None
+    return BoundingBox(page=page_no, x=0, y=0, width=float(width), height=float(height))
 
 
 def _table_html(page: dict[str, Any]) -> str:

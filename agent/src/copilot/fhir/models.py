@@ -547,13 +547,54 @@ def _uploaded_document_attachment(resource: dict[str, Any]) -> dict[str, Any] | 
     return None
 
 
+def _is_lab_document(resource: dict[str, Any]) -> bool:
+    """Whether a DocumentReference is a lab report, by its category (or type) naming a lab.
+
+    OpenEMR maps the uploaded document's category to ``DocumentReference.category`` (a list of
+    CodeableConcept); a lab report carries the text ``"Lab Report"``. ``DocumentReference.type`` is
+    typically the ``UNK`` NullFlavor for uploaded files (verified against live FHIR), so category is
+    the reliable signal, with type as a fallback. Matched case-insensitively on any category
+    text/coding so ``"Laboratory"``/``"Labs"`` variants also pass — and, critically, a non-lab
+    uploaded PDF (a referral, intake form, or insurance card) is excluded so it is not OCR'd through
+    the lab schema.
+
+    Args:
+        resource: A FHIR ``DocumentReference`` resource.
+
+    Returns:
+        True when a category (or type) CodeableConcept names a lab document.
+    """
+    categories = resource.get("category")
+    concepts: list[Any] = list(categories) if isinstance(categories, list) else []
+    concepts.append(resource.get("type"))
+    for concept in concepts:
+        if not isinstance(concept, dict):
+            continue
+        text = concept.get("text")
+        if isinstance(text, str) and "lab" in text.lower():
+            return True
+        codings = concept.get("coding")
+        if not isinstance(codings, list):
+            continue
+        for coding in codings:
+            if not isinstance(coding, dict):
+                continue
+            for field in ("display", "code"):
+                value = coding.get(field)
+                if isinstance(value, str) and "lab" in value.lower():
+                    return True
+    return False
+
+
 class LabDocumentSummary(BaseModel):
-    """A discovered uploaded lab document (a ``DocumentReference`` with a PDF/Binary attachment).
+    """A discovered uploaded lab document (a ``DocumentReference`` categorized as a lab report).
 
     Returned by ``get_lab_documents`` so the intake-extractor can find the id of a patient's
-    uploaded lab report and hand it to ``attach_and_extract``. This is metadata only — the document
-    is OCR'd from its bytes, not read from FHIR (the SMART token cannot read the Binary; see the
-    seam spec), so no ``citation_identity`` is needed here.
+    uploaded lab report and hand it to ``attach_and_extract``. A document qualifies only when it has
+    a binary (PDF/Binary) attachment AND its category names a lab — so a non-lab uploaded PDF is not
+    listed and OCR'd through the lab schema. This is metadata only — the document is OCR'd from its
+    bytes, not read from FHIR (the SMART token cannot read the Binary; see the seam spec), so no
+    ``citation_identity`` is needed here.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -573,14 +614,16 @@ class LabDocumentSummary(BaseModel):
             resource: A FHIR ``DocumentReference`` resource (parsed JSON).
 
         Returns:
-            The typed summary for an uploaded (PDF/Binary) document, or None for a text note or a
-            resource lacking a logical id.
+            The typed summary for an uploaded lab (PDF/Binary + lab category) document, or None for
+            a text note, a non-lab uploaded document, or a resource lacking a logical id.
         """
         resource_id = resource.get("id")
         if not isinstance(resource_id, str) or not resource_id:
             return None
         attachment = _uploaded_document_attachment(resource)
         if attachment is None:
+            return None
+        if not _is_lab_document(resource):
             return None
         title = attachment.get("title")
         if not (isinstance(title, str) and title.strip()):

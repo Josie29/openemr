@@ -19,7 +19,9 @@ class ConversationSession:
     guideline registry, and the ``documents`` extracted-lab-fact registry. Accumulating all three is
     what lets a later turn cite a resource an earlier turn read, a guideline chunk an earlier turn
     retrieved, or a lab fact an earlier turn extracted — the grounding gate resolves claims against
-    them (and the extraction cache means a follow-up need not re-OCR the same report).
+    them. (Note: the ``documents`` registry currently accumulates facts for grounding only;
+    ``attach_and_extract`` still re-runs OCR each call. Caching the extraction to skip re-OCR on a
+    follow-up is tracked separately — see the conditional-extraction issue.)
     """
 
     patient_id: str

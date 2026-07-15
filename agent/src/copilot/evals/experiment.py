@@ -7,7 +7,7 @@ from langfuse.experiment import EvaluatorFunction, RunEvaluatorFunction
 
 from copilot.config import get_settings
 from copilot.evals import rubrics
-from copilot.evals.cases import DATASET_NAME, ExpectedOutcome
+from copilot.evals.cases import CI_DATASET_NAME, DATASET_NAME, ExpectedOutcome
 from copilot.evals.runner import resolve_eval_model_tier, run_case
 from copilot.observability import configure_observability
 from copilot.schemas import ChatResponse
@@ -98,7 +98,7 @@ def eval_safe_refusal(
         rubrics.safe_refusal(
             _response(output),
             refused=bool(output.get("refused")),
-            expect_answer=expected.expect_answer,
+            behavior=expected.behavior,
             must_not_claim=expected.must_not_claim,
         ),
     )
@@ -220,15 +220,17 @@ def experiment(context: RunnerContext) -> Any:
 
 
 def run_local() -> None:
-    """Run the experiment locally against the hosted dataset (smoke test, never fails the process).
+    """Run the full golden set locally against the hosted dataset (paid; never fails the process).
 
-    Loads the Langfuse-hosted dataset directly and prints the run-level means and the run URL.
-    Unlike the CI entrypoint, a regression is reported but not raised — this is for iterating on the
-    suite, not gating.
+    This is the **on-demand, approval-gated full-50 run** (~$2 on Haiku) — it makes real model
+    calls for every case in ``copilot-golden-v1``. The cheap 3-case CI gate uses the
+    ``copilot-golden-ci`` subset instead (see the evals workflow). A regression is reported but not
+    raised — this is for iterating on the suite, not gating.
     """
     _enable_tracing()
     agent_model = resolve_eval_model_tier().value
-    print(f"Agent model under eval: {agent_model}")  # noqa: T201 - CLI entrypoint
+    print(f"PAID full run against '{DATASET_NAME}' on {agent_model} "  # noqa: T201 - CLI entrypoint
+          f"(CI uses the 3-case '{CI_DATASET_NAME}' subset).")
     client = get_client()
     dataset = client.get_dataset(DATASET_NAME)
     result = client.run_experiment(

@@ -44,20 +44,21 @@ class AbnormalFlag(StrEnum):
 
 
 class BoundingBox(BaseModel):
-    """Native pixel box locating a value on a source page, emitted by the extractor.
+    """Box locating a value on a source page, in PDF points, emitted by the extractor.
 
-    Drives the click-to-source overlay (W2_ARCHITECTURE §3.3). Coordinates are page-native pixels
-    with a top-left origin — not normalized — so the overlay maps them straight onto the rendered
-    page.
+    Drives the click-to-source overlay (W2_ARCHITECTURE §3.3). Coordinates are PDF user-space points
+    (72-DPI) with a top-left origin — the exact space the overlay renders in — so the overlay maps
+    them straight onto the rendered page with no conversion. Boxes come from the PDF text layer
+    where present (already in points); the scanned fallback converts its native pixels upstream.
     """
 
     model_config = ConfigDict(frozen=True)
 
     page: int = Field(ge=1, description="1-based page the box is on")
-    x: float = Field(ge=0, description="Left edge in native page pixels")
-    y: float = Field(ge=0, description="Top edge in native page pixels")
-    width: float = Field(gt=0, description="Box width in native page pixels")
-    height: float = Field(gt=0, description="Box height in native page pixels")
+    x: float = Field(ge=0, description="Left edge in PDF points")
+    y: float = Field(ge=0, description="Top edge in PDF points")
+    width: float = Field(gt=0, description="Box width in PDF points")
+    height: float = Field(gt=0, description="Box height in PDF points")
 
 
 class Citation(BaseModel):
@@ -77,7 +78,7 @@ class Citation(BaseModel):
     )
     bounding_box: BoundingBox | None = Field(
         default=None,
-        description="Native pixel box locating the value on the page. Required for lab_pdf facts.",
+        description="Box locating the value on the page (PDF points). Required for lab_pdf facts.",
     )
     source_type: SourceType | None = Field(
         default=None,

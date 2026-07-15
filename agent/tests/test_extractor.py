@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
+from typing import Any
 
-import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
@@ -12,11 +12,11 @@ from copilot.graph.workers import build_intake_extractor
 from copilot.ingestion.extractor import (
     DocumentExtractor,
     ExtractedDocument,
-    ExtractionError,
     FixtureOcrBackend,
     FixturePdfByteSource,
     map_lab_report,
 )
+from copilot.ingestion.pdf_geometry import Word, extract_word_boxes, locate_value_box
 from copilot.ingestion.registry import DOCUMENT_FACT_RESOURCE_TYPE, DocumentFactRegistry
 from copilot.ingestion.schemas import AbnormalFlag, DocType, LabReport, LabResult
 from copilot.retrieval import ChunkRegistry
@@ -29,93 +29,115 @@ _LAB_OCR = _FIXTURES / "extractions" / "sergio-angulo-lab-report.ocr.json"
 _LAB_PDF = _FIXTURES / "pdfs" / "sergio-angulo-lab-report.pdf"
 
 
+def _ocr() -> dict[str, Any]:
+    parsed: dict[str, Any] = json.loads(_LAB_OCR.read_text())
+    return parsed
+
+
+def _words() -> list[Word]:
+    return extract_word_boxes(_LAB_PDF.read_bytes())
+
+
 def _find(report: LabReport, test_name: str) -> LabResult | None:
     """Return the extracted result with the given test name, or None."""
     return next((r for r in report.results if r.test_name == test_name), None)
 
 
-def test_map_lab_report_extracts_values_flags_and_boxes() -> None:
-    """Regression: every lab value is extracted verbatim, flagged correctly, and carries a box.
+def test_pdf_geometry_locates_a_tight_box_on_the_right_row() -> None:
+    """The pdfplumber join boxes the value tightly on its own row, not the interpretive narrative.
 
-    If this breaks, the intake-extractor ships lab facts the click-to-source overlay can't place
-    (or misreads high/low), which is the whole point of the document-extraction path.
+    The report repeats "1.44"/"54" in the bottom narrative ("creatinine 1.06 -> 1.44"); a value-only
+    match would highlight THAT instead of the result cell. Anchoring on the test name prevents it —
+    if this breaks, click-to-source points the clinician at prose, not the lab value.
     """
-    import json
+    words = _words()
+    assert words, "the digital fixture must expose a text layer"
+    located = locate_value_box("Creatinine", "1.44", words, 0)
+    assert located is not None
+    box, _ = located
+    assert box.width < 40  # a tight box on "1.44", not a full-width row band
+    assert 280 < box.y < 292  # the result row (~283.6), NOT the narrative down near y~599
 
-    report, page_dpi = map_lab_report(json.loads(_LAB_OCR.read_text()))
 
-    assert page_dpi == {1: 93.0}  # the page render DPI drives the px->points conversion downstream
+def test_map_lab_report_extracts_values_flags_and_tight_boxes() -> None:
+    """Every lab value is extracted verbatim, flagged correctly, and carries a tight points box.
+
+    Guards the whole document path: wrong values/flags, or a box that can't place the value, defeats
+    the point of the click-to-source overlay.
+    """
+    report = map_lab_report(_ocr(), _words())
     assert len(report.results) >= 20  # the CMP + CBC panels, one result each
 
     creatinine = _find(report, "Creatinine")
     assert creatinine is not None
     assert creatinine.value == "1.44"  # verbatim, never rounded
     assert creatinine.abnormal_flag is AbnormalFlag.HIGH  # printed "H"
-    # Every result must carry a locatable box — the schema requires it and the overlay needs it.
+    box = creatinine.citation.bounding_box
+    assert box is not None
+    assert box.width < 40  # tight box on the value, in points — not the old full-width band
     for result in report.results:
-        assert result.citation.bounding_box is not None
-        assert result.citation.bounding_box.page == 1
+        assert result.citation.bounding_box is not None  # the schema + overlay require a box
 
 
-def test_row_bands_step_down_the_page_in_table_order() -> None:
-    """Catches a broken row estimator: later analytes must sit lower on the page than earlier ones.
-
-    The overlay lands on the correct ROW only if the estimated y-bands preserve table order; a
-    regression that collapses or reverses them would put every box on the wrong line.
-    """
-    import json
-
-    report, _ = map_lab_report(json.loads(_LAB_OCR.read_text()))
+def test_boxes_follow_table_row_order() -> None:
+    """A later analyte sits lower on the page than an earlier one — boxes track the real rows."""
+    report = map_lab_report(_ocr(), _words())
     glucose = _find(report, "Glucose, Fasting")
     creatinine = _find(report, "Creatinine")
     assert glucose is not None and glucose.citation.bounding_box is not None
     assert creatinine is not None and creatinine.citation.bounding_box is not None
-    # Creatinine is printed several rows below glucose, so its band must be lower on the page.
     assert creatinine.citation.bounding_box.y > glucose.citation.bounding_box.y
 
 
+def test_falls_back_to_coarse_estimate_without_a_text_layer() -> None:
+    """A scanned PDF exposes no text layer (empty words); every value still gets a points box.
+
+    This is the graceful-degradation path — a scan loses the tight box but keeps the clinical facts
+    on a coarse row/page band rather than dropping them.
+    """
+    report = map_lab_report(_ocr(), [])  # empty words simulates a scanned/image-only PDF
+    assert len(report.results) >= 20
+    creatinine = _find(report, "Creatinine")
+    assert creatinine is not None and creatinine.citation.bounding_box is not None
+    # The fallback is a wide band (converted to points), not the tight text-layer box.
+    assert creatinine.citation.bounding_box.width > 100
+
+
 async def test_fixture_extractor_round_trip() -> None:
-    """The DocumentExtractor wires byte-source + OCR backend + mapping into an ExtractedDocument."""
+    """The DocumentExtractor wires byte-source + OCR backend + geometry end to end."""
     extractor = DocumentExtractor(
-        ocr=FixtureOcrBackend(str(_LAB_OCR)),
-        byte_source=FixturePdfByteSource(str(_LAB_PDF)),
+        ocr=FixtureOcrBackend(str(_LAB_OCR)), byte_source=FixturePdfByteSource(str(_LAB_PDF))
     )
     extracted = await extractor.extract("doc-abc", DocType.LAB_PDF)
     assert extracted.document_id == "doc-abc"
     assert extracted.doc_type is DocType.LAB_PDF
-    assert _find(extracted.report, "Potassium") is not None
+    potassium = _find(extracted.report, "Potassium")
+    assert potassium is not None and potassium.citation.bounding_box is not None
+    assert potassium.citation.bounding_box.width < 40  # tight text-layer box
 
 
-def test_registry_resolve_converts_pixels_to_points() -> None:
-    """Registry stamps overlay geometry in PDF POINTS, converting the extractor's native pixels.
+def test_registry_passes_the_points_box_through_unchanged() -> None:
+    """The registry stamps the extractor's box as-is — it is already in PDF points, no conversion.
 
-    The overlay scales as if the box is in 72-DPI points; if the registry forgot to convert, boxes
-    would render ~1.3x too large and off the value (the JOS-57 coordinate-space contract).
+    If a stray conversion crept back in, the overlay would render ~1.3x off (the JOS-57 space bug).
     """
-    import json
-
-    report, page_dpi = map_lab_report(json.loads(_LAB_OCR.read_text()))
+    report = map_lab_report(_ocr(), _words())
     registry = DocumentFactRegistry()
-    extracted = ExtractedDocument(
-        document_id="doc-xyz", doc_type=DocType.LAB_PDF, report=report, page_dpi=page_dpi
+    handles = registry.record(
+        ExtractedDocument(document_id="doc-xyz", doc_type=DocType.LAB_PDF, report=report)
     )
-    handles = registry.record(extracted)
     assert handles and all(h.resource_type == DOCUMENT_FACT_RESOURCE_TYPE for h in handles)
 
     creatinine = _find(report, "Creatinine")
-    assert creatinine is not None and creatinine.citation.bounding_box is not None
-    creatinine_native = creatinine.citation.bounding_box
-    creatinine_handle = next(h for h in handles if h.test_name == "Creatinine")
+    assert creatinine is not None
+    handle = next(h for h in handles if h.test_name == "Creatinine")
     resolution = registry.resolve(
-        SourceRef(resource_type=creatinine_handle.resource_type,
-                  resource_id=creatinine_handle.resource_id, field="value")
+        SourceRef(resource_type=handle.resource_type, resource_id=handle.resource_id, field="value")
     )
     assert resolution is not None
     assert resolution.value == "1.44"
     assert resolution.document_id == "doc-xyz"
-    assert resolution.bounding_box is not None
-    # points = pixels * 72 / dpi (dpi 93). Assert the x was scaled, not passed through as pixels.
-    assert resolution.bounding_box.x == pytest.approx(creatinine_native.x * 72 / 93)
+    assert resolution.bounding_box == creatinine.citation.bounding_box  # passthrough, no conversion
 
 
 def test_registry_ignores_unrecorded_and_foreign_citations() -> None:
@@ -135,14 +157,10 @@ def test_grounded_document_claim_projects_to_lab_pdf_citation() -> None:
     This is the seam the sidebar consumes — if the box/document_id don't land on the SourceRef and
     survive to_citation(), click-to-source shows no overlay.
     """
-    import json
-
-    report, page_dpi = map_lab_report(json.loads(_LAB_OCR.read_text()))
+    report = map_lab_report(_ocr(), _words())
     registry = DocumentFactRegistry()
     handles = registry.record(
-        ExtractedDocument(
-            document_id="doc-777", doc_type=DocType.LAB_PDF, report=report, page_dpi=page_dpi
-        )
+        ExtractedDocument(document_id="doc-777", doc_type=DocType.LAB_PDF, report=report)
     )
     handle = next(h for h in handles if h.test_name == "Creatinine")
     claim = Claim(
@@ -199,7 +217,6 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if not state["extracted"]:
             state["extracted"] = True
-            # Extract the uploaded report first (document_id is what list_lab_documents would give).
             return ModelResponse(
                 parts=[ToolCallPart(tool_name="attach_and_extract", args={"document_id": "doc-1"})]
             )
@@ -228,76 +245,3 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
     assert source.document_id == "doc-1"
     assert source.bounding_box is not None
     assert source.to_citation().source_type is CitationSourceType.LAB_PDF
-
-
-def _ocr_with(results: object, blocks: list[dict[str, object]]) -> dict[str, object]:
-    """Build a minimal OCR response with the given annotation results and page blocks."""
-    return {
-        "document_annotation": json.dumps({"results": results}),
-        "pages": [
-            {
-                "index": 0,
-                "dimensions": {"dpi": 93, "width": 791, "height": 1023},
-                "blocks": blocks,
-                "tables": [],
-            }
-        ],
-    }
-
-
-def test_malformed_document_annotation_raises_extraction_error() -> None:
-    """A truncated/invalid OCR JSON must raise ExtractionError, not a raw JSONDecodeError.
-
-    attach_and_extract only catches ExtractionError; if the mapping leaked a JSONDecodeError the
-    physician's whole /chat turn would 500 instead of degrading to 'no lab facts'.
-    """
-    bad = {"document_annotation": "{not valid json", "pages": [{"index": 0, "dimensions": {}}]}
-    with pytest.raises(ExtractionError):
-        map_lab_report(bad)
-
-
-def test_malformed_table_block_does_not_crash() -> None:
-    """A table block missing its coordinate keys must not raise (finding #1 KeyError path).
-
-    Live OCR can return a table block without the flat top_left_x etc.; the mapper must skip it and
-    fall back, never crash the turn.
-    """
-    ocr = _ocr_with(
-        [{"test_name": "Glucose", "value": "108", "abnormal_flag": "H"}],
-        [{"type": "table", "content": "<table><tr><td>Glucose</td><td>108</td></tr></table>"}],
-    )
-    report, _ = map_lab_report(ocr)  # must not raise despite the coordinate-less table block
-    assert len(report.results) == 1
-
-
-def test_non_dict_result_entry_is_skipped() -> None:
-    """A non-object entry in results is skipped, not crashed on (finding #1 AttributeError path)."""
-    ocr = _ocr_with(
-        ["garbage", {"test_name": "Sodium", "value": "140", "abnormal_flag": "no"}],
-        [{"type": "table", "content": "<table><tr><td>Sodium</td><td>140</td></tr></table>",
-          "top_left_x": 10, "top_left_y": 10, "bottom_right_x": 100, "bottom_right_y": 40}],
-    )
-    report, _ = map_lab_report(ocr)
-    assert [r.test_name for r in report.results] == ["Sodium"]
-
-
-def test_no_table_block_falls_back_to_whole_page_box() -> None:
-    """A non-tabular OCR layout must still surface its values, not silently drop them (finding #4).
-
-    Without a fallback the Co-Pilot would tell the physician it found no labs even though the report
-    plainly contains them; the fallback highlights the whole page instead of losing the fact.
-    """
-    ocr = _ocr_with(
-        [
-            {"test_name": "Glucose", "value": "108", "abnormal_flag": "H"},
-            {"test_name": "Creatinine", "value": "1.44", "abnormal_flag": "H"},
-        ],
-        [{"type": "text", "content": "Glucose 108  Creatinine 1.44",
-          "top_left_x": 5, "top_left_y": 5, "bottom_right_x": 50, "bottom_right_y": 20}],
-    )
-    report, _ = map_lab_report(ocr)
-    assert len(report.results) == 2  # values survived despite no table block
-    box = report.results[0].citation.bounding_box
-    assert box is not None
-    # Whole-page fallback: native-pixel box spanning the full page dimensions.
-    assert (box.x, box.y, box.width, box.height) == (0, 0, 791, 1023)

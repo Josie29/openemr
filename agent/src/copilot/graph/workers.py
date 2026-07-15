@@ -156,10 +156,11 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         Args:
             ctx: The run context (holds the patient-scoped FHIR client).
         """
-        if ctx.deps.lab_documents_cache is None:
-            deps = ctx.deps
-            deps.lab_documents_cache = await deps.fhir.get_lab_documents(deps.patient_id)
-        return ctx.deps.lab_documents_cache
+        cache = ctx.deps.lab_documents_cache
+        if cache is None:
+            cache = await ctx.deps.fhir.get_lab_documents(ctx.deps.patient_id)
+            ctx.deps.lab_documents_cache = cache
+        return cache
 
     @agent.tool
     async def attach_and_extract(

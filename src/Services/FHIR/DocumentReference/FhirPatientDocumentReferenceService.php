@@ -11,6 +11,7 @@
 
 namespace OpenEMR\Services\FHIR\DocumentReference;
 
+use OpenEMR\Common\Uuid\UuidRegistry;
 use OpenEMR\FHIR\R4\FHIRDomainResource\FHIRDocumentReference;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRCodeableConcept;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRId;
@@ -30,6 +31,7 @@ use OpenEMR\Services\FHIR\FhirServiceBase;
 use OpenEMR\Services\FHIR\Traits\FhirServiceBaseEmptyTrait;
 use OpenEMR\Services\FHIR\Traits\PatientSearchTrait;
 use OpenEMR\Services\FHIR\UtilsService;
+use OpenEMR\Services\PatientService;
 use OpenEMR\Services\Search\CompositeSearchField;
 use OpenEMR\Services\Search\FhirSearchParameterDefinition;
 use OpenEMR\Services\Search\ISearchField;
@@ -53,10 +55,42 @@ class FhirPatientDocumentReferenceService extends FhirServiceBase
      */
     private DocumentService $service;
 
+    /**
+     * The bound patient's pid when serving a patient-scoped (self-access) request, else null.
+     * Set per-request by getAll() so searchForOpenEMRRecords can authorize documents by patient
+     * ownership rather than the clinician category ACL.
+     */
+    private ?int $patientRequestPid = null;
+
     public function __construct($fhirApiURL = null)
     {
         parent::__construct($fhirApiURL);
         $this->service = new DocumentService();
+    }
+
+    /**
+     * Capture the patient binding for the current request before delegating to the base search.
+     *
+     * A non-null $puuidBind means the route bound this request to a single patient (a patient-scoped
+     * SMART request; see the GET /fhir/DocumentReference route). We resolve it to a pid so a patient
+     * reading their own documents is authorized by patient ownership + information-blocking rules
+     * (US Core self-access) instead of the clinician category ACL, which is the wrong gate for a
+     * patient. Cleared after the call so no context leaks across requests on a reused instance.
+     *
+     * @param array<string, mixed> $fhirSearchParameters
+     */
+    public function getAll($fhirSearchParameters, $puuidBind = null): ProcessingResult
+    {
+        $this->patientRequestPid = null;
+        if (!empty($puuidBind)) {
+            $pid = (new PatientService())->getPidByUuid(UuidRegistry::uuidToBytes($puuidBind));
+            $this->patientRequestPid = !empty($pid) ? (int) $pid : null;
+        }
+        try {
+            return parent::getAll($fhirSearchParameters, $puuidBind);
+        } finally {
+            $this->patientRequestPid = null;
+        }
     }
 
     public function setSession(SessionInterface $session): void
@@ -126,7 +160,13 @@ class FhirPatientDocumentReferenceService extends FhirServiceBase
         } else {
             $openEMRSearchParameters['category_codes'] = $tokenField;
         }
-        return $this->service->search($openEMRSearchParameters);
+        // For a patient-scoped request, tell DocumentService to authorize each row by patient
+        // ownership (can_patient_access) rather than the clinician category ACL (can_access).
+        $options = [];
+        if ($this->patientRequestPid !== null) {
+            $options['patientPid'] = $this->patientRequestPid;
+        }
+        return $this->service->search($openEMRSearchParameters, true, $options);
     }
 
     public function parseOpenEMRRecord($dataRecord = [], $encode = false)

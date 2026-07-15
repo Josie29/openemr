@@ -76,7 +76,7 @@ redirect_uri="${origin}/interface/modules/custom_modules/${MODULE_DIR}/public/ca
 
 # The exact scopes the Co-Pilot's tools need. `launch` (never `launch/patient`,
 # whose substring match re-triggers the patient picker). See CopilotScopes.php.
-scope="openid fhirUser online_access launch patient/Patient.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Encounter.read patient/DocumentReference.read"
+scope="openid fhirUser online_access launch patient/Patient.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Encounter.read patient/DocumentReference.read patient/Binary.read"
 
 sql() { docker exec -i "$mysql_ctr" mariadb -uroot -proot openemr "$@"; }
 

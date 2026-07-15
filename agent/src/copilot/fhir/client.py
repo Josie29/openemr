@@ -1,3 +1,4 @@
+import base64
 from typing import Protocol
 
 import httpx
@@ -93,6 +94,17 @@ class FhirClient(Protocol):
 
         Raises:
             FhirError: If the read fails or times out.
+        """
+        ...
+
+    async def get_document_bytes(self, document_id: str) -> bytes:
+        """Fetch one document's raw bytes by its ``DocumentReference``/``Binary`` id, for OCR.
+
+        Keyed on the same document UUID the citation and click-to-source viewer use, so the
+        extracted facts resolve back to the real record.
+
+        Raises:
+            FhirError: If the read fails, times out, or returns no content.
         """
         ...
 
@@ -202,6 +214,27 @@ class HttpFhirClient:
         resources = await self._search("DocumentReference", patient_id)
         summaries = (LabDocumentSummary.try_from_fhir(r) for r in resources)
         return [summary for summary in summaries if summary is not None]
+
+    async def get_document_bytes(self, document_id: str) -> bytes:
+        try:
+            # OpenEMR streams the raw file for GET /Binary/{id}; ask for the binary, not FHIR JSON.
+            response = await self._client.get(
+                f"/Binary/{document_id}", headers={"Accept": "application/pdf, */*"}
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise FhirError(f"failed to read Binary/{document_id}") from exc
+        content_type = response.headers.get("content-type", "")
+        if "json" in content_type:
+            # Standards path: a FHIR Binary resource carries the content as base64 `data`.
+            data = response.json().get("data")
+            if not isinstance(data, str) or not data:
+                raise FhirError(f"Binary/{document_id} returned no data")
+            return base64.b64decode(data)
+        content = response.content
+        if not content:
+            raise FhirError(f"Binary/{document_id} returned no content")
+        return content
 
     async def ping(self) -> None:
         try:

@@ -159,6 +159,13 @@ flowchart TB
    **per-field / per-word confidence**. The extractor is given the target schema so its output is
    shaped, but its output is treated as **untrusted** until step 3. No separate OCR pass and no
    quote↔token match are needed — the geometry is native.
+   - **Where the bytes come from.** The document's bytes are fetched from OpenEMR over FHIR
+     `Binary` (`GET /Binary/{document_id}`) on the request's own patient-scoped SMART token
+     (`patient/Binary.read`), keyed on the same `DocumentReference` UUID the citation + click-to-source
+     viewer use. This required an OpenEMR-core fix so a patient-scoped request authorizes documents by
+     patient ownership (`can_patient_access`) rather than the clinician category ACL (`can_access`),
+     which also unblocks `DocumentReference` discovery of Documents-tab uploads. Fixture/offline mode
+     serves a committed PDF through the same path.
 3. **Parse, don't validate.** Raw extractor output is parsed into a strict Pydantic model
    (`LabReport` for `lab_pdf`, `IntakeForm` for `intake_form`). Per the PRD Engineering
    Requirements, **the schema is the source of truth, not what the extractor happens to return** —

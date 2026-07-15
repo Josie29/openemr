@@ -97,7 +97,7 @@ def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirC
         ValueError: If ``HTTP`` mode is selected without a base URL.
     """
     if settings.fhir_client_mode is FhirClientMode.FIXTURE:
-        return FixtureFhirClient.from_seed()
+        return FixtureFhirClient.from_seed(settings.document_pdf_path)
     # HTTP mode. A missing base URL is a misconfiguration, but we do not raise at startup —
     # crash-looping the deploy hides the cause. Construct a client anyway (empty base URL) so the
     # process starts and the misconfig surfaces as a red /ready FHIR probe; /chat separately 500s

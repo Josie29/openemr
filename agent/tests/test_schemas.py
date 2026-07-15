@@ -41,7 +41,7 @@ def _valid_lab_result(**overrides: object) -> LabResult:
         "citation": _valid_citation(),
     }
     fields.update(overrides)
-    return LabResult(**fields)  # type: ignore[arg-type]
+    return LabResult(**fields)
 
 
 # --- lab_pdf contract ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ def test_bounding_box_rejects_out_of_range_geometry(field: str, value: float) ->
     """
     box = {"page": 1, "x": 10.0, "y": 20.0, "width": 100.0, "height": 12.0, field: value}
     with pytest.raises(ValidationError):
-        BoundingBox(**box)  # type: ignore[arg-type]
+        BoundingBox(**box)
 
 
 @pytest.mark.parametrize("confidence", [1.5, -0.1])
@@ -116,7 +116,7 @@ def test_lab_result_requires_core_fields(missing: str) -> None:
     }
     del fields[missing]
     with pytest.raises(ValidationError):
-        LabResult(**fields)  # type: ignore[arg-type]
+        LabResult(**fields)
 
 
 @pytest.mark.parametrize("field", ["test_name", "value"])
@@ -191,10 +191,10 @@ def test_demographics_accepts_all_fields_absent() -> None:
 @pytest.mark.parametrize(
     "factory",
     [
-        lambda: Medication(name="Metformin"),
-        lambda: Allergy(substance="Penicillin"),
-        lambda: FamilyHistoryItem(condition="Type 2 diabetes"),
-        lambda: CitedText(value="chest pain"),
+        lambda: Medication(name="Metformin"),  # type: ignore[call-arg]
+        lambda: Allergy(substance="Penicillin"),  # type: ignore[call-arg]
+        lambda: FamilyHistoryItem(condition="Type 2 diabetes"),  # type: ignore[call-arg]
+        lambda: CitedText(value="chest pain"),  # type: ignore[call-arg]
     ],
 )
 def test_intake_items_require_a_citation(factory: object) -> None:
@@ -255,7 +255,7 @@ def test_intake_form_requires_core_sections(missing: str) -> None:
     }
     del fields[missing]
     with pytest.raises(ValidationError):
-        IntakeForm(**fields)  # type: ignore[arg-type]
+        IntakeForm(**fields)
 
 
 @pytest.mark.parametrize(

@@ -174,6 +174,15 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         """
         if ctx.deps.extractor is None:
             return []
+        # Only extract a document the patient actually has — i.e. one list_lab_documents returned.
+        # Rejects a hallucinated/guessed id and avoids wasting a Binary fetch + OCR (the expensive
+        # hop) on a document that isn't there. If discovery hasn't run, there is nothing to extract.
+        known = {doc.resource_id for doc in (ctx.deps.lab_documents_cache or [])}
+        if document_id not in known:
+            return []
+        # Memoized per document id: don't re-fetch + re-OCR a document already extracted this turn.
+        if document_id in ctx.deps.extracted_documents:
+            return ctx.deps.extracted_documents[document_id]
         # Fetch the document's bytes over the request's own patient-scoped FHIR client (Binary),
         # so the bytes are authorized by the open patient's access rights — keyed on the same id
         # the citation + click-to-source viewer use.
@@ -185,7 +194,9 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
             # rather than fabricating lab values around a failed OCR.
             return []
         # Record the extracted facts so the grounding gate can resolve any the worker cites.
-        return ctx.deps.documents.record(extracted)
+        handles = ctx.deps.documents.record(extracted)
+        ctx.deps.extracted_documents[document_id] = handles
+        return handles
 
     @agent.output_validator
     async def enforce_grounding(

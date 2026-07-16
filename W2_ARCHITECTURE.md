@@ -366,12 +366,22 @@ Guideline corpus (curated chunks · payload = {guideline, source, section})
 Qdrant  (dedicated Railway service · private networking)
    │  Universal Query API: prefetch(dense) + prefetch(sparse) → Fusion.RRF → top-k
    ▼
-Cohere Rerank  (rerank-v4.0-fast)  → keep top-n grounded snippets
+Cohere Rerank  (rerank-v4.0-fast)  → relevance floor τ, then top-K survivors
    ▼
-Answer model  ← receives ONLY the reranked evidence + source metadata
+Answer model  ← receives ONLY the surviving evidence + source metadata
    ▼
 output_validator gate — no unattributable evidence claim ships
 ```
+
+**Relevance gate (τ-floor + top-K, JOS-53/#31).** After rerank, a snippet ships only if it both
+clears the relevance floor **τ = 0.5** *and* ranks in the **top K = 3** — i.e. the highest-scoring
+survivors minus any below τ (`_above_floor` on the top-K, `retriever.py`). Two outcomes: ≥1 survivor
+→ a **grounded** answer with cited evidence cards; **nothing clears τ → no evidence section**, and
+the answer is composed without guideline grounding rather than fabricating it. `rerank_score` is
+Cohere relevance in [0,1] (live) / normalized term-overlap (fixture) — same shape, same gate. τ is a
+pragmatic floor, not a calibrated probability; τ/K are `config.py` values (`retrieval_relevance_floor`,
+`rerank_top_n`), tuned on the eval set. Full contract:
+[`evidence-gating-and-presentation.md`](context/specs/evidence-gating-and-presentation.md).
 
 Each choice traces to a requirement
 ([`vector-db-week2.md`](context/decisions/vector-db-week2.md)):

@@ -16,4 +16,4 @@ def test_golden_set_size() -> None:
     # The suite is sized by the coverage matrix (50 cases, + the both-tools extract+guideline
     # synthesis case = 51). A large accidental change to the count means the matrix allocation
     # drifted and coverage should be re-reviewed.
-    assert len(CASES) == 51
+    assert len(CASES) == 52

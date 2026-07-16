@@ -417,6 +417,108 @@ class Encounter(BaseModel):
         )
 
 
+def _quantity_value(quantity: Any) -> float | None:
+    """Pull the numeric value out of a FHIR ``Quantity``.
+
+    Args:
+        quantity: A FHIR ``Quantity`` (dict), or anything.
+
+    Returns:
+        The value as a float, or None when absent or non-numeric. ``bool`` is rejected
+        explicitly — it is an ``int`` subclass in Python and would otherwise coerce to 1.0.
+    """
+    if not isinstance(quantity, dict):
+        return None
+    value = quantity.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+class LabObservation(BaseModel):
+    """Typed projection of a FHIR R4 laboratory ``Observation`` — one analyte at one point in time.
+
+    A series of these for a single ``code`` is a lab trend. OpenEMR serves them from
+    ``procedure_result`` via ``FhirObservationLaboratoryService``, which is also where
+    agent-derived lab facts are written — so history and derived facts arrive through this
+    one shape, distinguished by ``status``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    resource_type: str = Field(
+        default="Observation", description="FHIR resource type, always 'Observation'"
+    )
+    resource_id: str = Field(description="FHIR Observation.id")
+    display: str | None = Field(
+        default=None, description="Analyte name (code.text or coding.display)"
+    )
+    code: str | None = Field(default=None, description="LOINC (or other) code for the analyte")
+    code_system: str | None = Field(default=None, description="Coding system URI for `code`")
+    value: float | None = Field(
+        default=None,
+        description=(
+            "Numeric result from valueQuantity. None when the result is not a quantity — "
+            "OpenEMR emits questionnaire scores (GAD-7, PHQ-9) with no value[x] at all, so a "
+            "lab Observation having no plottable value is normal, not an error."
+        ),
+    )
+    unit: str | None = Field(default=None, description="Human-readable unit, e.g. 'fL'")
+    unit_code: str | None = Field(
+        default=None, description="UCUM unit code from valueQuantity.code, e.g. '10*3/uL'"
+    )
+    effective_date: str | None = Field(
+        default=None, description="Specimen collection time (effectiveDateTime)"
+    )
+    status: str | None = Field(
+        default=None,
+        description=(
+            "FHIR Observation.status — 'final' for a clinician-ordered result, 'preliminary' "
+            "for one derived from a document and not yet confirmed."
+        ),
+    )
+
+    @classmethod
+    def from_fhir(cls, resource: dict[str, Any]) -> "LabObservation":
+        """Parse a FHIR ``Observation`` resource into a typed lab result.
+
+        Args:
+            resource: A FHIR ``Observation`` resource (parsed JSON).
+
+        Returns:
+            The typed ``LabObservation``.
+
+        Raises:
+            ValueError: If ``resource`` is not an ``Observation`` or lacks an ``id``.
+        """
+        resource_id = _require_id(resource, "Observation")
+        code, system = _first_coding(resource.get("code"))
+        quantity = resource.get("valueQuantity")
+        unit = quantity.get("unit") if isinstance(quantity, dict) else None
+        unit_code = quantity.get("code") if isinstance(quantity, dict) else None
+        effective = resource.get("effectiveDateTime")
+        status = resource.get("status")
+        return cls(
+            resource_id=resource_id,
+            display=_codeable_text(resource.get("code")),
+            code=code,
+            code_system=system,
+            value=_quantity_value(quantity),
+            unit=unit if isinstance(unit, str) else None,
+            unit_code=unit_code if isinstance(unit_code, str) else None,
+            effective_date=effective if isinstance(effective, str) else None,
+            status=status if isinstance(status, str) else None,
+        )
+
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The analyte's name and the date it was collected — what distinguishes one point in a
+        trend from the next, so a proof card cites a specific draw rather than the series."""
+        return ResourceIdentity(
+            label=self.display, date=self.effective_date, date_label="Collected"
+        )
+
+
 def _encounter_ref_id(resource: dict[str, Any]) -> str | None:
     """Extract the referenced encounter id from a DocumentReference's ``context.encounter``.
 

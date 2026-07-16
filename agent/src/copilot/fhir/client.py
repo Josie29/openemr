@@ -6,6 +6,7 @@ import httpx
 from copilot.fhir.models import (
     Allergy,
     Encounter,
+    LabObservation,
     Medication,
     NoteContent,
     PatientDemographics,
@@ -80,6 +81,25 @@ class FhirClient(Protocol):
         Reads ``DocumentReference`` (category ``clinical-note``) for the patient and keeps those
         tied to ``encounter_id`` — the FHIR API has no ``encounter`` search param, so the filter is
         client-side (verified against OpenEMR's FHIR service).
+
+        Raises:
+            FhirError: If the read fails or times out.
+        """
+        ...
+
+    async def get_lab_observations(
+        self, patient_id: str, *, code: str | None = None
+    ) -> list[LabObservation]:
+        """Read the patient's laboratory ``Observation`` resources, newest last.
+
+        Filters server-side to ``category=laboratory`` so vitals and social-history observations
+        (which share the Observation type in OpenEMR) never enter a lab trend. Pass ``code`` to
+        narrow to a single analyte by LOINC — the only safe way to build a series, since analyte
+        display names are ambiguous (three distinct LOINCs read as "Platelet...").
+
+        Args:
+            patient_id: The patient logical id to scope the search to.
+            code: Optional LOINC code, e.g. ``"787-2"`` for MCV.
 
         Raises:
             FhirError: If the read fails or times out.
@@ -207,6 +227,18 @@ class HttpFhirClient:
         )
         notes = [NoteContent.from_fhir(r) for r in resources]
         return [note for note in notes if note.encounter_id == encounter_id]
+
+    async def get_lab_observations(
+        self, patient_id: str, *, code: str | None = None
+    ) -> list[LabObservation]:
+        params = {"category": "laboratory"}
+        if code:
+            params["code"] = code
+        resources = await self._search("Observation", patient_id, params)
+        observations = [LabObservation.from_fhir(r) for r in resources]
+        # A trend reads oldest -> newest and the Bundle's order is not guaranteed, so sort here.
+        # Undated results sort first, never last, so one can't masquerade as the latest value.
+        return sorted(observations, key=lambda observation: observation.effective_date or "")
 
     async def get_documents(self, patient_id: str) -> list[UploadedDocumentSummary]:
         # Search all of the patient's DocumentReferences and keep the uploaded (PDF/Binary) ones;

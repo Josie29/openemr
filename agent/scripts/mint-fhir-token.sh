@@ -35,6 +35,7 @@ patient/Condition.read,\
 patient/MedicationRequest.read,\
 patient/AllergyIntolerance.read,\
 patient/Encounter.read,\
+patient/Observation.read,\
 patient/DocumentReference.read,\
 offline_access"
 

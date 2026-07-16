@@ -23,7 +23,8 @@ from copilot.verification import Resolution
 # claims: a claim cites ("<resource_type>", "<fact id>") and this registry grounds it. The tags come
 # from `resource_type_for` — the fact's eventual write target — so Patient / AllergyIntolerance /
 # MedicationRequest are types FHIR read tools ALSO fetch: a document fact and a fetched record can
-# now carry the same resource_type.
+# now carry the same resource_type. Lab results tag as `Observation`, which `get_lab_observations`
+# also fetches — so this applies to labs too.
 #
 # What keeps the two resolvers from shadowing each other is therefore ID-disjointness, not
 # type-disjointness. A document fact's id is `<document_id>#<ordinal>`, which is never a FHIR uuid,

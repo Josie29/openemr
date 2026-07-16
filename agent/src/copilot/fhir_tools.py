@@ -8,6 +8,7 @@ from copilot.fhir.client import FhirClient
 from copilot.fhir.models import (
     Allergy,
     Encounter,
+    LabObservation,
     Medication,
     NoteContent,
     PatientDemographics,
@@ -128,6 +129,25 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
     async def get_encounters(ctx: RunContext[D]) -> list[Encounter]:
         """Read the open patient's recent encounters (metadata only — no note bodies)."""
         return _track(ctx, await ctx.deps.fhir.get_encounters(ctx.deps.patient_id))
+
+    @agent.tool
+    async def get_lab_observations(
+        ctx: RunContext[D], code: str | None = None
+    ) -> list[LabObservation]:
+        """Read the open patient's laboratory results from the record, oldest first.
+
+        Use for "what is their <lab>" and for trends over time. Returns only laboratory results —
+        vitals and social history are excluded. A result with no `value` is normal (OpenEMR records
+        some scored questionnaires without a numeric value); report it as unavailable rather than
+        inferring a number.
+
+        Args:
+            ctx: The run context.
+            code: Optional LOINC code to narrow to one analyte, e.g. "787-2" for MCV. Omit to read
+                every lab result. Prefer filtering by code over matching on the analyte's name —
+                several distinct LOINC codes share similar names (three read as "Platelet...").
+        """
+        return _track(ctx, await ctx.deps.fhir.get_lab_observations(ctx.deps.patient_id, code=code))
 
     @agent.tool
     async def get_encounter_note(ctx: RunContext[D], encounter_id: str) -> list[NoteContent]:

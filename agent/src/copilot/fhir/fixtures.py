@@ -7,6 +7,7 @@ from copilot.fhir.client import FhirError
 from copilot.fhir.models import (
     Allergy,
     Encounter,
+    LabObservation,
     Medication,
     NoteContent,
     PatientDemographics,
@@ -23,6 +24,34 @@ _SEED_DIR = Path(__file__).parent / "seed"
 # A per-patient record: the Patient resource plus its lists of related resources, keyed by
 # FHIR resourceType. Mirrors what the five FHIR read endpoints return for one patient.
 PatientRecord = dict[str, Any]
+
+
+def _is_laboratory(resource: dict[str, Any]) -> bool:
+    """Report whether an ``Observation`` is categorised ``laboratory``.
+
+    OpenEMR serves vitals, social history and lab results all as ``Observation``; only the
+    category separates them. The live client narrows with a server-side ``category=laboratory``
+    filter, so the fixture client applies the same rule locally.
+
+    Args:
+        resource: A FHIR ``Observation`` resource.
+
+    Returns:
+        True when any category coding carries the ``laboratory`` code.
+    """
+    categories = resource.get("category")
+    if not isinstance(categories, list):
+        return False
+    for category in categories:
+        if not isinstance(category, dict):
+            continue
+        codings = category.get("coding")
+        if not isinstance(codings, list):
+            continue
+        for coding in codings:
+            if isinstance(coding, dict) and coding.get("code") == "laboratory":
+                return True
+    return False
 
 
 def _patient_ref_id(resource: dict[str, Any]) -> str | None:
@@ -159,6 +188,7 @@ class FixtureFhirClient:
             "MedicationRequest",
             "AllergyIntolerance",
             "Encounter",
+            "Observation",
             "DocumentReference",
         ):
             for resource in bundle_resources(document, resource_type):
@@ -197,6 +227,20 @@ class FixtureFhirClient:
     async def get_encounter_note(self, patient_id: str, encounter_id: str) -> list[NoteContent]:
         notes = [NoteContent.from_fhir(r) for r in self._resources(patient_id, "DocumentReference")]
         return [note for note in notes if note.encounter_id == encounter_id]
+
+    async def get_lab_observations(
+        self, patient_id: str, *, code: str | None = None
+    ) -> list[LabObservation]:
+        # The live client filters category/code server-side; do it here so fixture-backed runs
+        # exercise the same narrowing and a fixture cannot leak a vital into a lab trend.
+        observations = [
+            LabObservation.from_fhir(r)
+            for r in self._resources(patient_id, "Observation")
+            if _is_laboratory(r)
+        ]
+        if code:
+            observations = [o for o in observations if o.code == code]
+        return sorted(observations, key=lambda observation: observation.effective_date or "")
 
     async def get_documents(self, patient_id: str) -> list[UploadedDocumentSummary]:
         summaries = (

@@ -1,10 +1,13 @@
-import io
-import logging
-from dataclasses import dataclass
-
+from copilot.ingestion.geometry.spans import first_token, match_span, merge_and_pad, norm
+from copilot.ingestion.geometry.words import Word, extract_word_boxes
 from copilot.ingestion.schemas import BoundingBox
 
-logger = logging.getLogger("copilot")
+# Compatibility surface. The geometry implementation moved to `copilot.ingestion.geometry` (JOS-80)
+# so box location is no longer welded to the lab-table layout; this module re-exports the names the
+# rest of the tree still imports. `locate_value_box` is the lab row join expressed on the shared
+# span matcher — kept here until callers move to the locator chain, then deleted.
+
+__all__ = ["Word", "extract_word_boxes", "locate_value_box"]
 
 # The test-name column sits at the left of a lab table; anything past this x (points) is a value,
 # unit, or a mid-sentence mention in the interpretive narrative — never a row's leading test name.
@@ -13,68 +16,6 @@ logger = logging.getLogger("copilot")
 _LEFT_MARGIN_MAX = 200.0
 # Two words belong to the same visual row when their top edges are within this many points.
 _ROW_TOLERANCE = 3.0
-# Breathing room (points) added around a word's glyph box so the highlight frames the value
-# instead of clipping its ascenders/descenders. Small enough to stay clear of adjacent rows
-# (lab rows are ~12-13 pt apart, a padded value box ~11 pt tall).
-_BOX_PADDING = 2.0
-
-
-@dataclass(frozen=True)
-class Word:
-    """One text token from a PDF's text layer, with its box in PDF points (top-left origin).
-
-    ``pdfplumber`` reports coordinates directly in points on a top-left origin — the exact space the
-    click-to-source overlay renders in — so no DPI conversion is ever needed for a digital PDF.
-    """
-
-    text: str
-    x0: float
-    top: float
-    x1: float
-    bottom: float
-    page: int  # 1-based
-
-
-def extract_word_boxes(pdf_bytes: bytes) -> list[Word]:
-    """Extract every word from a digital PDF's text layer, in reading order, boxed in points.
-
-    Returns an empty list when the document has no text layer (a scanned/image-only PDF), when
-    ``pdfplumber`` is unavailable, or when the bytes cannot be parsed — the caller then falls back
-    to the coarse OCR row-estimate rather than failing.
-
-    Args:
-        pdf_bytes: The raw PDF bytes.
-
-    Returns:
-        Words across all pages in reading order (page, then top, then left), or ``[]``.
-    """
-    try:
-        import pdfplumber
-    except ImportError:
-        logger.warning("pdfplumber not installed; using the OCR row-estimate for box geometry")
-        return []
-    words: list[Word] = []
-    try:
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            for page_index, page in enumerate(pdf.pages, start=1):
-                for raw in page.extract_words():
-                    words.append(
-                        Word(
-                            text=str(raw["text"]),
-                            x0=float(raw["x0"]),
-                            top=float(raw["top"]),
-                            x1=float(raw["x1"]),
-                            bottom=float(raw["bottom"]),
-                            page=page_index,
-                        )
-                    )
-    except Exception:
-        # pdfplumber/pdfminer raise a variety of parse errors; treat any as "no text layer".
-        logger.warning(
-            "pdfplumber word extraction failed; using the OCR row-estimate", exc_info=True
-        )
-        return []
-    return words
 
 
 def locate_value_box(
@@ -99,50 +40,28 @@ def locate_value_box(
         ``(box, next_start)`` — the value's box in points and the cursor to pass to the next call —
         or ``None`` when the row or the value on it cannot be located (the caller then falls back).
     """
-    name_key = _first_token(test_name)
-    value_key = _norm(value)
-    if not name_key or not value_key:
+    name_key = first_token(test_name)
+    if not name_key or not norm(value):
         return None
     for index in range(start, len(words)):
         anchor = words[index]
-        if anchor.x0 > _LEFT_MARGIN_MAX or _norm(anchor.text) != name_key:
+        if anchor.x0 > _LEFT_MARGIN_MAX or norm(anchor.text) != name_key:
             continue
-        # Words on the anchor's row, to the right of the test name (the result/flag/range columns).
-        row_matches = [
-            word
-            for word in words
-            if word.page == anchor.page
-            and abs(word.top - anchor.top) <= _ROW_TOLERANCE
-            and word.x0 > anchor.x1
-            and _norm(word.text) == value_key
-        ]
-        if not row_matches:
-            continue  # name matched but its value is not on this row — keep scanning
-        # Prefer the left-most match: the result column precedes the "prior result" column, so if a
-        # value equals its own prior draw this still boxes the current result, not the prior one.
-        target = min(row_matches, key=lambda word: word.x0)
-        box = BoundingBox(
-            page=target.page,
-            x=max(target.x0 - _BOX_PADDING, 0.0),
-            y=max(target.top - _BOX_PADDING, 0.0),
-            width=max(target.x1 - target.x0, 1.0) + 2 * _BOX_PADDING,
-            height=max(target.bottom - target.top, 1.0) + 2 * _BOX_PADDING,
+        # Words on the anchor's row, to the right of the test name (the result/flag/range columns),
+        # ordered left-to-right: the result column precedes the "prior result" column, so matching
+        # the left-most still boxes the current result when a value equals its own prior draw.
+        row = sorted(
+            (
+                word
+                for word in words
+                if word.page == anchor.page
+                and abs(word.top - anchor.top) <= _ROW_TOLERANCE
+                and word.x0 > anchor.x1
+            ),
+            key=lambda word: word.x0,
         )
-        return box, index + 1
+        span = match_span(row, value, max_span_words=1)
+        if span is None:
+            continue  # name matched but its value is not on this row — keep scanning
+        return merge_and_pad(span), index + 1
     return None
-
-
-def _first_token(text: str) -> str:
-    """The normalized first whitespace-delimited token of a name (anchors a multi-word name).
-
-    Normalizes the token itself, so a trailing comma on a leading word ("Glucose," in "Glucose,
-    Fasting") is stripped to match the bare anchor word the PDF text layer reports.
-    """
-    parts = str(text).split()
-    return _norm(parts[0]) if parts else ""
-
-
-def _norm(text: str) -> str:
-    """Lowercase, collapse whitespace, and strip surrounding punctuation for tolerant matching."""
-    collapsed = " ".join(str(text).split()).lower()
-    return collapsed.strip(".,:;()[]")

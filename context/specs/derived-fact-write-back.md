@@ -50,18 +50,79 @@ normal OpenEMR UI, so it is not privilege escalation. Documented rather than hid
 ## Data model
 
 Every derived fact carries a native "not clinician-confirmed" marker in OpenEMR's own vocabulary — no
-core changes, nothing masquerading as physician-authored:
+core changes, nothing masquerading as physician-authored. **The markers are not symmetric**, because
+what each resource can express differs:
 
-| Fact | Table | Derived marker | Reads back as |
-|---|---|---|---|
-| Labs | `procedure_result` | `result_status='preliminary'` | Observation, `status: preliminary` |
-| Allergies | `lists` (`type='allergy'`) | `verification='unconfirmed'` | AllergyIntolerance, unconfirmed |
-| Medications | `lists` (`type='medication'`) | `verification='unconfirmed'` | MedicationRequest, unconfirmed |
+| Fact | Table | Derived marker | Reads back as | Strength |
+|---|---|---|---|---|
+| Labs | `procedure_result` | `result_status='preliminary'` | Observation `status: preliminary` | Strong |
+| Allergies | `lists` (`type='allergy'`) | `verification='unconfirmed'` | AllergyIntolerance `verificationStatus: unconfirmed` | Strong |
+| Medications | `lists_medication` | `request_intent='proposal'` (+ `lists.comments`) | MedicationRequest `intent: proposal` (+ `note`) | **Weaker — see below** |
+| Demographics | — | none exists | — | **Do not write** |
 
 `preliminary` is in the FHIR-valid status list (`FhirObservationLaboratoryService.php:357-364`), so it
-survives the round-trip. `lists.verification` already defaults to `unconfirmed` on read
-(`FhirAllergyIntoleranceService.php:223-237`). Phase 2 becomes a state transition on the same rows:
-`preliminary`→`final`, `unconfirmed`→`confirmed`.
+survives the round-trip. `lists.verification` genuinely defaults to `unconfirmed` on read: the coding
+block is hardcoded `unconfirmed` and only overridden `if (!empty($dataRecord['verification']))`
+(`FhirAllergyIntoleranceService.php:223-237`), and the column is `NOT NULL DEFAULT ''`. Stay inside the
+seeded set (`unconfirmed|confirmed|refuted|entered-in-error`, `database.sql:6871-6874`) — the FHIR
+layer passes the value through verbatim with no allowlist, so an unseeded value yields a code with a
+NULL display.
+
+### Medications — the marker is weaker, and that is a documented limitation
+
+**`lists.verification` is never read for a medication.** Only the allergy and condition services read
+that column; writing it on a `type='medication'` row is a **silent no-op** — it would sit in the
+database and never surface. Nor is `status` usable: `PrescriptionService::getBaseSQL:234-238` derives
+it from a `CASE` over `enddate` + `activity` alone, so a `lists` medication can only ever be `active`,
+`completed`, or `stopped`. `draft` exists in `FHIRMedicationStatusEnum` but **no column produces it**.
+
+What *is* expressible is `lists_medication.request_intent='proposal'` → `MedicationRequest.intent`
+(`PrescriptionService.php:211-212`, `FhirMedicationRequestService.php:498-507`). Its seeded
+`list_options` description (`database.sql:12314`) reads: *"The request is a suggestion made by
+someone/something that doesn't have an intention to ensure it occurs and without providing an
+authorization to act."* That is a literal description of an agent-derived medication. It must be set
+**explicitly** — the `lists` branch defaults to `plan` when NULL.
+
+**The honest caveat:** a consumer filtering only on `status` sees an ordinary active medication. The
+signal is coded and spec-blessed, but weaker than the allergy path. Reinforce it with a disclosure in
+`lists.comments` (surfaces as `MedicationRequest.note`, `PrescriptionService.php:216`). Do not rely on
+`lists_medication.is_primary_record` → `reported`: on a configured install a `reportedReference` to the
+primary organization wins and the flag is discarded (`FhirMedicationRequestService.php:405-417`).
+
+### Demographics — out of scope, deliberately
+
+`PatientService`/`FhirPatientService` have no verification concept, `patient_data` has no such column,
+and FHIR `Patient` has no `verificationStatus`. Writing extracted demographics would be an **unflagged
+in-place overwrite of clinician-entered chart data**, with no way for any reader to know it was
+machine-derived. There is no honest way to do it, so we do not. This also resolves the destination
+JOS-80 deferred to us for `chief_concern` (tagged `Patient` "for want of a closer write target") — it
+has no honest home either and stays unpersisted.
+
+### Insert paths
+
+- **Allergies:** `AllergyIntoleranceService::insert` (`:254-290`). It hardcodes `date=NOW()`,
+  `activity=1`, `type='allergy'`, and `buildInsertColumns` whitelists against the real `lists` columns,
+  so `verification` passes straight through. The validator requires only `title` + `puuid`.
+- **Medications:** `PatientIssuesService::createIssue` (`:60-87`), which inserts the `lists` row and
+  delegates to `MedicationPatientIssueService::createIssue` (`:33-49`) for the `lists_medication` side —
+  the only path that reaches `request_intent`. Not `ListService::insert` (hardcodes 6 columns, cannot
+  reach `lists_medication`).
+
+Phase 2 becomes a state transition on these same rows: `preliminary`→`final`,
+`unconfirmed`→`confirmed`, `proposal`→`order`.
+
+### An empty list is missing data, not a negative finding
+
+`IntakeForm`'s docstring is explicit: an empty `allergies` list means **"none read from the form"**, not
+an affirmative "no known allergies". Persisting an empty list as NKDA would fabricate a clinical
+assertion the document never made. Write nothing for an empty section.
+
+### Bounding boxes are optional for intake facts
+
+Only `LabResult` enforces a box (`_require_bounding_box`, `schemas.py:140-153`); an intake medication
+with `bounding_box: null` is valid. So the intake path needs an optional citation, and the sidecar's
+`bbox` column already allows `''` for exactly this. `BoundingBox` itself keeps refusing zero-area boxes
+— correct for labs, and the nullability belongs at the fact level, not inside the value object.
 
 ### Labs — the four-row chain
 

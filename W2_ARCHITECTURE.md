@@ -90,13 +90,13 @@ so this expansion would be additive.
 |---|---|---|
 | **Agents** | One conversational agent | Supervisor + intake-extractor + evidence-retriever |
 | **Inputs** | Structured FHIR reads only (6 tools) | + unstructured lab PDF & intake form (document ingestion) |
-| **Data written** | None (read-only agent) | Source `DocumentReference` + derived FHIR `Observation` |
+| **Data written** | None (read-only agent) | **Still none by the agent** — it has no write surface. The sidebar posts derived facts to a session-authed module endpoint, which writes **native** OpenEMR records (the lab chain → projects out as `Observation`; `lists` for allergies/meds) + a module sidecar (§3.1) |
 | **Retrieval** | None (patient record only) | Hybrid RAG over a guideline corpus (Qdrant + Cohere) |
 | **Grounding gate** | One `output_validator` on the single agent's answer | Same gate **ported to each worker** + the final answer |
 | **Services on Railway** | OpenEMR · agent · MySQL | + **Qdrant** service · Cohere API · document storage |
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
 | **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, below-floor = fail** |
-| **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs, FHIR writes |
+| **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs |
 | **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
 
 **What did not change** (and why that matters): the deployment topology (Option D — PHP module +
@@ -105,11 +105,12 @@ unreachable through the agent), the FHIR-only data-access posture, and the verif
 itself. Those are load-bearing and stable; see [`ARCHITECTURE.md`](ARCHITECTURE.md) §§3–7. Week 2
 extends them; it does not touch them.
 
-**Migration note (schema evolution).** Week 2 introduces new persisted artifacts (derived
-`Observation` resources, guideline chunks, citation records) but **changes no Week-1 schema** —
-the six FHIR read tools and their typed return models are untouched. The new writes are additive
-FHIR resources tagged with provenance (§6), so there is no Week-1→Week-2 data migration and no
-backwards-compatibility break in the existing tool contracts.
+**Migration note (schema evolution).** Week 2 introduces new persisted artifacts (derived lab
+results, guideline chunks, citation records) but **changes no Week-1 schema** — the six FHIR read
+tools and their typed return models are untouched. The new writes are ordinary rows in OpenEMR's
+existing clinical tables plus **one new module-owned table** (the extraction sidecar, installed by
+the module's own SQL), so there is no Week-1→Week-2 data migration and no backwards-compatibility
+break in the existing tool contracts.
 
 ---
 
@@ -190,7 +191,7 @@ flowchart TB
     locate --> parse["3. Parse-don't-validate\nraw extractor output → strict Pydantic schema\n(LabReport | IntakeForm)"]
     parse -->|schema violation| retry["reject / retry\n(raw output NEVER bypasses the schema)"]
     parse -->|valid| conf["4. Confidence gate\nMistral per-field/word confidence"]
-    conf --> derive["5. Derive FHIR Observations\n(lab results only) — provenance-tagged"]
+    conf --> derive["5. Persist derived facts\n(lab results) down OpenEMR's native\nlab chain — which projects back OUT\nas a FHIR Observation (no write route)"]
     derive --> cite["6. Emit citation records\n+ native PDF bounding-box overlay coords"]
     up -.->|correlation ID threads every step| obs[("Langfuse span:\ningestion.*")]
 ```
@@ -239,10 +240,48 @@ flowchart TB
    low-confidence / unsupported case: surfaced to the physician, never dropped and never presented
    as certain. It is treated as a **low-confidence refusal** by the `output_validator` gate
    (§4.3, §11), not a silent guess.
-5. **Derive FHIR Observations.** For `lab_pdf`, each validated lab result becomes a FHIR
-   `Observation` (test name, value, unit, reference range, collection date, abnormal flag),
-   tagged with provenance pointing back to the source `DocumentReference` (§6). Intake facts are
-   persisted as appropriate OpenEMR records, not as Observations.
+5. **Persist derived facts — down OpenEMR's native chain, not over FHIR.** There is **no FHIR or
+   REST write route for `Observation`** — nor for `AllergyIntolerance`, `MedicationRequest`, or
+   `Provenance`. Both surfaces are read-only, and no `.write` scope is ever constructed for them
+   (`ServerScopeListEntity.php:104-120`, `:167` `// we'll ignore write for now`). So for `lab_pdf`,
+   each validated lab result is written down OpenEMR's **own lab chain** —
+   `procedure_order → procedure_order_code → procedure_report → procedure_result` — which then
+   **projects back out** as a FHIR `Observation` (test name, value, unit, reference range,
+   collection date, abnormal flag) via `ProcedureService` / `FhirObservationLaboratoryService`.
+   Verified round-trip: LOINC-coded Observations with `valueQuantity`, units, and
+   `status: preliminary`, idempotently.
+   - **The `procedure_order_code` row is mandatory.** `ProcedureService::search` joins
+     `preport.procedure_order_seq = order_codes.procedure_order_seq` (`:210-211`) with
+     `order_codes` LEFT-joined. Omit that row and the predicate compares against NULL, never
+     matches, and the results **vanish from FHIR with no error** — a clean insert and zero
+     Observations. It is the one failure mode that looks exactly like success, so it gets an
+     explicit regression test (§8).
+   - **Synthesizing an order for an unordered result is house style**, not a fiction we invent: the
+     HL7 receiver does exactly this when results arrive with no matching order
+     (`receive_hl7_results.inc.php:1109-1131`).
+   - **Derived ≠ clinician-confirmed.** Results are written `result_status='preliminary'`, which is
+     in the FHIR-valid status list (`FhirObservationLaboratoryService.php:357-364`) and so
+     round-trips as `Observation.status: preliminary`.
+   - **The worker does not write.** The agent returns facts as it always has; the **sidebar** POSTs
+     them to a session-authenticated module endpoint (`public/persist-facts.php`) under the
+     physician's own ACL, with the pid read from the session and never the URL. The worker holds
+     only a patient-scoped SMART **read** token and can reach no write surface at all — the full
+     evidence table is in
+     [`derived-fact-write-back.md`](context/specs/derived-fact-write-back.md).
+   - **Provenance is native + sidecar — and is *not* visible through FHIR.** `FhirProvenanceService`
+     **synthesizes** Provenance on the fly from other resources (`:99`
+     `createProvenanceForDomainResource`, `:275` `_revinclude`): there is no Provenance table and no
+     write path, it has no `entity` / `derivedFrom` support, and its author is hardwired to
+     `lists.user` string-matched against `users.username`. So a fact cannot be "tagged with
+     provenance pointing back to the source `DocumentReference`". The real mechanism is
+     `procedure_result.document_id` — the schema's **own** source-link FK to `documents.id`
+     (`database.sql:10507`) — plus the extraction **sidecar** (§6), which additionally holds the
+     page + pixel bbox that no OpenEMR or FHIR field can express. **The limitation, stated plainly:**
+     provenance is visible to the module and to SQL, but not through FHIR. A
+     `GET /fhir/AllergyIntolerance` will not show that a fact came from a document.
+   - **Intake facts — allergies and medications only**, written as native `lists` records, not as
+     Observations. Demographics, chief concern, and family history are extracted but deliberately
+     **not persisted** — no honest destination exists for them (§6).
 6. **Citations + overlay.** Every derived fact emits a citation record and, for PDFs, the
    bounding-box coordinates for the click-to-source overlay (§3.3).
 
@@ -258,6 +297,13 @@ fact** — a fact without a citation is a schema violation, not a warning.
 
 These schemas are the **canonical contract** for the ingestion boundary and are contract-tested
 in CI (§7, §8). The Pydantic definitions and their validation tests are a separate PRD deliverable.
+
+**Extracted is not the same as persisted.** `IntakeForm`'s field list is what the extractor is asked
+to read off the page; it is **not** a list of write targets. Only allergies and medications have an
+honest destination in OpenEMR — demographics, chief concern, and family history are returned to the
+physician in the answer but written nowhere (§6). Note also that an **empty list is missing data, not
+a negative finding**: an empty `allergies` means "none read from this form", never an affirmative
+NKDA, so an empty section persists nothing rather than fabricating a clinical assertion.
 
 ### 3.3 The citation contract
 
@@ -297,35 +343,50 @@ produced for record claims alongside `GuidelineCitation`'s `guideline`); the `la
 
 ### 3.4 Extraction is a one-time transform — re-extraction & idempotency
 
-Extraction is a **one-time transform, not a per-turn operation.** The pipeline in §3.1 runs
-**once per document version.** The first time the intake-extractor needs facts from a document it
-runs the full pipeline; on every later turn those facts are already **structured chart data**
-(persisted records) plus a **cached extraction result**, so the worker *reads* them — it does not
-re-invoke the VLM. Re-reading a scanned PDF on every follow-up question would be slow, costly, and
-a fresh chance to hallucinate; there is no reason to, because the transform's output is durable.
+Extraction is a **one-time transform, not a per-turn operation** — that is the design intent. What
+ships enforces it **at the write, not at the read**: re-extraction never creates a duplicate
+clinical record, but it *does* re-run the VLM. Skipping the re-run is real work and is tracked
+separately as **JOS-70** (conditional extraction / OCR cache); it is an efficiency win, not a
+correctness gap.
 
-**The idempotency key is the source document's stable ID** — the *same* `source_id` the citation
-contract already carries (§3.3). One provenance tag does three jobs: **citation, idempotency, and
-lineage.** The guard is a check-the-destination-before-writing step:
+**Why the worker cannot check first.** The obvious guard — "does an extraction result already exist
+for this document? then skip the VLM" — is **not reachable from the agent.** The extraction sidecar
+is a module-owned table with **no FHIR resource**, and the worker is a separate service holding only
+a patient-scoped SMART read token, so it has no surface to read the sidecar through. This is the same
+wall that blocks writes (§3.1): the agent can neither read nor write the sidecar, so the destination
+check has to live where the write does.
+
+**What is implemented — idempotency at write time.** The module's persist endpoint checks the
+destination tables before inserting:
 
 ```
-intake-extractor needs facts from document X:
-  1. Does an extraction result already exist for (doc-X id, content hash)?
-  2. YES → read persisted facts + cached citations. Skip VLM, skip persist.
-  3. NO  → extract → validate → persist (provenance = doc-X) → cache the extraction result.
+sidebar POSTs facts extracted from document X to the persist endpoint:
+  1. Endpoint re-reads X's stored bytes and computes content_hash SERVER-SIDE
+     (never accepted from the client — the client does not compute one).
+  2. Already written for (X, content_hash)? → skip the insert, keep the existing rows.
+  3. Otherwise → insert the native records → upsert the sidecar (facts + page/bbox citations).
 ```
 
-- **Content hash guards re-uploads.** The key is `(document id, content hash)`, not the id alone.
-  A corrected re-upload changes the hash and is extracted as a **new version**; the prior facts
-  stay traceable to the prior version, so nothing becomes *untraceable* (§6).
-- **Why cache the whole extraction result, not just the facts.** A persisted lab `Observation`
-  carries the *value* but **not the pixel bounding box** the click-to-source overlay needs. So the
-  full extraction result — typed facts *plus* page/bbox citations — is stored as a **sidecar**
-  (§6), and re-rendering the overlay on a later turn reads the sidecar rather than re-running
-  Mistral OCR 4.
-- **Concurrency.** Two turns touching an un-extracted document at once could double-write; a
-  per-document lock (or an upsert keyed on `provenance + field`) makes first-touch extraction
-  safe. Low-risk at demo scale, called out so it is a decision, not an accident.
+This is exactly what §6's "no duplicate or untraceable records" requires: **store-once**, which is a
+weaker and more achievable claim than compute-once. A re-run costs a Mistral call and converges on
+the same rows.
+
+- **The key is `(document id, content hash)`**, not the id alone — and it does three jobs at once:
+  **citation, idempotency, and lineage**, keyed to the same `source_id` the citation contract carries
+  (§3.3). The hash is computed by the **endpoint, from the bytes OpenEMR actually stored**, so a
+  client cannot claim a fact was derived from content it was not.
+- **Content hash guards re-uploads.** A corrected re-upload changes the hash and is extracted as a
+  **new version**; the prior facts stay traceable to the prior version, so nothing becomes
+  *untraceable* (§6).
+- **Why the sidecar holds the whole extraction result, not just the facts.** A persisted lab result
+  carries the *value* but **not the pixel bounding box** the click-to-source overlay needs — and no
+  OpenEMR or FHIR field can express one. So the full result — typed facts *plus* page/bbox citations
+  — is stored as a **sidecar** (§6), letting the overlay be re-rendered from stored state rather than
+  by re-running Mistral OCR 4. The module can read it; the agent cannot.
+- **Concurrency.** Two turns touching an un-extracted document at once could double-write; the
+  sidecar upsert is keyed on `(document_id, content_hash, fact_table, field)`, and the endpoint's
+  destination check bounds the clinical rows. Low-risk at demo scale, called out so it is a decision,
+  not an accident.
 
 ### 3.5 Where a value sits — the locator chain (JOS-80)
 
@@ -612,8 +673,8 @@ Requirements, "data authority must be explicit").
 
 | Artifact | Authoritative owner | Lineage (where it came from) | Access | Validation |
 |---|---|---|---|---|
-| **Extracted lab observations** | OpenEMR — FHIR `Observation` | Derived from a stored `DocumentReference` via Mistral OCR 4 extraction; provenance tag points back to the source | Same patient-scoped SMART read as all FHIR data ([`ARCHITECTURE.md`](ARCHITECTURE.md) §5) | `LabReport` schema; abnormal-flag + reference-range sanity checks |
-| **Intake facts** | OpenEMR (demographics / meds / allergies / family history records) | Derived from a stored `DocumentReference` via extraction | Patient-scoped | `IntakeForm` schema |
+| **Extracted lab observations** | OpenEMR — the native `procedure_order → order_code → report → result` chain, which projects out as FHIR `Observation` (there is no Observation write route, §3.1) | Derived from a stored `DocumentReference` via Mistral OCR 4 extraction; linked by `procedure_result.document_id` (native FK to `documents.id`) + the sidecar — **not** a FHIR Provenance tag | Written via a session-authed module endpoint under the physician's ACL; read via the same patient-scoped SMART read as all FHIR data ([`ARCHITECTURE.md`](ARCHITECTURE.md) §5) | `LabReport` schema; abnormal-flag + reference-range sanity checks; written `result_status='preliminary'` |
+| **Intake facts** | OpenEMR — **allergies and medications only** (`lists` / `lists_medication`). Demographics, chief concern, and family history are **not persisted** — see below | Derived from a stored `DocumentReference` via extraction; linked through the sidecar (`lists` has no document FK) | Same session-authed write / patient-scoped read | `IntakeForm` schema; allergy `verification='unconfirmed'`, medication `request_intent='proposal'` |
 | **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{chunk_id, guideline, source, source_url, section, date, text, anchor_quote}` (anchor_quote optional) |
 | **Citation records** | The agent (emitted per claim) | Composed from an extraction or a retrieval result; for `lab_pdf`, the page + pixel bbox are **native output of Mistral OCR 4**, not a reconstructed rectangle | Rides with the answer payload | Must satisfy the full citation shape (§3.3); a `lab_pdf` citation whose field lacks a resolved bbox is refused, not shipped with a fabricated box |
 | **Extraction-result cache (sidecar)** | Derived cache — **rebuildable**, not a system of record | One extraction pass over a stored source document; keyed to `(document id, content hash)` (§3.4) | Same patient scope as the source document it derives from | Holds the validated facts + page/bbox citations; superseded when the source version (hash) changes |
@@ -629,23 +690,68 @@ untraceable records." We enforce this by:
 
 - **Store-once.** The source document is written as exactly one `DocumentReference`; re-running
   extraction on the same document does not create a second source blob.
-- **Provenance link.** Every derived `Observation` is tagged with a reference to the
-  `DocumentReference` it came from — so no derived record is *untraceable*, and the chain
-  `Observation → DocumentReference → cited page/bbox` is always walkable.
-- **Idempotent derivation — check the destination first.** Before extracting or persisting, the
-  worker checks whether an extraction result already exists for `(document id, content hash)`
-  (§3.4). If it does, it reads the persisted facts and cached citations instead of re-running the
-  VLM or re-inserting Observations; if it does not, it extracts once and records provenance. This
-  is what makes the "one-time transform" (§3.4) safe to trigger from a chat turn without
-  duplicating records.
+- **Source link — native FK + sidecar, not a FHIR Provenance tag.** A derived lab result carries
+  `procedure_result.document_id`, the schema's own FK to `documents.id`, and every derived fact
+  (labs and intake alike) resolves through the sidecar to document + page + bbox. So no derived
+  record is *untraceable* and the chain `result → document → cited page/bbox` is always walkable —
+  **but it is walkable from the module and from SQL, not over FHIR.** `FhirProvenanceService`
+  synthesizes Provenance on the fly from other resources (`:99`, `:275`), has no `entity` /
+  `derivedFrom` support, and hardwires its author to `lists.user`; there is no Provenance table and
+  no write path. A `GET /fhir/AllergyIntolerance` therefore will not reveal that a fact came from a
+  document. That is a real limitation of this fork's FHIR surface, recorded rather than glossed.
+- **Idempotent derivation — check the destination at write time.** The **persist endpoint**, not the
+  worker, is what guards against duplicates: it recomputes the content hash from the stored bytes and
+  checks the destination tables before inserting, so re-running extraction on the same document
+  converges on the same rows (§3.4). The worker cannot make this check — the sidecar has no FHIR
+  resource and it holds only a read token — so re-extraction re-runs the VLM even though it never
+  re-inserts. **Store-once is what the PRD requires here; compute-once is JOS-70.**
 - **Where the cache lives — sidecar in OpenEMR, not a new agent datastore.** The extraction result
   (facts + page/bbox citations) is stored **alongside the source in OpenEMR**, linked to the source
   document, rather than in a database owned by the agent service. The agent deliberately holds no
   datastore of its own ([`ARCHITECTURE.md`](ARCHITECTURE.md) — FHIR-only, no DB credentials); a
   private ledger would add a second source of truth to reconcile. Keeping the sidecar in OpenEMR
   preserves **one system of record** and lets the whole per-document state (source + facts +
-  citations) be recovered together (§11). The trade-off — an OpenEMR read to check extraction
-  status instead of an O(1) local lookup — is negligible at this scale.
+  citations) be recovered together (§11). The trade-off is sharper than a lookup cost: because the
+  sidecar is a module table with no FHIR resource, **the agent cannot read it at all** (§3.4). It is
+  the module's store, and the price of not giving the agent a datastore of its own.
+
+**What "derived, not confirmed" looks like per fact — and why the markers are not symmetric.** Every
+persisted fact carries a not-clinician-confirmed marker in OpenEMR's **own** vocabulary — no core
+changes, nothing masquerading as physician-authored. What each resource can express differs, so the
+markers differ in strength:
+
+| Fact | Table | Derived marker | Reads back as | Strength |
+|---|---|---|---|---|
+| Labs | `procedure_result` | `result_status='preliminary'` | `Observation.status: preliminary` | Strong — verified round-trip |
+| Allergies | `lists` (`type='allergy'`) | `verification='unconfirmed'` | `AllergyIntolerance.verificationStatus: unconfirmed` | Strong |
+| Medications | `lists_medication` | `request_intent='proposal'` (+ `lists.comments`) | `MedicationRequest.intent: proposal` (+ `note`) | **Weaker — see below** |
+| Demographics / chief concern | — | none exists | — | **Not written** |
+| Family history | — | no target exists | — | **Not written** |
+
+- **The medication marker is weaker, and that is a documented limitation.** `lists.verification` is
+  **never read for a medication** — only the allergy and condition services read that column, so
+  writing it on a `type='medication'` row is a silent no-op. Nor is `status` usable:
+  `PrescriptionService::getBaseSQL:234-238` derives it from a `CASE` over `enddate` + `activity`
+  alone, so a `lists` medication can only ever read back as `active`, `completed`, or `stopped`.
+  What *is* expressible is `lists_medication.request_intent='proposal'` → `MedicationRequest.intent`
+  (`PrescriptionService.php:211-212`, `FhirMedicationRequestService.php:498-507`), whose seeded
+  description is a literal description of an agent-derived medication. **The honest caveat:** a
+  consumer filtering on `status` sees an ordinary active medication. The signal is coded and
+  spec-blessed, but weaker than the allergy path; a disclosure in `lists.comments` (surfacing as
+  `MedicationRequest.note`) reinforces it.
+- **Demographics and chief concern are not persisted, deliberately.** No verification concept exists
+  anywhere in `PatientService` / `patient_data` / FHIR `Patient`. Writing extracted demographics
+  would be an **unflagged in-place overwrite of clinician-entered chart data**, with no way for any
+  reader to know it was machine-derived. There is no honest way to do it, so we do not.
+- **Family history is not persisted.** No FHIR resource, no service, no structured table — nine
+  fixed free-text columns (`history_data.relatives_*`). No target exists to write to.
+
+**Consequence for PRD Core Req 1 — partially met, and stated as such.** The requirement is to
+"persist derived facts as appropriate FHIR resources or OpenEMR records." Labs are persisted and
+round-trip verified; allergies and medications persist by the design above; demographics, chief
+concern, and family history are extracted and surfaced but **not persisted**, because no destination
+exists that could mark them as derived. Full evidence:
+[`derived-fact-write-back.md`](context/specs/derived-fact-write-back.md).
 
 ---
 
@@ -742,7 +848,7 @@ LLM and Mistral OCR 4 extractor responses against fixture documents.
 |---|---|---|
 | **Unit** | `LabReport` / `IntakeForm` schema validators; citation-shape validator; the `attach_and_extract` tool's pure logic; **extractor-output schema-conformance + bbox-presence validation** against fixture Mistral OCR 4 responses; RRF/rerank result-shaping | A schema silently accepting a malformed or uncited extraction; a citation record missing a required field; an extracted field reaching the overlay without a native bbox / with sub-floor confidence, or such a field not being flagged as a refusal (§11) |
 | **Unit** | Supervisor route-decision logic (which worker for which request) | Routing regressions — the supervisor sending extraction work to the retriever or vice versa |
-| **Integration** | Full **ingestion→answer path** with fixture PDFs/form images and a **stubbed Mistral OCR 4 extractor** (fixture schema-mode responses — typed fields + native bboxes + confidence) | The store→extract→derive→cite chain breaking at a seam (e.g. a derived Observation losing its provenance link, §6; a native bbox failing to thread into the citation record) |
+| **Integration** | Full **ingestion→answer path** with fixture PDFs/form images and a **stubbed Mistral OCR 4 extractor** (fixture schema-mode responses — typed fields + native bboxes + confidence) | The store→extract→derive→cite chain breaking at a seam (e.g. a derived result losing its `document_id` / sidecar link back to the source, §6; a native bbox failing to thread into the citation record). The write-back arm is covered separately by DB-backed tests — including the **silent-vanish trap**: a chain written without `procedure_order_code` must fail loudly rather than return zero Observations (§3.1) |
 | **Integration** | RAG pipeline: FastEmbed → Qdrant hybrid → Cohere rerank, against a fixture corpus | Retrieval returning wrong/empty results, or fusion/rerank silently degrading |
 | **Integration** | Supervisor↔worker **contract tests** (typed handoff payloads) | A handoff payload drifting from its Pydantic contract — the interface breaking undetected |
 | **Eval (golden set)** | Agent *behavior* — the 5 rubrics over 52 cases (§7) | The behavioral regressions the hard gate exists to catch |
@@ -901,6 +1007,9 @@ verbal talking points from the architecture defense, recorded here as the risk r
 |---|---|---|
 | **Extraction error / hallucination** | A doc-AI extractor can mis-read field labels or overstate confidence on a scanned form | The strict schema is the contract (raw output never bypasses it, §3); every field must carry a native bbox + page above the confidence floor or it is refused (§3, §4.3); per-field/word confidence surfaces unsupported fields; `schema_valid` + `citation_present` rubrics gate it (§7) |
 | **Weak semantics on free-text intake** | Mistral OCR 4 is OCR-first — strong on structured lab tables and form fields, weaker at normalizing free-text intake (units, reference ranges, abnormal-flag reasoning, free-text chief concern) than a reasoning VLM | Strict schema + `output_validator` refuse any unsupported field rather than guess; the `factually_consistent` / `schema_valid` rubrics on the **intake** cases are the tripwire. If the intake path fails the eval bar, the option to revisit is **Claude vision** for the reasoning-heavy fields, swapped in behind the same schema boundary — not built now |
+| **Write-back provenance is invisible to FHIR** | A derived fact reads back over FHIR as an ordinary record: `Observation.status: preliminary` and `AllergyIntolerance.verificationStatus: unconfirmed` are strong signals, but *that the fact came from a document* is not expressible — `FhirProvenanceService` synthesizes Provenance with no `entity`/`derivedFrom` and no write path (§3.1). A `MedicationRequest` is weaker still: a consumer filtering on `status` sees an ordinary active medication (§6) | Link natively where the schema allows (`procedure_result.document_id`) and through the module-owned sidecar everywhere else, so the chain is walkable from the module and from SQL; use the strongest marker each resource *can* express, and refuse to write where **no** marker exists (demographics, chief concern, family history — §6). Recorded as a limitation rather than papered over |
+| **Browser-posted facts are client-supplied** | The write is posted by the sidebar, not the worker (the worker has no write surface at all — §3.1), so a crafted request could persist facts the agent never extracted; the endpoint cannot verify them against the agent's in-memory registry | **Bounded, not eliminated:** the endpoint is session-authed and ACL-gated to a physician who can already write these records through the normal OpenEMR UI, so it is not privilege escalation; pid comes from the session and never the URL (an explicit IDOR defense), and the content hash is computed server-side from the stored bytes. Documented rather than hidden ([`derived-fact-write-back.md`](context/specs/derived-fact-write-back.md)) |
+| **Silent-vanish on a missing `procedure_order_code`** | The one failure mode that looks exactly like success: omit that row and `ProcedureService`'s join predicate hits NULL, the results never match, and **zero Observations** come back from a clean insert (§3.1) | An explicit regression test asserts the chain fails loudly in our code rather than silently returning nothing (§8) |
 | **Black-box supervisor** | Delegation-via-tool-call is procedural, not a rendered graph — routing could read as opaque | Every route decision is a structured, logged event + a Langfuse child span (§4.2); `pydantic-graph` is the in-framework escalation to an explicit FSM if needed |
 | **Scope creep** | The pull to support five document types before two work reliably | Ship **two** document types and **two** workers first; a third doc type is explicitly PRD-*optional* extension work, not core |
 | **Multi-agent latency vs. <15s** | Extra inference hops (supervisor + workers + extraction + rerank) threaten the Week-1 <15s budget ([`ARCHITECTURE.md`](ARCHITECTURE.md) §2) | Routing discipline (only consult the worker the request needs); SSE streaming to first token; tiered Claude routing keeps cost and latency defensible; RRF/rerank latency measured in the cost/latency report |
@@ -956,4 +1065,9 @@ decision — including the options not taken — is recorded in `/context/`:
   the pixel-bbox requirement, and the reasoning-VLM fallback if intake evals regress. Note the
   decision's "geometry-native, one-pass" premise holds for the VALUES only — Mistral returns no
   per-field box, so the boxes are earned by the locator chain (§3.5).
+- [`context/specs/derived-fact-write-back.md`](context/specs/derived-fact-write-back.md) — the
+  write-back design contract (§3.1, §3.4, §6): the surface-by-surface evidence that **no** write
+  scope or FHIR/REST write route the agent could reach exists, why writes therefore go through a
+  session-authenticated module endpoint posted by the sidebar, the per-fact marker table and why the
+  markers are asymmetric, and why demographics and family history have no honest destination.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the Week-1 baseline every section here cross-references.

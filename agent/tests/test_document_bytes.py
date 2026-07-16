@@ -7,7 +7,11 @@ import pytest
 from copilot.fhir.client import FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.ingestion.extractor import ExtractionError, FhirBinaryByteSource
+from copilot.ingestion.schemas import DocType
 
+_INTAKE_PDF = (
+    Path(__file__).parent / "fixtures/documents/pdfs/sergio-angulo-intake-form.pdf"
+)
 _LAB_PDF = (
     Path(__file__).parent / "fixtures" / "documents" / "pdfs" / "sergio-angulo-lab-report.pdf"
 )
@@ -73,18 +77,39 @@ async def test_http_get_document_bytes_raises_on_error() -> None:
     await client.aclose()
 
 
-async def test_fixture_client_serves_document_bytes() -> None:
-    """The fixture client returns the configured PDF, so the offline path exercises real OCR."""
-    client = FixtureFhirClient.from_seed(str(_LAB_PDF))
-    data = await client.get_document_bytes("any-id")
-    assert data[:5] == b"%PDF-"
+async def test_fixture_client_serves_each_document_its_own_pdf() -> None:
+    """Each seeded document's bytes come from the PDF configured for ITS type, not one global file.
+
+    The client used to serve a single PDF for any id. With two document types seeded that silently
+    hands the lab report's page to an intake extraction: the recorded intake values are right, but
+    none of them can be located on the wrong document's text layer, so every intake fact is dropped
+    and the physician is told the form is empty.
+    """
+    client = FixtureFhirClient.from_seed(
+        {DocType.LAB_PDF: str(_LAB_PDF), DocType.INTAKE_FORM: str(_INTAKE_PDF)}
+    )
+
+    lab = await client.get_document_bytes("labreport-2026-07")
+    intake = await client.get_document_bytes("intakeform-2026-07")
+
+    assert lab[:5] == b"%PDF-" and intake[:5] == b"%PDF-"
+    assert lab != intake, "each document must serve its own file"
+    assert lab == _LAB_PDF.read_bytes()
+    assert intake == _INTAKE_PDF.read_bytes()
 
 
 async def test_fixture_client_without_pdf_raises() -> None:
     """A fixture client with no PDF configured reports the gap rather than returning empty bytes."""
     client = FixtureFhirClient.from_seed()
     with pytest.raises(FhirError):
-        await client.get_document_bytes("any-id")
+        await client.get_document_bytes("labreport-2026-07")
+
+
+async def test_fixture_client_rejects_an_unseeded_document_id() -> None:
+    """An id no seeded document carries reports the gap instead of serving some other document."""
+    client = FixtureFhirClient.from_seed({DocType.LAB_PDF: str(_LAB_PDF)})
+    with pytest.raises(FhirError):
+        await client.get_document_bytes("not-a-real-document")
 
 
 class _StubBytesClient:

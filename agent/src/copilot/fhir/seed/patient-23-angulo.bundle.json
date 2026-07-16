@@ -716,6 +716,41 @@
           }
         ]
       }
+    },
+    {
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "intakeform-2026-07",
+        "status": "current",
+        "type": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/v3-NullFlavor",
+              "code": "UNK",
+              "display": "unknown"
+            }
+          ]
+        },
+        "category": [
+          {
+            "text": "Patient Information"
+          }
+        ],
+        "subject": {
+          "reference": "Patient/23",
+          "type": "Patient"
+        },
+        "date": "2026-07-14T14:10:00Z",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "application/pdf",
+              "title": "Riverbend Family Medicine - Patient Intake & Health History",
+              "url": "Binary/intakeform-2026-07"
+            }
+          }
+        ]
+      }
     }
   ]
 }

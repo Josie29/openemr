@@ -11,11 +11,12 @@ from pydantic_ai.usage import UsageLimits
 
 from copilot.config import ModelTier, Settings, get_settings
 from copilot.fhir.fixtures import FixtureFhirClient
-from copilot.fhir.models import LabDocumentSummary
+from copilot.fhir.models import UploadedDocumentSummary
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.ingestion.extractor import DocumentExtractor, FixtureOcrBackend
 from copilot.ingestion.registry import DocumentFactRegistry
+from copilot.ingestion.schemas import DocType
 from copilot.observability import TurnTrace
 from copilot.rag.retriever import FixtureEvidenceRetriever
 from copilot.retrieval import ChunkRegistry
@@ -27,14 +28,22 @@ logger = logging.getLogger("copilot.evals.runner")
 # Override to evaluate a non-default tier (full identifier, e.g. 'anthropic:claude-sonnet-5').
 _EVAL_MODEL_TIER_ENV = "COPILOT_EVAL_MODEL_TIER"
 
-# Committed lab-document fixtures the eval replays for the one both-tools synthesis case, whose
-# patient (Sergio Angulo, pid 23) carries an uploaded lab report. Resolved from the source tree
-# (evals always run from the repo, like the seed bundles under fhir/seed/): parents[3] is the
-# agent/ package root. These are wired ONLY for a patient whose record surfaces a lab document —
-# every other case keeps extraction disabled and unchanged.
+# Committed document fixtures the eval replays for the cases whose patient (Sergio Angulo, pid 23)
+# carries uploaded documents. Resolved from the source tree (evals always run from the repo, like
+# the seed bundles under fhir/seed/): parents[3] is the agent/ package root. These are wired ONLY
+# for a patient whose record surfaces a document — every other case keeps extraction disabled.
 _DOCUMENTS_DIR = Path(__file__).parents[3] / "tests" / "fixtures" / "documents"
-_LAB_PDF_PATH = _DOCUMENTS_DIR / "pdfs" / "sergio-angulo-lab-report.pdf"
-_LAB_OCR_FIXTURE_PATH = _DOCUMENTS_DIR / "extractions" / "sergio-angulo-lab-report.ocr.json"
+# The demo PDF per document type: the fixture client serves these bytes for whichever seeded
+# document has that type, so an intake extraction reads the intake form's own page.
+_DOCUMENT_PDF_PATHS = {
+    DocType.LAB_PDF: _DOCUMENTS_DIR / "pdfs" / "sergio-angulo-lab-report.pdf",
+    DocType.INTAKE_FORM: _DOCUMENTS_DIR / "pdfs" / "sergio-angulo-intake-form.pdf",
+}
+# One recorded OCR response per document type — the replay is keyed by type, not by patient.
+_OCR_FIXTURE_PATHS = {
+    DocType.LAB_PDF: _DOCUMENTS_DIR / "extractions" / "sergio-angulo-lab-report.ocr.json",
+    DocType.INTAKE_FORM: _DOCUMENTS_DIR / "extractions" / "sergio-angulo-intake-form.ocr.json",
+}
 
 # The grounding gate exhausted its retries (or the turn hit the tool-call ceiling) without an
 # attributable answer — mirrors the /chat route's refusal so the eval scores the same degraded
@@ -106,25 +115,33 @@ def build_eval_model(settings: Settings) -> Model:
     return AnthropicModel(model_id, provider=provider)
 
 
-def _fixture_extractor_for(lab_documents: list[LabDocumentSummary]) -> DocumentExtractor | None:
-    """Build a deterministic fixture OCR extractor when the patient has an uploaded lab document.
+def _fixture_extractor_for(documents: list[UploadedDocumentSummary]) -> DocumentExtractor | None:
+    """Build a deterministic fixture OCR extractor covering the doc types this patient's record has.
 
-    Keeps evals offline and deterministic: a patient whose record surfaces an uploaded lab report
-    (only Sergio Angulo in the golden set) gets a ``FixtureOcrBackend`` that replays the recorded
-    OCR response — no live Mistral call — so the both-tools synthesis case genuinely exercises
-    ``attach_and_extract``. Every other patient surfaces no lab document, so extraction stays
-    disabled (``None``), unchanged. The single fixture replay is safe because the golden set has
-    exactly one patient with a lab document.
+    Keeps evals offline and deterministic: a patient whose record surfaces an uploaded document gets
+    a ``FixtureOcrBackend`` replaying the recorded response for that document's TYPE — no live
+    Mistral call — so a case genuinely exercises ``attach_and_extract``. A patient with no uploaded
+    document surfaces none, so extraction stays disabled (``None``).
+
+    Replay is keyed by doc type (one recording per type), which is what lets a lab case and an
+    intake case coexist in one process. The invariant that remains, stated honestly: the golden set
+    holds at most one document per type, so a per-type recording is unambiguous.
 
     Args:
-        lab_documents: The patient's uploaded lab-document summaries (from ``get_lab_documents``).
+        documents: The patient's uploaded document summaries (from ``get_documents``).
 
     Returns:
-        A fixture-backed :class:`DocumentExtractor` when a lab document exists, else None.
+        A fixture-backed :class:`DocumentExtractor` when the patient has any extractable document,
+        else None.
     """
-    if not lab_documents:
+    paths = {
+        doc.doc_type: str(_OCR_FIXTURE_PATHS[doc.doc_type])
+        for doc in documents
+        if doc.doc_type in _OCR_FIXTURE_PATHS
+    }
+    if not paths:
         return None
-    return DocumentExtractor(FixtureOcrBackend(str(_LAB_OCR_FIXTURE_PATH)))
+    return DocumentExtractor(FixtureOcrBackend(paths))
 
 
 async def run_case(
@@ -159,7 +176,9 @@ async def run_case(
     # the one patient with an uploaded lab report; harmless for every other patient, whose record
     # surfaces no lab document to extract. A caller supplying its own fhir client for a lab-document
     # patient must configure its document_pdf_path likewise.
-    fhir = fhir or FixtureFhirClient.from_seed(document_pdf_path=str(_LAB_PDF_PATH))
+    fhir = fhir or FixtureFhirClient.from_seed(
+        {doc_type: str(path) for doc_type, path in _DOCUMENT_PDF_PATHS.items()}
+    )
     graph = build_graph(build_eval_model(settings))
     deps = GraphDeps(
         fhir=fhir,
@@ -174,7 +193,7 @@ async def run_case(
         # and the run stays deterministic and OCR-call-free, matching the fixture-only PHI-free
         # contract.
         documents=DocumentFactRegistry(),
-        extractor=_fixture_extractor_for(await fhir.get_lab_documents(patient_id)),
+        extractor=_fixture_extractor_for(await fhir.get_documents(patient_id)),
     )
     try:
         result = await run_graph(

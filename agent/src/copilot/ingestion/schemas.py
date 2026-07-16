@@ -16,6 +16,26 @@ class DocType(StrEnum):
     INTAKE_FORM = "intake_form"
 
 
+def paths_by_doc_type(*, lab_pdf: str | None, intake_form: str | None) -> dict[DocType, str]:
+    """Pair each document type with its configured file path, dropping the unconfigured ones.
+
+    Settings carry one flat scalar per document type (a `dict` field would be JSON-decoded inside
+    pydantic-settings' env source, before any validator runs). This turns that pair back into the
+    mapping the extractor and the fixture FHIR client both want, in the one module that owns
+    ``DocType`` — so ``config`` stays a leaf that knows nothing about the ingestion schemas, and
+    neither caller has to spell the mapping out again.
+
+    Args:
+        lab_pdf: Path configured for a lab report, if any.
+        intake_form: Path configured for an intake form, if any.
+
+    Returns:
+        The configured paths by document type; empty when neither is set.
+    """
+    configured = {DocType.LAB_PDF: lab_pdf, DocType.INTAKE_FORM: intake_form}
+    return {doc_type: path for doc_type, path in configured.items() if path}
+
+
 class SourceType(StrEnum):
     """Citation source vocabulary (W2_ARCHITECTURE §3.3).
 

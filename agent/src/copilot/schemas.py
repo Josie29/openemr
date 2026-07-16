@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from copilot.ingestion.schemas import BoundingBox
+from copilot.ingestion.schemas import BoundingBox, DocType
 
 
 class SourceRef(BaseModel):
@@ -59,13 +59,20 @@ class SourceRef(BaseModel):
 
     # --- Click-to-source document provenance (JOS-57) ---
     # Present only when the cited record derives from an uploaded document (lab_pdf / intake_form).
-    # System-stamped from the extraction sidecar (the derived FHIR Observation carries the value
-    # but not the pixel box — W2_ARCHITECTURE §3.3/§6), NEVER written by the model. The verification
-    # gate ignores these — overlay provenance, not verified fields. `to_citation` projects them
-    # onto the canonical `LabPdfCitation` the sidebar's click-to-source consumes.
+    # System-stamped from the extraction sidecar (the derived FHIR record carries the value but not
+    # the pixel box — W2_ARCHITECTURE §3.3/§6), NEVER written by the model. The verification gate
+    # ignores these — overlay provenance, not verified fields. `to_citation` projects them onto the
+    # document `Citation` arm named by `doc_type`, which the sidebar's click-to-source consumes.
     document_id: str | None = Field(
         default=None,
         description="Binary/DocumentReference id of the source document. Leave empty — system-set.",
+    )
+    doc_type: DocType | None = Field(
+        default=None,
+        description=(
+            "Which kind of document the fact was read from. Leave empty — the system stamps this "
+            "from the document's category."
+        ),
     )
     page: int | None = Field(
         default=None,
@@ -85,25 +92,51 @@ class SourceRef(BaseModel):
         A *pure* projection of the **stamped** ``SourceRef`` (``value``/``label``/``date`` already
         filled by the grounding gate), so the sidebar's click-to-source (JOS-57) gets the
         machine-readable contract with no second lookup: a **document-extraction** fact (carrying
-        the JOS-57 overlay provenance) projects to a :class:`LabPdfCitation` with its page +
-        bounding box; a guideline reference reads the stamped ``label``/``date``; a FHIR reads its
-        resource type/id and field. Kept off :class:`Claim` so it never enters an LLM output schema.
+        the JOS-57 overlay provenance) projects to the document arm its ``doc_type`` names, with
+        its page + bounding box; a guideline reference reads the stamped ``label``/``date``; a FHIR
+        reads its resource type/id and field. Kept off :class:`Claim` so it never enters an LLM
+        output schema.
+
+        The document arm is selected by ``doc_type`` — deliberately **not** by ``resource_type`` and
+        **not** by the presence of a ``bounding_box``:
+
+        - Document facts are tagged by their eventual write target
+          (``ingestion.registry.resource_type_for``), so a ``Patient`` read from FHIR and a
+          ``Patient`` fact read off an intake form both exist. Only ``doc_type`` — stamped by the
+          gate from the document's OpenEMR category — tells them apart, which makes inferring the
+          arm from the resource type broken by design.
+        - A document fact whose value could not be boxed still belongs to its own arm; branching on
+          the box would silently demote it to a FHIR citation.
 
         Returns:
             The typed :data:`Citation` variant for this reference, carrying the claim's specific
             grounded value/quote (and, for a document fact, the click-to-source box).
         """
         quote_or_value = self.value or self.quote or ""
-        if self.bounding_box is not None:
-            # Document-extraction fact: carries the box (PDF points) + page for the overlay.
-            return LabPdfCitation(
-                source_id=self.document_id or f"{self.resource_type}/{self.resource_id}",
-                page_or_section=str(self.page) if self.page is not None else self.resource_type,
-                field_or_chunk_id=self.field or self.resource_id,
-                quote_or_value=quote_or_value,
-                page=self.page,
-                bounding_box=self.bounding_box,
-            )
+        if self.doc_type is not None:
+            # Document-extraction fact: carries page + box (PDF points) for the overlay.
+            source_id = self.document_id or f"{self.resource_type}/{self.resource_id}"
+            page_or_section = str(self.page) if self.page is not None else self.resource_type
+            field_or_chunk_id = self.field or self.resource_id
+            match self.doc_type:
+                case DocType.LAB_PDF:
+                    return LabPdfCitation(
+                        source_id=source_id,
+                        page_or_section=page_or_section,
+                        field_or_chunk_id=field_or_chunk_id,
+                        quote_or_value=quote_or_value,
+                        page=self.page,
+                        bounding_box=self.bounding_box,
+                    )
+                case DocType.INTAKE_FORM:
+                    return IntakeFormCitation(
+                        source_id=source_id,
+                        page_or_section=page_or_section,
+                        field_or_chunk_id=field_or_chunk_id,
+                        quote_or_value=quote_or_value,
+                        page=self.page,
+                        bounding_box=self.bounding_box,
+                    )
         if self.resource_type == CitationSourceType.GUIDELINE.value:
             return GuidelineCitation(
                 source_id=self.label or self.resource_id,
@@ -222,10 +255,10 @@ class ChatRequest(BaseModel):
 # We model it as a discriminated (tagged) union so each source kind is a typed variant and
 # adding a new one (document extraction) is additive, not a rewrite.
 #
-# Today the supervisor graph's final answer produces both ``GuidelineCitation`` (guideline
-# evidence) and the ``FhirCitation`` record-claim arm below (the converged projection of the
-# Week-1 FHIR ``SourceRef``). ``LabPdfCitation`` / ``IntakeFormCitation`` remain reserved for the
-# document-extraction increment — declared for union extensibility, produced by nothing yet.
+# All four arms are produced today: the supervisor graph's final answer emits ``GuidelineCitation``
+# (guideline evidence) and ``FhirCitation`` (the converged projection of the Week-1 FHIR
+# ``SourceRef``), and ``SourceRef.to_citation`` routes a document-extraction fact to
+# ``LabPdfCitation`` or ``IntakeFormCitation`` on its stamped ``doc_type``.
 # Routing the grounding gate by ``source_type`` is still a tracked follow-up (see
 # context/specs/hybrid-rag-pipeline.md §3.3).
 # ---------------------------------------------------------------------------
@@ -234,10 +267,9 @@ class ChatRequest(BaseModel):
 class CitationSourceType(StrEnum):
     """The kind of source a :class:`Citation` points at (W2_ARCHITECTURE.md §3.3).
 
-    ``GUIDELINE`` (evidence) and ``FHIR`` (patient-record claims) are produced today — the
-    supervisor graph's final answer emits both. ``LAB_PDF`` / ``INTAKE_FORM`` are reserved for
-    the document-extraction increment: their variants are declared so the union is extensible,
-    but nothing produces them yet.
+    ``GUIDELINE`` (evidence) and ``FHIR`` (patient-record claims) come from the supervisor graph's
+    final answer; ``LAB_PDF`` / ``INTAKE_FORM`` come from a document-extraction fact, selected by
+    the ``doc_type`` the grounding gate stamps onto its citation.
     """
 
     GUIDELINE = "guideline"
@@ -284,17 +316,18 @@ class GuidelineCitation(CitationBase):
     source_type: Literal[CitationSourceType.GUIDELINE] = CitationSourceType.GUIDELINE
 
 
-class LabPdfCitation(CitationBase):
-    """A citation to an extracted lab-PDF field, with the click-to-source overlay geometry.
+class DocumentCitationBase(CitationBase):
+    """The extra provenance a citation to an *uploaded document* carries: where on the page it sits.
 
-    Produced by :meth:`SourceRef.to_citation` for a document-derived fact (JOS-57). Beyond the
-    shared five fields it carries the ``bounding_box`` (in PDF points) + ``page`` the sidebar draws
-    on the source scan (W2_ARCHITECTURE.md §3.3). Absent ``bounding_box`` means the value could
-    not be located on the page — the sidebar shows the citation without a rectangle, never a
-    fabricated box.
+    A second level under the tagged-union carve-out :class:`CitationBase` documents — the same
+    reasoning applies one step down: the ``lab_pdf`` and ``intake_form`` arms are one source kind
+    (a document the extractor read and boxed) and differ only by their ``source_type`` tag, so the
+    click-to-source geometry they both carry belongs on a shared base rather than repeated per arm.
+
+    Absent ``bounding_box`` means the value could not be located on the page — the sidebar shows the
+    citation without a rectangle, never a fabricated box (W2_ARCHITECTURE.md §3.3).
     """
 
-    source_type: Literal[CitationSourceType.LAB_PDF] = CitationSourceType.LAB_PDF
     page: int | None = Field(
         default=None, description="1-based source page the value was read from."
     )
@@ -304,10 +337,22 @@ class LabPdfCitation(CitationBase):
     )
 
 
-class IntakeFormCitation(CitationBase):
-    """RESERVED (document-extraction increment): a citation to an extracted intake-form field.
+class LabPdfCitation(DocumentCitationBase):
+    """A citation to an extracted lab-PDF field, with the click-to-source overlay geometry.
 
-    Declared for union extensibility; not produced by any code yet.
+    Produced by :meth:`SourceRef.to_citation` for a fact whose ``doc_type`` is ``LAB_PDF`` (JOS-57).
+    """
+
+    source_type: Literal[CitationSourceType.LAB_PDF] = CitationSourceType.LAB_PDF
+
+
+class IntakeFormCitation(DocumentCitationBase):
+    """A citation to an extracted intake-form field, with the click-to-source overlay geometry.
+
+    Produced by :meth:`SourceRef.to_citation` for a fact whose ``doc_type`` is ``INTAKE_FORM``.
+    Unlike a lab fact — always an ``Observation`` — an intake fact is tagged by its eventual write
+    target (``Patient``/``AllergyIntolerance``/``MedicationRequest``/``FamilyMemberHistory``), types
+    a FHIR read also returns, so this arm is reachable only via ``doc_type``.
     """
 
     source_type: Literal[CitationSourceType.INTAKE_FORM] = CitationSourceType.INTAKE_FORM

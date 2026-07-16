@@ -22,6 +22,7 @@ from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
 from copilot.health import check_readiness
 from copilot.ingestion.extractor import build_extractor
+from copilot.ingestion.schemas import paths_by_doc_type
 from copilot.observability import (
     configure_observability,
     observe_turn,
@@ -142,7 +143,12 @@ def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirC
         ValueError: If ``HTTP`` mode is selected without a base URL.
     """
     if settings.fhir_client_mode is FhirClientMode.FIXTURE:
-        return FixtureFhirClient.from_seed(settings.document_pdf_path)
+        return FixtureFhirClient.from_seed(
+            paths_by_doc_type(
+                lab_pdf=settings.document_pdf_path_lab_pdf,
+                intake_form=settings.document_pdf_path_intake_form,
+            )
+        )
     # HTTP mode. A missing base URL is a misconfiguration, but we do not raise at startup —
     # crash-looping the deploy hides the cause. Construct a client anyway (empty base URL) so the
     # process starts and the misconfig surfaces as a red /ready FHIR probe; /chat separately 500s

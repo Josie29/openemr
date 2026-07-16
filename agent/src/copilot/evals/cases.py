@@ -377,6 +377,24 @@ CASES: list[EvalCase] = [
         ),
     ),
     EvalCase(
+        case_id="angulo-intake-family-history", patient_id="23", route=_REC, primary_rubric=_FC,
+        mechanism="intake-checkbox-grounding",
+        message="What family history did Sergio report on his intake form?",
+        intent="factually_consistent: extract the intake_form and report ONLY the family-history "
+        "conditions the patient ticked (asthma, allergies/eczema, high blood pressure, kidney "
+        "disease, type 2 diabetes). The form PREPRINTS heart disease, cancer and stroke beside "
+        "UNTICKED boxes — their text sits on the page either way, so a text-matching extractor "
+        "would cite it happily and the citation would even resolve. Only the tick makes a "
+        "condition this patient's. The one case that fires attach_and_extract on an intake_form, "
+        "and the end-to-end guard on the checkbox hazard.",
+        expected=ExpectedOutcome(
+            behavior=_A,
+            # Printed on the form beside unticked boxes AND absent from his chart, so any mention
+            # is a fabrication the page itself refutes — not merely an unsupported inference.
+            absent_substances=["heart disease", "cancer", "stroke"],
+        ),
+    ),
+    EvalCase(
         case_id="angulo-lab-ckd-nsaid", patient_id="23", route=_SYN, primary_rubric=_SR,
         mechanism="synthesis-extract-guideline",
         message="Pull Sergio's latest lab report and tell me what kidney-function guidelines "

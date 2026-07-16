@@ -1,8 +1,11 @@
 import base64
+from collections.abc import Iterator
 from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from copilot.ingestion.schemas import DocType
 
 
 def _codeable_text(concept: Any) -> str | None:
@@ -547,23 +550,55 @@ def _uploaded_document_attachment(resource: dict[str, Any]) -> dict[str, Any] | 
     return None
 
 
-def _is_lab_document(resource: dict[str, Any]) -> bool:
-    """Whether a DocumentReference is a lab report, by its category (or type) naming a lab.
+# The OpenEMR document categories that select an extraction schema. The category is chosen by
+# whoever files the document, and it — not the model — decides which schema the document is read
+# through (`DocType`'s docstring).
+#
+# The two are matched ASYMMETRICALLY, and deliberately:
+#
+# - `Lab Report` is a purpose-built OpenEMR category, so a tolerant SUBSTRING match is safe:
+#   "Laboratory" and "Labs" variants all mean the same thing and nothing else contains "lab".
+# - Intake has NO purpose-built category in OpenEMR's tree. `Patient Information` is the closest,
+#   but it is really the identity bucket — its children are `Patient ID card` and `Patient
+#   Photograph` — so it is matched EXACTLY. A substring match would sweep those children in, and
+#   OCR a driver's licence through the intake schema.
+#
+# The residual risk is accepted and understood: OpenEMR ships no insurance-card category either, so
+# an insurance card filed under `Patient Information` WOULD be read as an intake form. It degrades
+# safely rather than fabricating — the strict probe finds no intake fields, every value fails to
+# locate, and the precision floor drops them, so the agent reports no facts. Adding a purpose-built
+# intake category would remove the ambiguity; until then, this set is the seam (add a name here, not
+# code, to support another deployment's naming).
+_LAB_CATEGORY_SUBSTRING = "lab"
+_INTAKE_CATEGORY_NAMES = frozenset({"patient information"})
 
-    OpenEMR maps the uploaded document's category to ``DocumentReference.category`` (a list of
-    CodeableConcept); a lab report carries the text ``"Lab Report"``. ``DocumentReference.type`` is
-    typically the ``UNK`` NullFlavor for uploaded files (verified against live FHIR), so category is
-    the reliable signal, with type as a fallback. Matched case-insensitively on any category
-    text/coding so ``"Laboratory"``/``"Labs"`` variants also pass — and, critically, a non-lab
-    uploaded PDF (a referral, intake form, or insurance card) is excluded so it is not OCR'd through
-    the lab schema.
+
+def resolve_doc_type(resource: dict[str, Any]) -> DocType | None:
+    """Resolve which extraction schema a ``DocumentReference`` should be read through.
+
+    The category picks the schema and the model never decides (``DocType``'s docstring). Anything
+    whose category names neither kind — a referral, an advance directive — returns None and is never
+    listed, so it is not OCR'd through a schema that does not describe it.
+
+    ``DocumentReference.type`` is typically the ``UNK`` NullFlavor for uploaded files (verified
+    against live FHIR), so category is the reliable signal, with type as a fallback.
 
     Args:
         resource: A FHIR ``DocumentReference`` resource.
 
     Returns:
-        True when a category (or type) CodeableConcept names a lab document.
+        The :class:`DocType` the document's category names, or None when it names neither.
     """
+    for text in _concept_texts(resource):
+        if _LAB_CATEGORY_SUBSTRING in text:
+            return DocType.LAB_PDF
+        if text in _INTAKE_CATEGORY_NAMES:
+            return DocType.INTAKE_FORM
+    return None
+
+
+def _concept_texts(resource: dict[str, Any]) -> Iterator[str]:
+    """Yield every category/type label on a DocumentReference, normalized for matching."""
     categories = resource.get("category")
     concepts: list[Any] = list(categories) if isinstance(categories, list) else []
     concepts.append(resource.get("type"))
@@ -571,8 +606,8 @@ def _is_lab_document(resource: dict[str, Any]) -> bool:
         if not isinstance(concept, dict):
             continue
         text = concept.get("text")
-        if isinstance(text, str) and "lab" in text.lower():
-            return True
+        if isinstance(text, str) and text.strip():
+            yield text.strip().lower()
         codings = concept.get("coding")
         if not isinstance(codings, list):
             continue
@@ -581,20 +616,24 @@ def _is_lab_document(resource: dict[str, Any]) -> bool:
                 continue
             for field in ("display", "code"):
                 value = coding.get(field)
-                if isinstance(value, str) and "lab" in value.lower():
-                    return True
-    return False
+                if isinstance(value, str) and value.strip():
+                    yield value.strip().lower()
 
 
-class LabDocumentSummary(BaseModel):
-    """A discovered uploaded lab document (a ``DocumentReference`` categorized as a lab report).
+class UploadedDocumentSummary(BaseModel):
+    """A discovered uploaded document, and which extraction schema its category names.
 
-    Returned by ``get_lab_documents`` so the intake-extractor can find the id of a patient's
-    uploaded lab report and hand it to ``attach_and_extract``. A document qualifies only when it has
-    a binary (PDF/Binary) attachment AND its category names a lab — so a non-lab uploaded PDF is not
-    listed and OCR'd through the lab schema. This is metadata only — the document is OCR'd from its
-    bytes, not read from FHIR (the SMART token cannot read the Binary; see the seam spec), so no
-    ``citation_identity`` is needed here.
+    Returned by ``get_documents`` so the intake-extractor can find a patient's uploaded documents
+    and hand one to ``attach_and_extract``. A document qualifies only when it has a binary
+    (PDF/Binary) attachment AND its category resolves to a schema — so an advance directive or a
+    referral is never listed, and never read through a schema that does not describe it.
+
+    ``doc_type`` rides on the summary so the tool that extracts a document never has to be TOLD
+    what kind it is: the type was resolved from the record's own category at discovery, which is
+    what keeps the choice of schema out of the model's hands.
+
+    Metadata only — the document is OCR'd from its bytes, not read from FHIR (the SMART token
+    cannot read the Binary; see the seam spec), so no ``citation_identity`` is needed here.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -603,19 +642,20 @@ class LabDocumentSummary(BaseModel):
         default="DocumentReference", description="FHIR resource type, always 'DocumentReference'"
     )
     resource_id: str = Field(description="FHIR DocumentReference.id — pass to attach_and_extract")
+    doc_type: DocType = Field(description="Which schema this document is read through")
     title: str | None = Field(default=None, description="Document title/filename, if any")
     date: str | None = Field(default=None, description="DocumentReference.date")
 
     @classmethod
-    def try_from_fhir(cls, resource: dict[str, Any]) -> "LabDocumentSummary | None":
-        """Parse a ``DocumentReference`` into a summary, or None if it is not an uploaded document.
+    def try_from_fhir(cls, resource: dict[str, Any]) -> "UploadedDocumentSummary | None":
+        """Parse a ``DocumentReference`` into a summary, or None if it is not an extractable upload.
 
         Args:
             resource: A FHIR ``DocumentReference`` resource (parsed JSON).
 
         Returns:
-            The typed summary for an uploaded lab (PDF/Binary + lab category) document, or None for
-            a text note, a non-lab uploaded document, or a resource lacking a logical id.
+            The typed summary for an uploaded (PDF/Binary) document whose category names a schema,
+            or None for a text note, a document of no extractable kind, or one lacking a logical id.
         """
         resource_id = resource.get("id")
         if not isinstance(resource_id, str) or not resource_id:
@@ -623,13 +663,15 @@ class LabDocumentSummary(BaseModel):
         attachment = _uploaded_document_attachment(resource)
         if attachment is None:
             return None
-        if not _is_lab_document(resource):
+        doc_type = resolve_doc_type(resource)
+        if doc_type is None:
             return None
         title = attachment.get("title")
         if not (isinstance(title, str) and title.strip()):
             title = _codeable_text(resource.get("type")) or resource.get("description")
         return cls(
             resource_id=resource_id,
+            doc_type=doc_type,
             title=title if isinstance(title, str) and title.strip() else None,
             date=resource.get("date") if isinstance(resource.get("date"), str) else None,
         )

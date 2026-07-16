@@ -250,6 +250,15 @@ flowchart TB
    collection date, abnormal flag) via `ProcedureService` / `FhirObservationLaboratoryService`.
    Verified round-trip: LOINC-coded Observations with `valueQuantity`, units, and
    `status: preliminary`, idempotently.
+   - **Not yet reachable end-to-end — the extractor produces no LOINC code (JOS-87).**
+     `FhirObservationLaboratoryService:255` stamps `system: LOINC` on `result_code`
+     **unconditionally**, but `LabResult` carries only a printed `test_name` — lab PDFs print names,
+     not codes. Writing the name into `result_code` would publish a **fabricated LOINC code**, so
+     the writer refuses it, and the round-trip above is verified against codes supplied by the test
+     fixtures. JOS-87 closes this by printing LOINC on the generated report and extracting it *with
+     a bounding box* like any other fact (grounded, not recalled), with check-digit validation and
+     refuse-on-failure. Until then the lab arm is built and tested but cannot persist a real
+     extraction. The intake arm is unaffected — see §6.
    - **The `procedure_order_code` row is mandatory.** `ProcedureService::search` joins
      `preport.procedure_order_seq = order_codes.procedure_order_seq` (`:210-211`) with
      `order_codes` LEFT-joined. Omit that row and the predicate compares against NULL, never

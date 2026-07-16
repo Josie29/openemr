@@ -38,7 +38,11 @@ final readonly class ExtractionSidecar
      *
      * @param string $factTable Destination table the fact was written to.
      * @param int $factId Primary key of the written row.
-     * @param string $field Field identity — a LOINC code for labs, a field name for intake facts.
+     * @param string $field Field identity — a LOINC code for labs, a stable fact key for intake facts.
+     * @param BoundingBox|null $box Null when the extractor resolved no geometry, which is legitimate
+     *                              for intake facts (only lab results require a box). Stored as '',
+     *                              and `citationsFor()` skips those rows — the fact still persists,
+     *                              it simply cannot be clicked back to the page.
      *
      * @throws \RuntimeException When the write fails.
      */
@@ -50,7 +54,7 @@ final readonly class ExtractionSidecar
         int $factId,
         string $field,
         int $page,
-        BoundingBox $box,
+        ?BoundingBox $box,
         ?float $confidence,
         string $username,
     ): void {
@@ -68,7 +72,7 @@ final readonly class ExtractionSidecar
                 $factId,
                 $field,
                 $page,
-                $box->toJson(),
+                $box?->toJson() ?? '',
                 $confidence,
                 $username,
             ],

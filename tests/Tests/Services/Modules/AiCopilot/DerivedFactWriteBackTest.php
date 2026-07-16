@@ -20,9 +20,14 @@ use OpenEMR\Core\ModulesClassLoader;
 use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\Modules\AiCopilot\Fact\AbnormalFlag;
 use OpenEMR\Modules\AiCopilot\Fact\BoundingBox;
+use OpenEMR\Modules\AiCopilot\Fact\DerivedAllergy;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedLabResult;
+use OpenEMR\Modules\AiCopilot\Fact\DerivedMedication;
 use OpenEMR\Modules\AiCopilot\Fact\ExtractionSidecar;
+use OpenEMR\Modules\AiCopilot\Fact\IntakeFactWriter;
 use OpenEMR\Modules\AiCopilot\Fact\LabResultWriter;
+use OpenEMR\Services\FHIR\FhirAllergyIntoleranceService;
+use OpenEMR\Services\FHIR\FhirMedicationRequestService;
 use OpenEMR\Services\FHIR\Observation\FhirObservationLaboratoryService;
 use OpenEMR\Tests\Fixtures\FixtureManager;
 use PHPUnit\Framework\Attributes\Test;
@@ -46,8 +51,12 @@ class DerivedFactWriteBackTest extends TestCase
     private const HBA1C = '4548-4';
     private const GLUCOSE = '2345-7';
 
+    private const ALLERGY_SUBSTANCE = 'Penicillin';
+    private const MEDICATION_NAME = 'Metformin';
+
     private FixtureManager $fixtureManager;
     private LabResultWriter $writer;
+    private IntakeFactWriter $intakeWriter;
     private ExtractionSidecar $sidecar;
     private int $pid;
     private string $puuid;
@@ -96,12 +105,15 @@ class DerivedFactWriteBackTest extends TestCase
 
         $this->sidecar = new ExtractionSidecar();
         $this->writer = new LabResultWriter($this->sidecar);
+        $this->intakeWriter = new IntakeFactWriter($this->sidecar);
         $this->removeChain();
+        $this->removeIntakeFacts();
     }
 
     protected function tearDown(): void
     {
         $this->removeChain();
+        $this->removeIntakeFacts();
         $this->fixtureManager->removePatientFixtures();
     }
 
@@ -213,6 +225,236 @@ class DerivedFactWriteBackTest extends TestCase
         );
 
         $this->assertSame(0, (int) $orphans, 'No derived result may lack its source document link.');
+    }
+
+    // --- intake facts: allergies + medications ---------------------------------------------------
+
+    /**
+     * The allergy path's derived marker is the strong one: verificationStatus is a first-class FHIR
+     * element, so a reader sees "unconfirmed" without having to know anything about this module.
+     */
+    #[Test]
+    public function derivedAllergyRoundTripsAsUnconfirmedAllergyIntolerance(): void
+    {
+        $this->intakeWriter->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [$this->allergy()], [], 'admin');
+
+        $allergy = $this->readDerivedAllergy();
+
+        $this->assertNotNull($allergy, 'The allergy should re-materialize through FHIR.');
+        $this->assertSame('unconfirmed', $allergy['verificationStatus']['coding'][0]['code']);
+        $this->assertNotEmpty($allergy['id'], 'It needs a FHIR id to be addressable.');
+    }
+
+    /**
+     * Pins a real limitation rather than a behaviour we want. The agent extracts a free-text
+     * substance and no RxNorm/SNOMED code, and FhirAllergyIntoleranceService builds `code` from
+     * lists.diagnosis — so with no code it emits data-absent-reason `unknown` and the substance
+     * survives only in the narrative. That is the honest output: inventing a code from free text
+     * would launder a guess into a coded clinical assertion. If this ever starts returning a real
+     * code, someone has started fabricating one.
+     */
+    #[Test]
+    public function derivedAllergyHasNoCodedSubstanceBecauseTheExtractorSuppliesNoCode(): void
+    {
+        $this->intakeWriter->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [$this->allergy()], [], 'admin');
+
+        $allergy = $this->readDerivedAllergy();
+
+        $this->assertSame('unknown', $allergy['code']['coding'][0]['code']);
+        $this->assertStringContainsString('data-absent-reason', $allergy['code']['coding'][0]['system']);
+        $this->assertStringContainsString(self::ALLERGY_SUBSTANCE, $allergy['text']['div'] ?? '');
+    }
+
+    /**
+     * THE MEDICATION MARKER. This was wrong once already — the spec claimed medications could carry
+     * lists.verification='unconfirmed', but nothing reads that column for a medication, so the write
+     * was a silent no-op that looked like it worked. intent=proposal is the marker that actually
+     * survives; if it regresses to 'plan' (the column's own NULL default) an agent's guess presents
+     * as a clinician's plan.
+     */
+    #[Test]
+    public function derivedMedicationRoundTripsWithProposalIntent(): void
+    {
+        $this->intakeWriter->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [], [$this->medication()], 'admin');
+
+        $medication = $this->readDerivedMedication();
+
+        $this->assertNotNull($medication, 'The medication should re-materialize through FHIR.');
+        $this->assertSame('proposal', $medication['intent']);
+        $this->assertNotEmpty($medication['id'], 'It needs a FHIR id to be addressable.');
+    }
+
+    /**
+     * intent=proposal is a coded signal a human skimming the chart will not see, so the disclosure
+     * says the same thing in words. It is the compensating control for the medication marker being
+     * weaker than the allergy one — a reader filtering on status alone sees an ordinary active med.
+     */
+    #[Test]
+    public function derivedMedicationCarriesAHumanReadableDisclosureAndItsDosageAsWritten(): void
+    {
+        $this->intakeWriter->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [], [$this->medication()], 'admin');
+
+        $medication = $this->readDerivedMedication();
+
+        $this->assertStringContainsString('Co-Pilot', $medication['note'][0]['text'] ?? '');
+        $this->assertStringContainsString('Not confirmed by a clinician', $medication['note'][0]['text'] ?? '');
+        // Free text in, free text out — no structured doseAndRate inferred from '500 mg'.
+        $this->assertSame('500 mg twice daily', $medication['dosageInstruction'][0]['text'] ?? '');
+    }
+
+    /**
+     * `lists` has no document_id, so unlike labs this dedupes on the clinical identity itself. A
+     * patient must not collect a second active Penicillin allergy because a second document
+     * mentioned it, or because the extractor capitalised it differently.
+     */
+    #[Test]
+    public function reExtractingIntakeFactsDoesNotDuplicateThemEvenWithDifferentCasing(): void
+    {
+        $first = $this->intakeWriter->write(
+            $this->pid,
+            self::DOCUMENT_ID,
+            self::CONTENT_HASH,
+            [$this->allergy()],
+            [$this->medication()],
+            'admin'
+        );
+        $second = $this->intakeWriter->write(
+            $this->pid,
+            self::DOCUMENT_ID,
+            self::CONTENT_HASH,
+            [new DerivedAllergy('  penicillin ', 'hives', null, 1, 0.95)],
+            [new DerivedMedication('METFORMIN', '500 mg', 'twice daily', null, 1, 0.93)],
+            'admin'
+        );
+
+        $this->assertSame(['allergy:penicillin', 'medication:metformin'], $first->written);
+        $this->assertSame([], $second->written, 'A repeat write must persist nothing.');
+        $this->assertSame(['allergy:penicillin', 'medication:metformin'], $second->skipped);
+        $this->assertSame(1, $this->countListRows('allergy', self::ALLERGY_SUBSTANCE));
+        $this->assertSame(1, $this->countListRows('medication', self::MEDICATION_NAME));
+    }
+
+    /**
+     * An empty section means "none read from the form", NOT "no known allergies" — per IntakeForm's
+     * own docstring. Writing an NKDA record here would fabricate a clinical assertion the document
+     * never made, which is worse than recording nothing.
+     */
+    #[Test]
+    public function anEmptyFactListWritesNothingRatherThanAssertingANegativeFinding(): void
+    {
+        $outcome = $this->intakeWriter->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [], [], 'admin');
+
+        $this->assertSame([], $outcome->written);
+        $this->assertSame([], $outcome->skipped);
+        $this->assertSame(0, $this->countListRows('allergy', self::ALLERGY_SUBSTANCE));
+    }
+
+    /**
+     * Only lab results require geometry agent-side, so an intake fact without a box must still
+     * persist — it simply cannot be clicked back to the page. Losing the fact entirely because the
+     * extractor could not localise it would be a far worse trade.
+     */
+    #[Test]
+    public function anIntakeFactWithoutABoundingBoxStillPersists(): void
+    {
+        $outcome = $this->intakeWriter->write(
+            $this->pid,
+            self::DOCUMENT_ID,
+            self::CONTENT_HASH,
+            [],
+            [$this->medication()],
+            'admin'
+        );
+
+        $this->assertSame(['medication:metformin'], $outcome->written);
+        $this->assertNotNull($this->readDerivedMedication(), 'A box-less fact must still reach the chart.');
+
+        // Recorded for provenance, with an empty bbox; citationsFor() skips it since there is no
+        // geometry to render.
+        $stored = QueryUtils::fetchSingleValue(
+            'SELECT bbox FROM ai_copilot_document_facts WHERE document_id = ? AND field = ?',
+            'bbox',
+            [self::DOCUMENT_ID, 'medication:metformin']
+        );
+        $this->assertSame('', $stored);
+        $this->assertArrayNotHasKey('medication:metformin', $this->sidecar->citationsFor(self::DOCUMENT_ID, self::CONTENT_HASH));
+    }
+
+    #[Test]
+    public function intakeCitationGeometryIsRecordedWhenTheExtractorResolvedABox(): void
+    {
+        $this->intakeWriter->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [$this->allergy()], [], 'admin');
+
+        $citations = $this->sidecar->citationsFor(self::DOCUMENT_ID, self::CONTENT_HASH);
+
+        $this->assertArrayHasKey('allergy:penicillin', $citations);
+        $this->assertSame('lists', $citations['allergy:penicillin']['fact_table']);
+        $this->assertSame(40.0, $citations['allergy:penicillin']['box']->x);
+    }
+
+    private function allergy(): DerivedAllergy
+    {
+        return new DerivedAllergy(self::ALLERGY_SUBSTANCE, 'hives', new BoundingBox(40.0, 200.0, 120.0, 11.0), 1, 0.95);
+    }
+
+    /** Deliberately box-less: intake facts may legitimately lack geometry. */
+    private function medication(): DerivedMedication
+    {
+        return new DerivedMedication(self::MEDICATION_NAME, '500 mg', 'twice daily', null, 1, 0.93);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function readDerivedAllergy(): ?array
+    {
+        $records = (new FhirAllergyIntoleranceService())->getAll(['patient' => $this->puuid], $this->puuid)->getData();
+        foreach ($records as $record) {
+            $decoded = json_decode(json_encode($record), true);
+            // The substance is not in `code` (see the data-absent test) — the narrative is where it
+            // lands for an uncoded allergy.
+            if (stripos($decoded['text']['div'] ?? '', self::ALLERGY_SUBSTANCE) !== false) {
+                return $decoded;
+            }
+        }
+
+        return null;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function readDerivedMedication(): ?array
+    {
+        $records = (new FhirMedicationRequestService())->getAll(['patient' => $this->puuid], $this->puuid)->getData();
+        foreach ($records as $record) {
+            $decoded = json_decode(json_encode($record), true);
+            $drug = $decoded['medicationCodeableConcept']['text']
+                ?? ($decoded['medicationCodeableConcept']['coding'][0]['display'] ?? '');
+            if (stripos((string) $drug, self::MEDICATION_NAME) !== false) {
+                return $decoded;
+            }
+        }
+
+        return null;
+    }
+
+    private function countListRows(string $type, string $title): int
+    {
+        return (int) QueryUtils::fetchSingleValue(
+            'SELECT COUNT(*) AS c FROM lists WHERE pid = ? AND type = ? AND LOWER(TRIM(title)) = LOWER(TRIM(?))',
+            'c',
+            [$this->pid, $type, $title]
+        );
+    }
+
+    private function removeIntakeFacts(): void
+    {
+        QueryUtils::sqlStatementThrowException(
+            'DELETE lm FROM lists_medication lm JOIN lists l ON l.id = lm.list_id'
+            . ' WHERE l.pid = ? AND l.title IN (?, ?)',
+            [$this->pid, self::ALLERGY_SUBSTANCE, self::MEDICATION_NAME]
+        );
+        QueryUtils::sqlStatementThrowException(
+            'DELETE FROM lists WHERE pid = ? AND title IN (?, ?)',
+            [$this->pid, self::ALLERGY_SUBSTANCE, self::MEDICATION_NAME]
+        );
     }
 
     /** @return list<DerivedLabResult> */

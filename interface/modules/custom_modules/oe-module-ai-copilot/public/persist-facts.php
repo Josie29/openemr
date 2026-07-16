@@ -12,9 +12,15 @@
  * read documents. The sidebar posts the facts the agent returned; the write is authorized by the
  * logged-in clinician's own ACL, not by a service credential. The agent never holds write authority.
  *
- * POST JSON:
- *   { "csrf_token": "...", "document": "<uuid>", "facts": [ {loinc,label,value,units,range,
- *     abnormal,page,bbox:{x,y,w,h},confidence}, ... ] }
+ * POST JSON — each fact carries a `type` discriminator:
+ *   { "csrf_token": "...", "document": "<uuid>", "facts": [
+ *       {type:"lab", loinc, label, value, units, range, abnormal, page, bbox:{x,y,w,h}, confidence},
+ *       {type:"allergy", substance, reaction, page, bbox?, confidence},
+ *       {type:"medication", name, dose, frequency, page, bbox?, confidence}
+ *   ] }
+ *
+ * Demographics, chief concern and family history are extracted by the agent but are NOT persistable
+ * — no honest derived-marker exists for them — so the parser refuses those types outright.
  *
  * @package   OpenEMR\Modules\AiCopilot
  * @link      https://www.open-emr.org
@@ -39,6 +45,7 @@ use OpenEMR\Core\ModulesClassLoader;
 use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\Modules\AiCopilot\Fact\ExtractionSidecar;
 use OpenEMR\Modules\AiCopilot\Fact\FactPayloadParser;
+use OpenEMR\Modules\AiCopilot\Fact\IntakeFactWriter;
 use OpenEMR\Modules\AiCopilot\Fact\LabResultWriter;
 
 $classLoader = new ModulesClassLoader(OEGlobalsBag::getInstance()->getProjectDir());
@@ -117,7 +124,7 @@ if (!is_array($facts) || $facts === []) {
 }
 
 try {
-    $parsed = (new FactPayloadParser())->parseLabResults($facts);
+    $parsed = (new FactPayloadParser())->parse($facts);
 } catch (\DomainException $e) {
     // Safe to echo: these messages are authored by our own parser and describe the caller's own
     // payload. Anything from deeper in the stack is not — see the Throwable arm below.
@@ -133,29 +140,52 @@ if (!is_string($bytes) || $bytes === '') {
 }
 $contentHash = hash('sha256', $bytes);
 
+$documentId = (int) $document->get_id();
+$username = (string) ($session->get('authUser') ?? '');
+$sidecar = new ExtractionSidecar();
+
+$written = [];
+$skipped = [];
+$orderId = null;
+
 try {
-    $writer = new LabResultWriter(new ExtractionSidecar());
-    $outcome = $writer->write(
-        $pid,
-        (int) $document->get_id(),
-        $contentHash,
-        $parsed,
-        (string) ($session->get('authUser') ?? ''),
-    );
+    // Each family takes its own path and its own transaction: a lab means four rows down the
+    // procedure chain, an intake fact means a `lists` row. Keeping them separate means a failure
+    // persisting medications cannot roll back labs that already wrote cleanly.
+    if ($parsed->hasLabs()) {
+        $labOutcome = (new LabResultWriter($sidecar))
+            ->write($pid, $documentId, $contentHash, $parsed->labs, $username);
+        $written = [...$written, ...$labOutcome->written];
+        $skipped = [...$skipped, ...$labOutcome->skipped];
+        $orderId = $labOutcome->procedureOrderId;
+    }
+
+    if ($parsed->hasIntakeFacts()) {
+        $intakeOutcome = (new IntakeFactWriter($sidecar))
+            ->write($pid, $documentId, $contentHash, $parsed->allergies, $parsed->medications, $username);
+        $written = [...$written, ...$intakeOutcome->written];
+        $skipped = [...$skipped, ...$intakeOutcome->skipped];
+    }
 } catch (\Throwable $e) {
     // Log with context, return a generic message — the exception may carry SQL or paths.
     (new SystemLogger())->error('Co-Pilot fact write-back failed', [
         'pid' => $pid,
-        'document_id' => $document->get_id(),
-        'fact_count' => count($parsed),
+        'document_id' => $documentId,
+        'lab_count' => count($parsed->labs),
+        'allergy_count' => count($parsed->allergies),
+        'medication_count' => count($parsed->medications),
         'exception' => $e,
     ]);
     respond(500, ['error' => 'Could not persist the derived facts.']);
 }
 
-respond(200, [
-    'written' => $outcome->written,
-    'skipped' => $outcome->skipped,
-    'order_id' => $outcome->procedureOrderId,
+$response = [
+    'written' => $written,
+    'skipped' => $skipped,
     'content_hash' => $contentHash,
-]);
+];
+if ($orderId !== null) {
+    $response['order_id'] = $orderId;
+}
+
+respond(200, $response);

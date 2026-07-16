@@ -27,6 +27,47 @@ namespace OpenEMR\Modules\AiCopilot\Fact;
 final readonly class FactPayloadParser
 {
     /**
+     * Parse a mixed payload, sorting each fact to its destination by its `type` discriminator.
+     *
+     * @param array<mixed> $facts The decoded `facts` array from the request body.
+     *
+     * @throws \DomainException When any fact is malformed or carries an unpersistable type.
+     *                          All-or-nothing, as below.
+     */
+    public function parse(array $facts): ParsedFacts
+    {
+        $labs = [];
+        $allergies = [];
+        $medications = [];
+
+        foreach ($facts as $index => $fact) {
+            if (!is_array($fact)) {
+                throw new \DomainException("Fact #$index is not an object.");
+            }
+
+            $rawType = $fact['type'] ?? null;
+            if (!is_string($rawType) || $rawType === '') {
+                throw new \DomainException("Fact #$index is missing 'type'.");
+            }
+            // No default. A fact whose type we do not recognise must not be quietly treated as a
+            // lab, and the agent extracts kinds we deliberately never persist (demographics, chief
+            // concern, family history) — those must be refused here, not written somewhere wrong.
+            $type = FactType::tryFrom($rawType);
+            if ($type === null) {
+                throw new \DomainException("Fact #$index has an unpersistable type '$rawType'.");
+            }
+
+            match ($type) {
+                FactType::Lab => $labs[] = $this->parseLabResult($fact, $index),
+                FactType::Allergy => $allergies[] = $this->parseAllergy($fact, $index),
+                FactType::Medication => $medications[] = $this->parseMedication($fact, $index),
+            };
+        }
+
+        return new ParsedFacts($labs, $allergies, $medications);
+    }
+
+    /**
      * @param array<mixed> $facts The decoded `facts` array from the request body.
      *
      * @return list<DerivedLabResult>
@@ -53,6 +94,39 @@ final readonly class FactPayloadParser
      *
      * @throws \DomainException
      */
+    private function parseAllergy(array $fact, int $index): DerivedAllergy
+    {
+        return new DerivedAllergy(
+            substance: $this->stringField($fact, 'substance', $index),
+            reaction: $this->nullableStringField($fact, 'reaction', $index),
+            box: $this->parseOptionalBox($fact, $index),
+            page: $this->parsePage($fact, $index),
+            confidence: $this->parseConfidence($fact, $index),
+        );
+    }
+
+    /**
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
+    private function parseMedication(array $fact, int $index): DerivedMedication
+    {
+        return new DerivedMedication(
+            name: $this->stringField($fact, 'name', $index),
+            dose: $this->nullableStringField($fact, 'dose', $index),
+            frequency: $this->nullableStringField($fact, 'frequency', $index),
+            box: $this->parseOptionalBox($fact, $index),
+            page: $this->parsePage($fact, $index),
+            confidence: $this->parseConfidence($fact, $index),
+        );
+    }
+
+    /**
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
     private function parseLabResult(array $fact, int $index): DerivedLabResult
     {
         $abnormalRaw = $this->stringField($fact, 'abnormal', $index, required: false);
@@ -61,14 +135,6 @@ final readonly class FactPayloadParser
             : AbnormalFlag::tryFrom($abnormalRaw);
         if ($abnormal === null) {
             throw new \DomainException("Fact #$index has an unrecognised abnormal flag '$abnormalRaw'.");
-        }
-
-        $confidence = null;
-        if (isset($fact['confidence'])) {
-            if (!is_numeric($fact['confidence'])) {
-                throw new \DomainException("Fact #$index has a non-numeric confidence.");
-            }
-            $confidence = (float) $fact['confidence'];
         }
 
         // DerivedLabResult's constructor enforces the rest (non-empty code/label/value, no
@@ -83,8 +149,62 @@ final readonly class FactPayloadParser
             abnormal: $abnormal,
             box: $this->parseBox($fact, $index),
             page: $this->parsePage($fact, $index),
-            confidence: $confidence,
+            confidence: $this->parseConfidence($fact, $index),
         );
+    }
+
+    /**
+     * A box for a fact that is allowed not to have one.
+     *
+     * Only lab results require geometry agent-side (`LabResult._require_bounding_box`); an intake
+     * fact the model read without resolving a box is still a valid fact — it just cannot be clicked
+     * back to the page. A box that is *present* must still be well-formed: a malformed box is a bug,
+     * not an absence.
+     *
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
+    private function parseOptionalBox(array $fact, int $index): ?BoundingBox
+    {
+        if (!isset($fact['bbox']) || $fact['bbox'] === null) {
+            return null;
+        }
+
+        return $this->parseBox($fact, $index);
+    }
+
+    /**
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
+    private function parseConfidence(array $fact, int $index): ?float
+    {
+        if (!isset($fact['confidence'])) {
+            return null;
+        }
+        if (!is_numeric($fact['confidence'])) {
+            throw new \DomainException("Fact #$index has a non-numeric confidence.");
+        }
+
+        return (float) $fact['confidence'];
+    }
+
+    /**
+     * An optional free-text field, absent rather than empty when the extractor did not read one.
+     *
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
+    private function nullableStringField(array $fact, string $key, int $index): ?string
+    {
+        if (!isset($fact[$key]) || $fact[$key] === '') {
+            return null;
+        }
+
+        return $this->stringField($fact, $key, $index);
     }
 
     /**

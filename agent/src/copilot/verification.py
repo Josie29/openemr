@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from copilot.fhir.models import ResourceIdentity
-from copilot.ingestion.schemas import BoundingBox
+from copilot.ingestion.schemas import BoundingBox, DocType
 from copilot.schemas import ChatResponse, Claim, SourceRef
 
 _MISSING = object()
@@ -20,13 +20,15 @@ class Resolution:
     response boundary rather than carried here.
 
     A document-extraction resolver (JOS-54) additionally returns the click-to-source overlay
-    provenance — the source ``document_id``, ``page``, and ``bounding_box`` (**in PDF points**) —
-    which :func:`_stamp` copies onto the ``SourceRef``. FHIR/guideline resolvers leave these None.
+    provenance — the source ``document_id``, ``doc_type``, ``page``, and ``bounding_box`` (**in PDF
+    points**) — which :func:`_stamp` copies onto the ``SourceRef``. FHIR/guideline resolvers leave
+    these None.
     """
 
     value: str
     identity: ResourceIdentity | None
     document_id: str | None = None
+    doc_type: DocType | None = None
     page: int | None = None
     bounding_box: BoundingBox | None = None
 
@@ -285,10 +287,13 @@ def _stamp(resolver: CitationResolver, ref: SourceRef) -> SourceRef | None:
         update["date"] = resolution.identity.date
         update["date_label"] = resolution.identity.date_label
     # Click-to-source overlay provenance (JOS-54/57) is ALWAYS system-set from the resolution —
-    # written unconditionally (None for a non-document fact) so any model-authored box is stripped,
-    # never trusted. `to_citation` routes to a LabPdfCitation purely on `bounding_box is not None`,
-    # so leaving a fabricated box here would draw an overlay on a fact that isn't document-derived.
+    # written unconditionally (None for a non-document fact) so anything the model authored here is
+    # stripped, never trusted. `doc_type` is the load-bearing one: `to_citation` routes a citation
+    # to its document arm on `doc_type is not None`, so a model-authored doc_type would make a plain
+    # FHIR fact serialize as a document citation — and draw whatever box it also invented onto a
+    # source scan the fact was never read from.
     update["document_id"] = resolution.document_id
+    update["doc_type"] = resolution.doc_type
     update["page"] = resolution.page
     update["bounding_box"] = resolution.bounding_box
     return ref.model_copy(update=update)

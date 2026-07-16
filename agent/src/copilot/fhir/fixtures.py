@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -6,14 +7,16 @@ from copilot.fhir.client import FhirError
 from copilot.fhir.models import (
     Allergy,
     Encounter,
-    LabDocumentSummary,
     Medication,
     NoteContent,
     PatientDemographics,
     Problem,
+    UploadedDocumentSummary,
     bundle_resources,
     dedup_medications,
+    resolve_doc_type,
 )
+from copilot.ingestion.schemas import DocType
 
 _SEED_DIR = Path(__file__).parent / "seed"
 
@@ -40,6 +43,33 @@ def _patient_ref_id(resource: dict[str, Any]) -> str | None:
     return reference.rsplit("/", 1)[-1]
 
 
+def _document_paths_by_id(
+    patients: dict[str, PatientRecord], paths_by_type: Mapping[DocType, str]
+) -> dict[str, str]:
+    """Map each seeded document's id to the fixture PDF configured for its type.
+
+    Args:
+        patients: The seeded resource map.
+        paths_by_type: The fixture PDF configured per document type.
+
+    Returns:
+        Document id -> PDF path, for every seeded document whose type has a configured PDF.
+    """
+    resolved: dict[str, str] = {}
+    for record in patients.values():
+        for resource in record.get("DocumentReference", []) or []:
+            if not isinstance(resource, dict):
+                continue
+            doc_type = resolve_doc_type(resource)
+            resource_id = resource.get("id")
+            if doc_type is None or not isinstance(resource_id, str):
+                continue
+            path = paths_by_type.get(doc_type)
+            if path is not None:
+                resolved[resource_id] = path
+    return resolved
+
+
 class FixtureFhirClient:
     """FHIR client that replays recorded resources from memory, grouped by patient.
 
@@ -50,28 +80,40 @@ class FixtureFhirClient:
     """
 
     def __init__(
-        self, patients: dict[str, PatientRecord], document_pdf_path: str | None = None
+        self,
+        patients: dict[str, PatientRecord],
+        document_pdf_paths: Mapping[DocType, str] | None = None,
     ) -> None:
         self._patients = patients
         # Bytes served by get_document_bytes so the fixture path exercises the real OCR pipeline
         # (mirrors HttpFhirClient fetching Binary bytes in prod).
-        self._document_pdf_path = document_pdf_path
+        #
+        # Configured per document TYPE but resolved to an id->path map here, because the byte source
+        # is asked for an ID, not a type. Serving one global PDF for every id — as this client used
+        # to — hands the lab report's page to an intake extraction: the recorded intake values are
+        # right, but none of them can be located on the wrong document's text layer, so every fact
+        # is silently dropped. Resolving each seeded DocumentReference's own category is what keeps
+        # the two apart.
+        self._document_pdf_by_id = _document_paths_by_id(patients, document_pdf_paths or {})
 
     @classmethod
-    def from_seed(cls, document_pdf_path: str | None = None) -> "FixtureFhirClient":
+    def from_seed(
+        cls, document_pdf_paths: Mapping[DocType, str] | None = None
+    ) -> "FixtureFhirClient":
         """Build a client from the FHIR fixtures bundled in ``fhir/seed/``.
 
         Args:
-            document_pdf_path: Optional fixture lab PDF served by ``get_document_bytes``.
+            document_pdf_paths: Optional fixture PDFs, one per document type, served by
+                ``get_document_bytes`` to whichever seeded document has that type.
 
         Returns:
             A client seeded with every patient found in the seed directory.
         """
-        return cls.from_directory(_SEED_DIR, document_pdf_path)
+        return cls.from_directory(_SEED_DIR, document_pdf_paths)
 
     @classmethod
     def from_directory(
-        cls, directory: Path, document_pdf_path: str | None = None
+        cls, directory: Path, document_pdf_paths: Mapping[DocType, str] | None = None
     ) -> "FixtureFhirClient":
         """Build a client from every FHIR JSON file in a directory.
 
@@ -92,7 +134,7 @@ class FixtureFhirClient:
         for path in sorted(directory.glob("*.json")):
             document = json.loads(path.read_text())
             cls._ingest_document(document, patients, source=str(path))
-        return cls(patients, document_pdf_path)
+        return cls(patients, document_pdf_paths)
 
     @classmethod
     def _ingest_document(
@@ -156,20 +198,21 @@ class FixtureFhirClient:
         notes = [NoteContent.from_fhir(r) for r in self._resources(patient_id, "DocumentReference")]
         return [note for note in notes if note.encounter_id == encounter_id]
 
-    async def get_lab_documents(self, patient_id: str) -> list[LabDocumentSummary]:
+    async def get_documents(self, patient_id: str) -> list[UploadedDocumentSummary]:
         summaries = (
-            LabDocumentSummary.try_from_fhir(r)
+            UploadedDocumentSummary.try_from_fhir(r)
             for r in self._resources(patient_id, "DocumentReference")
         )
         return [summary for summary in summaries if summary is not None]
 
     async def get_document_bytes(self, document_id: str) -> bytes:
-        if not self._document_pdf_path:
-            raise FhirError("fixture FHIR client has no document PDF configured")
+        path = self._document_pdf_by_id.get(document_id)
+        if path is None:
+            raise FhirError(f"fixture FHIR client has no document PDF for {document_id}")
         try:
-            return Path(self._document_pdf_path).read_bytes()
+            return Path(path).read_bytes()
         except OSError as exc:
-            raise FhirError(f"could not read fixture document {self._document_pdf_path}") from exc
+            raise FhirError(f"could not read fixture document {path}") from exc
 
     async def ping(self) -> None:
         # In-memory fixtures are always reachable.

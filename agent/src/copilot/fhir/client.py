@@ -6,11 +6,11 @@ import httpx
 from copilot.fhir.models import (
     Allergy,
     Encounter,
-    LabDocumentSummary,
     Medication,
     NoteContent,
     PatientDemographics,
     Problem,
+    UploadedDocumentSummary,
     bundle_resources,
     dedup_medications,
 )
@@ -86,7 +86,7 @@ class FhirClient(Protocol):
         """
         ...
 
-    async def get_lab_documents(self, patient_id: str) -> list[LabDocumentSummary]:
+    async def get_documents(self, patient_id: str) -> list[UploadedDocumentSummary]:
         """List the patient's uploaded lab documents (``DocumentReference`` with binary content).
 
         Returns the uploaded documents (PDF/Binary attachment) only — inline ``text/plain`` clinical
@@ -208,11 +208,11 @@ class HttpFhirClient:
         notes = [NoteContent.from_fhir(r) for r in resources]
         return [note for note in notes if note.encounter_id == encounter_id]
 
-    async def get_lab_documents(self, patient_id: str) -> list[LabDocumentSummary]:
+    async def get_documents(self, patient_id: str) -> list[UploadedDocumentSummary]:
         # Search all of the patient's DocumentReferences and keep the uploaded (PDF/Binary) ones;
         # the exact OpenEMR lab category token is unreliable, so the attachment kind is the filter.
         resources = await self._search("DocumentReference", patient_id)
-        summaries = (LabDocumentSummary.try_from_fhir(r) for r in resources)
+        summaries = (UploadedDocumentSummary.try_from_fhir(r) for r in resources)
         return [summary for summary in summaries if summary is not None]
 
     async def get_document_bytes(self, document_id: str) -> bytes:

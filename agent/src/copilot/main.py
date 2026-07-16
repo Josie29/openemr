@@ -22,6 +22,7 @@ from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
 from copilot.health import check_readiness
 from copilot.ingestion.extractor import build_extractor
+from copilot.ingestion.schemas import DocType
 from copilot.observability import (
     configure_observability,
     observe_turn,
@@ -122,6 +123,25 @@ def _build_evidence(answer: ChatResponse, chunks: ChunkRegistry) -> list[dict[st
     return [entry.model_dump(mode="json") for entry in ordered]
 
 
+def _fixture_document_pdfs(settings: Settings) -> dict[DocType, str]:
+    """The demo PDF configured for each document type, omitting the unconfigured.
+
+    The DocType -> settings-field mapping lives here rather than on ``Settings`` so ``config`` stays
+    a leaf that knows nothing about the ingestion schemas.
+
+    Args:
+        settings: Service settings.
+
+    Returns:
+        The configured demo PDFs by document type; empty when none are set.
+    """
+    by_type = {
+        DocType.LAB_PDF: settings.document_pdf_path_lab_pdf,
+        DocType.INTAKE_FORM: settings.document_pdf_path_intake_form,
+    }
+    return {doc_type: path for doc_type, path in by_type.items() if path}
+
+
 def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirClient:
     """Construct the app-lifetime FHIR client used by the ``/ready`` probe (and fixture reads).
 
@@ -141,7 +161,7 @@ def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirC
         ValueError: If ``HTTP`` mode is selected without a base URL.
     """
     if settings.fhir_client_mode is FhirClientMode.FIXTURE:
-        return FixtureFhirClient.from_seed(settings.document_pdf_path)
+        return FixtureFhirClient.from_seed(_fixture_document_pdfs(settings))
     # HTTP mode. A missing base URL is a misconfiguration, but we do not raise at startup —
     # crash-looping the deploy hides the cause. Construct a client anyway (empty base URL) so the
     # process starts and the misconfig surfaces as a red /ready FHIR probe; /chat separately 500s

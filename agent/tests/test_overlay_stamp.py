@@ -4,7 +4,11 @@ from pathlib import Path
 from copilot.fhir.models import PatientDemographics
 from copilot.ingestion.extractor import ExtractedDocument, map_lab_report
 from copilot.ingestion.pdf_geometry import extract_word_boxes
-from copilot.ingestion.registry import DOCUMENT_FACT_RESOURCE_TYPE, DocumentFactRegistry
+from copilot.ingestion.registry import (
+    DOCUMENT_FACT_RESOURCE_TYPE,
+    DocumentFactRegistry,
+    LabFactHandle,
+)
 from copilot.ingestion.schemas import BoundingBox, DocType
 from copilot.schemas import Claim, FhirCitation, LabPdfCitation, SourceRef
 from copilot.verification import FetchLog, ground_claims
@@ -56,7 +60,11 @@ def test_stamp_keeps_box_on_real_document_fact() -> None:
     handles = registry.record(
         ExtractedDocument(document_id="doc-1", doc_type=DocType.LAB_PDF, report=report)
     )
-    handle = next(h for h in handles if h.test_name == "Creatinine")
+    # The registry records whatever kind of fact a document yields, so its handles are a tagged
+    # union; this test is about the lab arm.
+    handle = next(
+        h for h in handles if isinstance(h, LabFactHandle) and h.test_name == "Creatinine"
+    )
     assert handle.resource_type == DOCUMENT_FACT_RESOURCE_TYPE
     claim = Claim(
         text="Creatinine was 1.44 mg/dL (high).",

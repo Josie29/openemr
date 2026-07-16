@@ -1,14 +1,13 @@
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 
-from copilot.fhir.models import LabDocumentSummary
+from copilot.fhir.models import UploadedDocumentSummary
 from copilot.fhir_tools import register_fhir_read_tools
 from copilot.graph.deps import GraphDeps
 from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.ingestion.extractor import ExtractionError, FhirBinaryByteSource
-from copilot.ingestion.registry import LabFactHandle
-from copilot.ingestion.schemas import DocType
+from copilot.ingestion.registry import DocumentFactHandle
 from copilot.rag.models import EvidenceSnippet
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
@@ -49,14 +48,24 @@ when independent):
   lists don't hold. Find the visit with get_encounters first, then read the note for the SPECIFIC
   encounter the question is about. If that visit has no note, say so rather than scanning others.
 
-You also read UPLOADED lab-report documents (values the FHIR lists don't hold):
-- list_lab_documents: the patient's uploaded lab reports (id, title, date). Metadata only.
-- attach_and_extract(document_id): OCR one lab report into its individual lab results. Returns a
-  list of facts, each with a `resource_type` ("Observation"), a `resource_id`, and the printed
-  `test_name`/`value`/`unit`/`reference_range`/`abnormal_flag`. When a question is about lab values,
-  a trend, or an uploaded report, call list_lab_documents, then attach_and_extract on the relevant
-  report, and state the results the question needs. Cite each fact you state with its
-  `resource_type`/`resource_id` and `field` "value" — verbatim from the tool result.
+You also read UPLOADED documents (values the FHIR lists don't hold):
+- list_documents: the patient's uploaded documents (id, title, date, and `doc_type`, which is either
+  "lab_pdf" or "intake_form"). Metadata only.
+- attach_and_extract(document_id): OCR one uploaded document into its individual facts. What is read
+  depends on the document's own type — you do not choose it:
+  - a `lab_pdf` returns lab results, each with `resource_type` "Observation" and the printed
+    `test_name`/`value`/`unit`/`reference_range`/`abnormal_flag`.
+  - an `intake_form` returns what the patient wrote at the front desk: demographics
+    (`resource_type` "Patient"), current medications ("MedicationRequest"), allergies
+    ("AllergyIntolerance"), and family history ("FamilyMemberHistory").
+  When a question is about lab values, a trend, an uploaded report, or something the patient
+  reported on their intake form (a chief concern, a medication they take, a family history), call
+  list_documents, then attach_and_extract on the relevant document, and state the facts the question
+  needs. Cite each fact with its `resource_type`/`resource_id` and `field` "value" — verbatim from
+  the tool result.
+  Facts from an intake form are what the PATIENT reported, not what a clinician has confirmed. Say
+  so when it matters — an intake medication list is not the chart's medication list, and the two can
+  disagree.
 
 For a broad "who is this / give me the picture" request, fetch problems, medications, allergies, and
 the most recent encounters so the orientation is complete; for a focused question, fetch only what
@@ -150,8 +159,8 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     register_fhir_read_tools(agent)
 
     @agent.tool
-    async def list_lab_documents(ctx: RunContext[GraphDeps]) -> list[LabDocumentSummary]:
-        """List the patient's uploaded lab-report documents (id, title, date) for extraction.
+    async def list_documents(ctx: RunContext[GraphDeps]) -> list[UploadedDocumentSummary]:
+        """List the patient's uploaded documents (id, title, date, doc_type) for extraction.
 
         Memoized per turn: the FHIR discovery read runs once, so repeated calls (a model retrying on
         an empty list) return the cached result instead of hammering FHIR.
@@ -159,17 +168,21 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         Args:
             ctx: The run context (holds the patient-scoped FHIR client).
         """
-        cache = ctx.deps.lab_documents_cache
+        cache = ctx.deps.documents_cache
         if cache is None:
-            cache = await ctx.deps.fhir.get_lab_documents(ctx.deps.patient_id)
-            ctx.deps.lab_documents_cache = cache
+            cache = await ctx.deps.fhir.get_documents(ctx.deps.patient_id)
+            ctx.deps.documents_cache = cache
         return cache
 
     @agent.tool
     async def attach_and_extract(
         ctx: RunContext[GraphDeps], document_id: str
-    ) -> list[LabFactHandle]:
-        """OCR one uploaded lab report into its individual, citable lab results.
+    ) -> list[DocumentFactHandle]:
+        """OCR one uploaded document into its individual, citable facts.
+
+        What is read from the document is decided by the document's own type, not by the caller: a
+        lab report yields lab results, an intake form yields demographics, medications, allergies,
+        and family history.
 
         Args:
             ctx: The run context (holds the extractor and the document-fact registry).
@@ -177,11 +190,19 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         """
         if ctx.deps.extractor is None:
             return []
-        # Only extract a document the patient actually has — i.e. one list_lab_documents returned.
+        # Only extract a document the patient actually has — i.e. one list_documents returned.
         # Rejects a hallucinated/guessed id and avoids wasting a Binary fetch + OCR (the expensive
         # hop) on a document that isn't there. If discovery hasn't run, there is nothing to extract.
-        known = {doc.resource_id for doc in (ctx.deps.lab_documents_cache or [])}
-        if document_id not in known:
+        #
+        # This lookup is also what keeps the SCHEMA out of the model's hands: the doc type comes off
+        # the discovered record, resolved from its OpenEMR category, so the tool takes no doc_type
+        # argument the model could set. The model chooses WHICH document to read, never how to read
+        # it.
+        summary = next(
+            (doc for doc in (ctx.deps.documents_cache or []) if doc.resource_id == document_id),
+            None,
+        )
+        if summary is None:
             return []
         # Memoized per document id: don't re-fetch + re-OCR a document already extracted this turn.
         if document_id in ctx.deps.extracted_documents:
@@ -191,10 +212,10 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         # the citation + click-to-source viewer use.
         byte_source = FhirBinaryByteSource(ctx.deps.fhir)
         try:
-            extracted = await ctx.deps.extractor.extract(document_id, DocType.LAB_PDF, byte_source)
+            extracted = await ctx.deps.extractor.extract(document_id, summary.doc_type, byte_source)
         except ExtractionError:
             # The document could not be read — return no facts so the worker reports the gap
-            # rather than fabricating lab values around a failed OCR.
+            # rather than fabricating facts around a failed OCR.
             return []
         # Record the extracted facts so the grounding gate can resolve any the worker cites.
         handles = ctx.deps.documents.record(extracted)

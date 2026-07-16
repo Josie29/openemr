@@ -68,6 +68,21 @@ seeded set (`unconfirmed|confirmed|refuted|entered-in-error`, `database.sql:6871
 layer passes the value through verbatim with no allowlist, so an unseeded value yields a code with a
 NULL display.
 
+### Allergies — the marker is strong, but the substance is not machine-readable
+
+`verificationStatus: unconfirmed` round-trips exactly as designed. But `AllergyIntolerance.code` comes
+from `lists.diagnosis` (`FhirAllergyIntoleranceService:198-217`), and the extractor supplies no
+RxNorm/SNOMED code — the agent's `Allergy` model carries only a free-text `substance`. So the code
+element reads back as `data-absent-reason: unknown`, and "Penicillin" survives only in the narrative
+`text.div`.
+
+**This is the honest output and is deliberate.** Fabricating a code from free text would launder a
+guess into a coded clinical assertion — precisely the failure mode the whole grounding design exists
+to prevent. A machine consumer sees an unconfirmed allergy of unknown substance, which is true;
+inventing `SNOMED:764146007` from the string "Penicillin" would be a lie with better ergonomics.
+Pinned by test rather than "fixed". Coding extracted substances would need a real terminology lookup
+with its own confidence handling — out of scope here.
+
 ### Medications — the marker is weaker, and that is a documented limitation
 
 **`lists.verification` is never read for a medication.** Only the allergy and condition services read
@@ -227,6 +242,18 @@ the claim §3.1 makes today.
 ## Risks
 
 - **Silent-vanish on missing `order_code`** — the headline trap; explicit test.
+- **Medication rows need two things nothing else does.** `lists.activity` defaults to NULL and
+  `PatientIssuesService::createIssue` does not set it (the allergy path hardcodes it) — without
+  `activity=1` the status `CASE` falls through to `stopped` and the medication never reads back as
+  current. And `PrescriptionService`'s constructor backfills uuids for prescriptions/patient/
+  encounter/users/drugs but **not `lists`**, and `createIssue` mints none — so unlike labs (which get
+  backfill free from `ProcedureService`) and allergies (`AllergyIntoleranceService::insert` mints
+  one), a medication row must have its uuid minted explicitly or the MedicationRequest returns with
+  no id. Both failures are silent.
+- **PHPStan gives no signal in the dev container.** It exits 9 with no output on *stock core files*
+  too — PHPStan 2.1.56 does not support PHP 8.5.6. Pre-existing and repo-wide, not specific to this
+  work, but it means the level-10 gate CLAUDE.md relies on did not run here. Do not read a phpstan
+  invocation that prints only the config note as a pass.
 - **UUID backfill contradiction — resolve empirically before relying on either.** The spike reports
   "UUID registration needed or `procedure_result.uuid` is NULL and the Observation has no id", but
   `ProcedureService::__construct:46-55` calls `UuidRegistry::createMissingUuidsForTables`, which should

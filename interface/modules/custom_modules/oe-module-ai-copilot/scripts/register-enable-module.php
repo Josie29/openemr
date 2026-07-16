@@ -15,8 +15,10 @@
  * Run inside the openemr container from the webroot:
  *   php interface/modules/custom_modules/oe-module-ai-copilot/scripts/register-enable-module.php
  *
- * The module ships no install SQL or ACL (`version.php` has `$v_database = 0`),
- * so register + enable is the whole job — no `installSQL`/ACL step is needed.
+ * Three steps, mirroring the Module Manager: register, install SQL, enable. The
+ * SQL step creates the extraction sidecar (`sql/table.sql`, `$v_database = 1`);
+ * it runs through `SqlUpgradeService`, so the script's `#IfNotTable` guards make
+ * re-running a no-op. The module still ships no ACL.
  *
  * @package   OpenEMR\Modules\AiCopilot
  * @link      https://www.open-emr.org
@@ -74,9 +76,22 @@ if (empty($rows)) {
     exit(1);
 }
 $modId = (int) $rows[0]['mod_id'];
-echo "mod_id={$modId} type={$rows[0]['type']} mod_active(before)={$rows[0]['mod_active']}\n";
+$modType = (int) $rows[0]['type'];
+echo "mod_id={$modId} type={$modType} mod_active(before)={$rows[0]['mod_active']}\n";
 
-// (b) Enable. Same call EnableModule() makes: UPDATE modules SET mod_active=1.
+// (b) Install SQL. type=0 (MODULE_TYPE_CUSTOM) routes to installSQLWithUpgradeService, which
+//     honours the #IfNotTable guards in sql/table.sql — so this is safe to re-run.
+$moduleDir = __DIR__ . '/..';
+if (!$table->installSQL($modId, $modType, $moduleDir)) {
+    fwrite(STDERR, "FATAL: installSQL failed for sql/table.sql — sidecar table not created\n");
+    exit(1);
+}
+$sidecarExists = QueryUtils::fetchRecords("SHOW TABLES LIKE 'ai_copilot_document_facts'");
+echo empty($sidecarExists)
+    ? "installSQL: reported OK but ai_copilot_document_facts is missing\n"
+    : "installSQL: ai_copilot_document_facts present\n";
+
+// (c) Enable. Same call EnableModule() makes: UPDATE modules SET mod_active=1.
 $table->updateRegistered($modId, "mod_active=1");
 
 $after = QueryUtils::fetchRecords("SELECT mod_active FROM modules WHERE mod_id = ?", [$modId]);

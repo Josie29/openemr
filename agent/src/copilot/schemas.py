@@ -165,6 +165,32 @@ class ChatResponse(BaseModel):
     )
 
 
+class Evidence(BaseModel):
+    """One distinct guideline source that grounded the answer — a source card for the sidebar.
+
+    The evidence panel shows SOURCES, not claim sentences: this is deduplicated by chunk and
+    ordered by relevance, so its count reflects how many distinct sources back the answer, not how
+    many claims the model wrote. Built by code from the retrieved
+    :class:`~copilot.rag.models.EvidenceSnippet` (never the model), so it carries the reranker
+    ``relevance_score`` and the presentation metadata (``source_url``, ``year``) the minimal
+    citation contract omits. Added to the response body in ``_answer_payload`` — deliberately NOT a
+    field on the LLM-facing :class:`ChatResponse` (mirrors the per-claim ``citations`` projection).
+    See context/specs/evidence-gating-and-presentation.md §3.2.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source_id: str = Field(description="The guideline source id, e.g. 'gina-main-report-2022'")
+    section: str = Field(description="Section heading the snippet was drawn from")
+    quote: str = Field(description="The verbatim guideline text that grounded the answer")
+    chunk_id: str = Field(description="The retrieval chunk id — the dedup key")
+    relevance_score: float = Field(
+        description="Cohere rerank score in [0, 1]; higher is more relevant to the query"
+    )
+    source_url: str | None = Field(default=None, description="Public URL of the source guideline")
+    year: str | None = Field(default=None, description="Source publication year, e.g. '2022'")
+
+
 class ChatRequest(BaseModel):
     """The inbound ``POST /chat`` payload for a single agent turn."""
 

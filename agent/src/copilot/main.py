@@ -30,7 +30,8 @@ from copilot.observability import (
 )
 from copilot.pricing import turn_cost_usd
 from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
-from copilot.schemas import ChatRequest, ChatResponse
+from copilot.retrieval import ChunkRegistry
+from copilot.schemas import ChatRequest, ChatResponse, CitationSourceType, Evidence
 
 logger = logging.getLogger("copilot")
 
@@ -55,27 +56,70 @@ _UNAVAILABLE_ANSWER = ChatResponse(
 )
 
 
-def _answer_payload(answer: ChatResponse) -> dict[str, Any]:
-    """Serialize the final answer and attach the canonical wire citation to each claim.
+def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, Any]:
+    """Serialize the final answer: per-claim wire citations plus the deduped evidence panel.
 
     The response keeps the answer's own ``claims`` (with their gate-stamped ``source``) and adds,
     per claim, the project-wide :data:`~copilot.schemas.Citation` list the sidebar's click-to-source
     (JOS-57) consumes — each a pure projection of a grounded ``SourceRef`` via
-    :meth:`~copilot.schemas.SourceRef.to_citation`. Additive, so nothing the current sidebar reads
-    is removed, and the citations stay off the LLM-facing ``Claim`` model.
+    :meth:`~copilot.schemas.SourceRef.to_citation`. It also adds a top-level ``evidence`` array: the
+    distinct guideline sources that grounded the answer, deduped by chunk and ranked by relevance
+    (§3.2). Both are additive — nothing the current sidebar reads is removed — and stay off the
+    LLM-facing ``Claim``/``ChatResponse`` models.
 
     Args:
         answer: The grounded final answer from the graph.
+        chunks: The conversation's chunk registry — the source of the retrieved snippets' rerank
+            scores and presentation metadata for the evidence panel.
 
     Returns:
-        The JSON-serializable response body, each claim carrying a ``citations`` list.
+        The JSON-serializable response body, each claim carrying a ``citations`` list and the body
+        carrying an ``evidence`` list.
     """
     content: dict[str, Any] = answer.model_dump()
     for claim_dict, claim in zip(content["claims"], answer.claims, strict=True):
         claim_dict["citations"] = [
             ref.to_citation().model_dump(mode="json") for ref in [claim.source, *claim.supporting]
         ]
+    content["evidence"] = _build_evidence(answer, chunks)
     return content
+
+
+def _build_evidence(answer: ChatResponse, chunks: ChunkRegistry) -> list[dict[str, Any]]:
+    """Build the evidence panel: the distinct guideline sources the answer's claims cite.
+
+    The panel shows SOURCES, not claim sentences — so this collects every guideline chunk the final
+    claims cite, resolves each back to the snippet the retriever recorded (for its rerank score and
+    presentation metadata), dedupes by chunk id, and orders by relevance. Non-guideline citations
+    (FHIR records, lab facts) are not guideline evidence and are skipped. Empty when the answer
+    grounds on no guideline chunk — the sidebar then shows no evidence section.
+
+    Args:
+        answer: The grounded final answer.
+        chunks: The conversation's chunk registry holding this turn's retrieved snippets.
+
+    Returns:
+        JSON-serializable evidence entries, most relevant first, one per distinct cited chunk.
+    """
+    deduped: dict[str, Evidence] = {}
+    for claim in answer.claims:
+        for ref in (claim.source, *claim.supporting):
+            if ref.resource_type != CitationSourceType.GUIDELINE.value:
+                continue
+            snippet = chunks.get(ref.resource_id)
+            if snippet is None or ref.resource_id in deduped:
+                continue
+            deduped[ref.resource_id] = Evidence(
+                source_id=snippet.citation.source_id,
+                section=snippet.citation.page_or_section,
+                quote=snippet.text,
+                chunk_id=ref.resource_id,
+                relevance_score=snippet.rerank_score,
+                source_url=snippet.source_url,
+                year=snippet.year,
+            )
+    ordered = sorted(deduped.values(), key=lambda e: e.relevance_score, reverse=True)
+    return [entry.model_dump(mode="json") for entry in ordered]
 
 
 def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirClient:
@@ -253,7 +297,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     retriever = build_retriever(settings)
     if retriever is None:
         logger.warning("evidence retriever unconfigured for QDRANT mode; using fixture fallback")
-        retriever = FixtureEvidenceRetriever.from_corpus(settings.rerank_top_n)
+        retriever = FixtureEvidenceRetriever.from_corpus(
+            settings.rerank_top_n, relevance_floor=settings.retrieval_relevance_floor
+        )
     app.state.retriever = retriever
     # The Week-2 supervisor graph is the only /chat behavior: supervisor routes to the
     # intake-extractor and evidence-retriever, and the grounding gate is enforced on each worker and
@@ -362,7 +408,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
-                    content = _answer_payload(result.answer)
+                    content = _answer_payload(result.answer, session.chunks)
                     turn.output(content)
                 except (UnexpectedModelBehavior, UsageLimitExceeded):
                     # Either the gate exhausted its retries without an attributable answer, or the

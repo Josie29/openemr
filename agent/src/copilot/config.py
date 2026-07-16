@@ -127,11 +127,18 @@ class Settings(BaseSettings):
     dense_embedding_model: str = "BAAI/bge-small-en-v1.5"  # 384-dim
     sparse_embedding_model: str = "Qdrant/bm25"
     rerank_model: str = "rerank-v4.0-fast"  # Cohere; v3.5 is deprecated (pin a v4.0 model)
-    # Per-leg prefetch depth (dense and sparse each fetch this many before RRF); reranked down to
-    # rerank_top_n grounded snippets fed to the answer model. Defaults per the decision doc;
-    # tune empirically once the 50-case eval set exists.
+    # Per-leg prefetch depth (dense and sparse each fetch this many before RRF); every fused
+    # candidate is reranked, gated by the relevance floor, then capped to rerank_top_n grounded
+    # snippets fed to the answer model. Defaults per the decision doc; tune empirically once the
+    # 50-case eval set exists.
     retrieval_prefetch_k: int = 20
-    rerank_top_n: int = 5
+    rerank_top_n: int = 3
+    # Minimum Cohere rerank score a snippet must clear to be shown AND to reach the answer model
+    # (upstream gate — a weak match never grounds an answer). Nothing clears it -> no evidence, and
+    # the answer is composed without guideline backing rather than on a poor match. NOT calibrated
+    # across queries (0.5 on one query != another); a pragmatic floor to tune against the eval set.
+    # See context/specs/evidence-gating-and-presentation.md §3.1.
+    retrieval_relevance_floor: float = 0.5
 
     # Document extraction (JOS-54 — W2_ARCHITECTURE.md §3.1). The intake-extractor's
     # attach_and_extract tool OCRs an uploaded lab PDF into cited lab facts. Defaults to MISTRAL so

@@ -14,10 +14,7 @@ from copilot.ingestion.extractor import (  # noqa: E402
     map_intake_form,
     map_lab_report,
 )
-from copilot.ingestion.geometry.words import (  # noqa: E402
-    extract_checkboxes,
-    extract_word_boxes,
-)
+from copilot.ingestion.geometry.document import DocumentGeometry  # noqa: E402
 from copilot.ingestion.schemas import DocType, IntakeForm, LabReport  # noqa: E402
 
 _AGENT_ROOT = Path(__file__).resolve().parents[1]
@@ -140,13 +137,13 @@ def _replay(raw: dict[str, Any], pdf_bytes: bytes, doc_type: DocType) -> list[tu
     Raises:
         SystemExit: If the response maps to no facts — the recording is not worth committing.
     """
-    words = extract_word_boxes(pdf_bytes)
     try:
+        geometry = DocumentGeometry.from_document(pdf_bytes, raw)
         match doc_type:
             case DocType.LAB_PDF:
-                report: LabReport | IntakeForm = map_lab_report(raw, words)
+                report: LabReport | IntakeForm = map_lab_report(raw, geometry)
             case DocType.INTAKE_FORM:
-                report = map_intake_form(raw, words, extract_checkboxes(pdf_bytes))
+                report = map_intake_form(raw, geometry)
     except ExtractionError as exc:
         raise SystemExit(f"the recording does not map: {exc}") from exc
     rows = _report_rows(report)

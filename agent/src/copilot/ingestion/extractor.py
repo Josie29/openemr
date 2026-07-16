@@ -16,12 +16,6 @@ from copilot.ingestion.errors import ExtractionError
 from copilot.ingestion.geometry.document import DocumentGeometry
 from copilot.ingestion.geometry.fields import FieldId, spec_for
 from copilot.ingestion.geometry.locators import LocateRequest, LocatorState
-from copilot.ingestion.geometry.words import (
-    Checkbox,
-    Word,
-    extract_checkboxes,
-    extract_word_boxes,
-)
 from copilot.ingestion.schemas import (
     AbnormalFlag,
     Allergy,
@@ -35,6 +29,7 @@ from copilot.ingestion.schemas import (
     LabReport,
     LabResult,
     Medication,
+    paths_by_doc_type,
 )
 
 logger = logging.getLogger("copilot")
@@ -372,17 +367,12 @@ def _map_report(
     Raises:
         ExtractionError: If the response cannot be mapped.
     """
-    # The PDF text layer gives exact word boxes (points); empty for a scanned/image-only PDF, in
-    # which case the mapper falls back to its coarse locators.
-    words = extract_word_boxes(pdf_bytes)
+    geometry = DocumentGeometry.from_document(pdf_bytes, raw)
     match doc_type:
         case DocType.LAB_PDF:
-            return map_lab_report(raw, words)
+            return map_lab_report(raw, geometry)
         case DocType.INTAKE_FORM:
-            # Checkboxes are read only for a form: a tick is what makes an option a fact, and a
-            # lab report has none.
-            checkboxes = extract_checkboxes(pdf_bytes)
-            return map_intake_form(raw, words, checkboxes)
+            return map_intake_form(raw, geometry)
 
 
 class DocumentExtractor:
@@ -418,25 +408,6 @@ class DocumentExtractor:
         return ExtractedDocument(document_id=document_id, doc_type=doc_type, report=report)
 
 
-def _ocr_fixture_paths(settings: Settings) -> dict[DocType, str]:
-    """The recorded OCR response configured for each document type, omitting the unconfigured.
-
-    The DocType -> settings-field mapping lives here rather than on ``Settings`` so ``config`` stays
-    a leaf that knows nothing about the ingestion schemas.
-
-    Args:
-        settings: Service settings.
-
-    Returns:
-        The configured fixture paths by document type; empty when none are set.
-    """
-    by_type = {
-        DocType.LAB_PDF: settings.ocr_fixture_path_lab_pdf,
-        DocType.INTAKE_FORM: settings.ocr_fixture_path_intake_form,
-    }
-    return {doc_type: path for doc_type, path in by_type.items() if path}
-
-
 def build_extractor(settings: Settings) -> DocumentExtractor | None:
     """Construct the document extractor from settings, or None when extraction is unconfigured.
 
@@ -452,7 +423,10 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
         A wired :class:`DocumentExtractor`, or None when extraction cannot be configured.
     """
     if settings.extractor_mode is ExtractorMode.FIXTURE:
-        paths = _ocr_fixture_paths(settings)
+        paths = paths_by_doc_type(
+            lab_pdf=settings.ocr_fixture_path_lab_pdf,
+            intake_form=settings.ocr_fixture_path_intake_form,
+        )
         if not paths:
             logger.warning("extractor FIXTURE mode without an OCR fixture; extraction disabled")
             return None
@@ -497,13 +471,12 @@ def _annotation_dict(ocr: dict[str, Any]) -> dict[str, Any]:
     return annotation if isinstance(annotation, dict) else {}
 
 
-def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
-    """Map a Mistral OCR response + PDF word boxes into a strict ``LabReport`` (boxes in points).
+def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport:
+    """Map a Mistral OCR response + document geometry into a strict ``LabReport`` (boxes in points).
 
     Args:
         ocr: The raw OCR response dict (``document_annotation`` + ``pages[].blocks``/``tables``).
-        words: The PDF text-layer words (from :func:`extract_word_boxes`); empty for a scanned PDF,
-            in which case each value falls back to the coarse OCR row band.
+        geometry: The document's normalized evidence (:meth:`DocumentGeometry.from_document`).
 
     Returns:
         The strict :class:`LabReport`; every ``LabResult``'s ``bounding_box`` is in PDF points.
@@ -517,10 +490,9 @@ def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
     raw_annotation_results = annotation.get("results")
     raw_results = raw_annotation_results if isinstance(raw_annotation_results, list) else []
 
-    geometry = DocumentGeometry.from_parts(ocr, words)
     # The raw page is still needed for per-word confidence, which is OCR metadata, not geometry.
     page: dict[str, Any] = (ocr.get("pages") or [{}])[0]
-    if not words and raw_results:
+    if not geometry.words and raw_results:
         logger.warning(
             "PDF has no text layer; using the coarse OCR row band for box geometry",
             extra={"result_count": len(raw_results)},
@@ -561,10 +533,8 @@ def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
     return LabReport(results=results)
 
 
-def map_intake_form(
-    ocr: dict[str, Any], words: list[Word], checkboxes: list[Checkbox]
-) -> IntakeForm:
-    """Map a Mistral OCR response + text-layer evidence into a strict ``IntakeForm``.
+def map_intake_form(ocr: dict[str, Any], geometry: DocumentGeometry) -> IntakeForm:
+    """Map a Mistral OCR response + document geometry into a strict ``IntakeForm``.
 
     Mirrors :func:`map_lab_report`: schema mode gives the VALUES, the locator chain bound to each
     field decides where they sit. A value that cannot be placed to the intake precision floor — or
@@ -576,8 +546,8 @@ def map_intake_form(
 
     Args:
         ocr: The raw OCR response dict.
-        words: The PDF text-layer words in points.
-        checkboxes: The form's tick boxes, which alone assert a checkbox-backed answer.
+        geometry: The document's normalized evidence — including the tick boxes, which alone
+            assert a checkbox-backed answer (:meth:`DocumentGeometry.from_document`).
 
     Returns:
         The strict :class:`IntakeForm`; every emitted citation's box is in PDF points.
@@ -587,7 +557,6 @@ def map_intake_form(
             but not valid JSON.
     """
     annotation = _annotation_dict(ocr)
-    geometry = DocumentGeometry.from_parts(ocr, words, checkboxes=checkboxes)
     state = LocatorState()
 
     def cited(field: FieldId, value: Any) -> CitedText | None:
@@ -633,7 +602,7 @@ def _locate(
     """
     spec = spec_for(DocType.INTAKE_FORM, field)
     located = spec.chain.locate(
-        LocateRequest(value=value, anchors=tuple(sorted(spec.labels))), geometry, state
+        LocateRequest(value=value, anchors=spec.labels), geometry, state
     )
     if located is None:
         logger.warning(

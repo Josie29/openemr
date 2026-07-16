@@ -47,13 +47,17 @@ class FieldSpec:
     matching is normalized (case- and punctuation-insensitive). Supporting another form should mean
     adding an alias here; only a genuinely new *idiom* warrants a new locator.
 
+    The wordings are an ordered tuple purely so the value handed to a locator is stable run to run;
+    which one matches does not depend on their order (a locator collects every match and picks by
+    position on the page, not by the order it was asked).
+
     ``chain`` is ordered and layout-agnostic: the first locator that applies wins, so one spec can
     serve a form that renders the field in a table and another that renders it as a label:value
     pair, without either form being named anywhere.
     """
 
     field: FieldId
-    labels: frozenset[str]
+    labels: tuple[str, ...]
     chain: LocatorChain
     floor: BoxPrecision
 
@@ -75,7 +79,7 @@ LAB_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             field=FieldId.LAB_RESULT_VALUE,
             # A lab result is anchored by its own printed test name, which varies per report, so the
             # anchor is supplied per fact rather than drawn from a fixed alias set.
-            labels=frozenset(),
+            labels=(),
             chain=_chain(
                 RowSpanLocator(anchor_region=(0.0, 200.0), max_span_words=1),
                 TableRowBandLocator(),
@@ -99,19 +103,19 @@ INTAKE_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
     {
         FieldId.DEMOGRAPHICS_FULL_NAME: FieldSpec(
             field=FieldId.DEMOGRAPHICS_FULL_NAME,
-            labels=frozenset({"patient name (last, first)", "full name", "patient name", "name"}),
+            labels=("patient name (last, first)", "full name", "patient name", "name"),
             chain=_chain(LabelSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
         FieldId.DEMOGRAPHICS_DATE_OF_BIRTH: FieldSpec(
             field=FieldId.DEMOGRAPHICS_DATE_OF_BIRTH,
-            labels=frozenset({"date of birth", "dob", "birth date"}),
+            labels=("date of birth", "dob", "birth date"),
             chain=_chain(LabelSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
         FieldId.DEMOGRAPHICS_SEX: FieldSpec(
             field=FieldId.DEMOGRAPHICS_SEX,
-            labels=frozenset({"sex", "gender", "sex assigned at birth"}),
+            labels=("sex", "gender", "sex assigned at birth"),
             # Checkbox FIRST: where the form offers ticked options, the tick is the only thing that
             # asserts an answer, and an unticked option must be refused rather than fall through to
             # a text match on its preprinted label. Where a form has no boxes, this defers and the
@@ -122,20 +126,23 @@ INTAKE_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
         ),
         FieldId.DEMOGRAPHICS_ADDRESS: FieldSpec(
             field=FieldId.DEMOGRAPHICS_ADDRESS,
-            labels=frozenset({"home address", "address", "mailing address", "street address"}),
+            labels=("home address", "address", "mailing address", "street address"),
             chain=_chain(LabelSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
         FieldId.DEMOGRAPHICS_PHONE: FieldSpec(
             field=FieldId.DEMOGRAPHICS_PHONE,
-            labels=frozenset({"phone", "contact phone", "home phone", "mobile", "cell"}),
+            labels=("phone", "contact phone", "home phone", "mobile", "cell"),
             chain=_chain(LabelSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
         FieldId.CHIEF_CONCERN: FieldSpec(
             field=FieldId.CHIEF_CONCERN,
-            labels=frozenset(
-                {"reason for today's visit", "reason for visit", "chief concern", "chief complaint"}
+            labels=(
+                "reason for today's visit",
+                "reason for visit",
+                "chief concern",
+                "chief complaint",
             ),
             # Free text under a heading: there is no label beside the value, so the heading scopes
             # the search instead. The span limit is raised well past the other fields' because this
@@ -146,19 +153,19 @@ INTAKE_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
         ),
         FieldId.CURRENT_MEDICATIONS: FieldSpec(
             field=FieldId.CURRENT_MEDICATIONS,
-            labels=frozenset({"current medications", "medications", "medication"}),
+            labels=("current medications", "medications", "medication"),
             chain=_chain(SectionSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
         FieldId.ALLERGIES: FieldSpec(
             field=FieldId.ALLERGIES,
-            labels=frozenset({"allergies", "allergy / substance", "allergy", "known allergies"}),
+            labels=("allergies", "allergy / substance", "allergy", "known allergies"),
             chain=_chain(SectionSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
         FieldId.FAMILY_HISTORY: FieldSpec(
             field=FieldId.FAMILY_HISTORY,
-            labels=frozenset({"family history", "family medical history"}),
+            labels=("family history", "family medical history"),
             # Same reasoning as sex: a family-history checklist preprints every condition, so only
             # the tick distinguishes "the patient has this" from "the form asked about this".
             chain=_chain(CheckboxLocator(), SectionSpanLocator(), LineBandLocator()),

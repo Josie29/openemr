@@ -6,7 +6,8 @@ from typing import Any
 import pytest
 
 from copilot.ingestion.extractor import map_lab_report
-from copilot.ingestion.pdf_geometry import extract_word_boxes
+from copilot.ingestion.geometry.document import DocumentGeometry
+from copilot.ingestion.geometry.words import extract_word_boxes
 from copilot.ingestion.schemas import LabReport
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "documents"
@@ -39,7 +40,7 @@ def _snapshot(name: str) -> list[dict[str, Any]]:
     """
     ocr: dict[str, Any] = json.loads((_FIXTURES / "extractions" / f"{name}.ocr.json").read_text())
     words = extract_word_boxes((_FIXTURES / "pdfs" / f"{name}.pdf").read_bytes())
-    report: LabReport = map_lab_report(ocr, words)
+    report: LabReport = map_lab_report(ocr, DocumentGeometry.from_parts(ocr, words))
     return [
         {
             "test_name": result.test_name,

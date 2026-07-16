@@ -18,7 +18,10 @@ from copilot.ingestion.extractor import (
     FixturePdfByteSource,
     map_lab_report,
 )
-from copilot.ingestion.pdf_geometry import Word, extract_word_boxes, locate_value_box
+from copilot.ingestion.geometry.boxes import LocateOutcome
+from copilot.ingestion.geometry.document import DocumentGeometry
+from copilot.ingestion.geometry.locators import LocateRequest, LocatorState, RowSpanLocator
+from copilot.ingestion.geometry.words import Word, extract_word_boxes
 from copilot.ingestion.registry import (
     DOCUMENT_FACT_RESOURCE_TYPE,
     DocumentFactHandle,
@@ -45,6 +48,11 @@ def _words() -> list[Word]:
     return extract_word_boxes(_LAB_PDF.read_bytes())
 
 
+def _geometry(words: list[Word] | None = None) -> DocumentGeometry:
+    """The lab fixture's geometry; pass ``[]`` to simulate a scanned PDF with no text layer."""
+    return DocumentGeometry.from_parts(_ocr(), _words() if words is None else words)
+
+
 def _lab_handles(handles: list[DocumentFactHandle], test_name: str) -> Iterator[LabFactHandle]:
     """Yield the recorded lab handles for a test name, narrowing the registry's handle union.
 
@@ -65,18 +73,20 @@ def _find(report: LabReport | IntakeForm, test_name: str) -> LabResult | None:
     return next((r for r in report.results if r.test_name == test_name), None)
 
 
-def test_pdf_geometry_locates_a_tight_box_on_the_right_row() -> None:
-    """The pdfplumber join boxes the value tightly on its own row, not the interpretive narrative.
+def test_row_locator_boxes_the_value_tightly_on_the_right_row() -> None:
+    """The text-layer join boxes the value tightly on its own row, not the interpretive narrative.
 
     The report repeats "1.44"/"54" in the bottom narrative ("creatinine 1.06 -> 1.44"); a value-only
     match would highlight THAT instead of the result cell. Anchoring on the test name prevents it —
     if this breaks, click-to-source points the clinician at prose, not the lab value.
     """
-    words = _words()
-    assert words, "the digital fixture must expose a text layer"
-    located = locate_value_box("Creatinine", "1.44", words, 0)
-    assert located is not None
-    box, _ = located
+    assert _words(), "the digital fixture must expose a text layer"
+    result = RowSpanLocator().locate(
+        LocateRequest(value="1.44", anchors=("Creatinine",)), _geometry(), LocatorState()
+    )
+    assert result.outcome is LocateOutcome.LOCATED
+    assert result.located is not None
+    box = result.located.box
     assert box.width < 40  # a tight box on "1.44", not a full-width row band
     assert 280 < box.y < 292  # the result row (~283.6), NOT the narrative down near y~599
 
@@ -87,7 +97,7 @@ def test_map_lab_report_extracts_values_flags_and_tight_boxes() -> None:
     Guards the whole document path: wrong values/flags, or a box that can't place the value, defeats
     the point of the click-to-source overlay.
     """
-    report = map_lab_report(_ocr(), _words())
+    report = map_lab_report(_ocr(), _geometry())
     assert len(report.results) >= 20  # the CMP + CBC panels, one result each
 
     creatinine = _find(report, "Creatinine")
@@ -103,7 +113,7 @@ def test_map_lab_report_extracts_values_flags_and_tight_boxes() -> None:
 
 def test_boxes_follow_table_row_order() -> None:
     """A later analyte sits lower on the page than an earlier one — boxes track the real rows."""
-    report = map_lab_report(_ocr(), _words())
+    report = map_lab_report(_ocr(), _geometry())
     glucose = _find(report, "Glucose, Fasting")
     creatinine = _find(report, "Creatinine")
     assert glucose is not None and glucose.citation.bounding_box is not None
@@ -117,7 +127,7 @@ def test_falls_back_to_coarse_estimate_without_a_text_layer() -> None:
     This is the graceful-degradation path — a scan loses the tight box but keeps the clinical facts
     on a coarse row/page band rather than dropping them.
     """
-    report = map_lab_report(_ocr(), [])  # empty words simulates a scanned/image-only PDF
+    report = map_lab_report(_ocr(), _geometry([]))  # no text layer = a scanned/image-only PDF
     assert len(report.results) >= 20
     creatinine = _find(report, "Creatinine")
     assert creatinine is not None and creatinine.citation.bounding_box is not None
@@ -143,7 +153,7 @@ def test_registry_passes_the_points_box_through_unchanged() -> None:
 
     If a stray conversion crept back in, the overlay would render ~1.3x off (the JOS-57 space bug).
     """
-    report = map_lab_report(_ocr(), _words())
+    report = map_lab_report(_ocr(), _geometry())
     registry = DocumentFactRegistry()
     handles = registry.record(
         ExtractedDocument(document_id="doc-xyz", doc_type=DocType.LAB_PDF, report=report)
@@ -184,7 +194,7 @@ def test_grounded_document_claim_projects_to_lab_pdf_citation() -> None:
     This is the seam the sidebar consumes — if the box/document_id don't land on the SourceRef and
     survive to_citation(), click-to-source shows no overlay.
     """
-    report = map_lab_report(_ocr(), _words())
+    report = map_lab_report(_ocr(), _geometry())
     registry = DocumentFactRegistry()
     handles = registry.record(
         ExtractedDocument(document_id="doc-777", doc_type=DocType.LAB_PDF, report=report)
@@ -436,5 +446,5 @@ def test_blank_value_or_name_rows_are_skipped_not_crashed() -> None:
         ],
     )
     # Empty words = scanned-PDF path (coarse OCR row-estimate). Must not raise a ValidationError.
-    report = map_lab_report(ocr, [])
+    report = map_lab_report(ocr, DocumentGeometry.from_parts(ocr, []))
     assert [r.test_name for r in report.results] == ["Glucose", "Sodium"]

@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 
 from copilot.ingestion.extractor import map_intake_form
-from copilot.ingestion.geometry.words import extract_checkboxes, extract_word_boxes
+from copilot.ingestion.geometry.document import DocumentGeometry
+from copilot.ingestion.geometry.words import extract_checkboxes
 from copilot.ingestion.schemas import Citation, IntakeForm
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "documents"
@@ -50,8 +51,8 @@ def _pdf(name: str) -> bytes:
 
 def _extract(name: str, ocr: dict[str, Any] | None = None) -> IntakeForm:
     """Map one intake fixture through the real pipeline."""
-    pdf = _pdf(name)
-    return map_intake_form(ocr or _load(name), extract_word_boxes(pdf), extract_checkboxes(pdf))
+    resolved = ocr or _load(name)
+    return map_intake_form(resolved, DocumentGeometry.from_document(_pdf(name), resolved))
 
 
 @pytest.mark.parametrize("name", _FORMS)

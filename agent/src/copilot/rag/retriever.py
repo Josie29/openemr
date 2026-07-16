@@ -331,6 +331,7 @@ def _to_snippet(chunk: CorpusChunk, rerank_score: float) -> EvidenceSnippet:
         guideline=chunk.guideline,
         source_url=chunk.source_url,
         year=chunk.date,
+        anchor_quote=chunk.anchor_quote,
         rerank_score=rerank_score,
     )
 

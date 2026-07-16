@@ -707,6 +707,38 @@
         return head ? head.toUpperCase() : 'Guideline';
     }
 
+    // Percent-encode one text-fragment token. encodeURIComponent covers ',' and '&'; the fragment
+    // grammar also reserves '-' (prefix/suffix marker), which it leaves alone — so encode it too.
+    function fragmentToken(text) {
+        return encodeURIComponent(text).replace(/-/g, '%2D');
+    }
+
+    /**
+     * Build a "View source" href that jumps to — and, in Chromium, highlights — the cited passage,
+     * using a URL text fragment (`…#:~:text=start,end`). This works in Chrome's PDF viewer (110+)
+     * and on HTML sources alike. It is built from the chunk's `anchor_quote` — a span copied
+     * verbatim from the source (the curated card `quote` is lightly reworded and would not match) —
+     * so it lands on the exact passage instead of the document's first page. A long anchor becomes a
+     * start,end range (robust to rendering quirks in the middle); a short one is matched whole. If
+     * the browser can't find the text it simply opens the source at the top — never worse.
+     *
+     * @param {string} url the source URL (already scheme-checked by the caller)
+     * @param {?string} anchor the verbatim source span (evidence[].anchor_quote), if any
+     * @returns {string} the URL, with a text-fragment anchor when one can be built
+     */
+    function sourceDeepLink(url, anchor) {
+        var words = String(anchor || '').trim().split(/\s+/).filter(Boolean);
+        if (words.length < 4) {
+            return url; // too little text to anchor on reliably — link the source as-is
+        }
+        if (words.length <= 12) {
+            return url + '#:~:text=' + fragmentToken(words.join(' '));
+        }
+        var start = fragmentToken(words.slice(0, 6).join(' '));
+        var end = fragmentToken(words.slice(-5).join(' '));
+        return url + '#:~:text=' + start + ',' + end;
+    }
+
     /**
      * Render one guideline source as an evidence card: a numbered header (issuing body, year), the
      * verbatim retrieved quote, and a section line with an optional link to the source. Built from
@@ -718,7 +750,8 @@
      * confidence it can't honestly convey. The [n] rank is the only relevance cue.
      *
      * @param {{source_id: string, section: string, quote: string, relevance_score: number,
-     *   source_url: ?string, year: ?string}} entry one evidence[] item (relevance_score unused here)
+     *   source_url: ?string, year: ?string, anchor_quote: ?string}} entry one evidence[] item
+     *   (relevance_score is unused here — it orders the cards server-side)
      * @param {number} index zero-based rank (drives the [n] badge)
      * @returns {HTMLElement} an <li> source card
      */
@@ -769,7 +802,7 @@
         if (entry.source_url && /^https?:\/\//i.test(entry.source_url)) {
             var link = document.createElement('a');
             link.className = 'ai-copilot__source-link';
-            link.href = entry.source_url;
+            link.href = sourceDeepLink(entry.source_url, entry.anchor_quote);
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
             link.textContent = 'View source ↗';   // U+2197 north-east arrow

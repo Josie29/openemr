@@ -117,6 +117,7 @@ def _build_evidence(answer: ChatResponse, chunks: ChunkRegistry) -> list[dict[st
                 relevance_score=snippet.rerank_score,
                 source_url=snippet.source_url,
                 year=snippet.year,
+                anchor_quote=snippet.anchor_quote,
             )
     ordered = sorted(deduped.values(), key=lambda e: e.relevance_score, reverse=True)
     return [entry.model_dump(mode="json") for entry in ordered]

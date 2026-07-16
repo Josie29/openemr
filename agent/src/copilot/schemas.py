@@ -186,12 +186,20 @@ class Evidence(BaseModel):
     chunk_id: str = Field(description="The retrieval chunk id — the dedup key")
     relevance_score: float = Field(
         description=(
-            "Cohere rerank score in [0, 1]; higher is more relevant. Orders the cards; not shown in "
-            "the UI (uncalibrated across queries, so a displayed band would imply false precision)."
+            "Cohere rerank score in [0, 1]; higher is more relevant. Used to order the cards; not "
+            "displayed (uncalibrated across queries, so a band would imply false precision)."
         )
     )
     source_url: str | None = Field(default=None, description="Public URL of the source guideline")
     year: str | None = Field(default=None, description="Source publication year, e.g. '2022'")
+    anchor_quote: str | None = Field(
+        default=None,
+        description=(
+            "A verbatim span from the source; the sidebar builds a text-fragment deep link "
+            "(…#:~:text=) from it so 'View source' highlights the exact passage instead of "
+            "opening at page 1. None when the chunk has no reliable anchor."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):

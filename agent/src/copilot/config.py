@@ -127,11 +127,18 @@ class Settings(BaseSettings):
     dense_embedding_model: str = "BAAI/bge-small-en-v1.5"  # 384-dim
     sparse_embedding_model: str = "Qdrant/bm25"
     rerank_model: str = "rerank-v4.0-fast"  # Cohere; v3.5 is deprecated (pin a v4.0 model)
-    # Per-leg prefetch depth (dense and sparse each fetch this many before RRF); reranked down to
-    # rerank_top_n grounded snippets fed to the answer model. Defaults per the decision doc;
-    # tune empirically once the 50-case eval set exists.
+    # Per-leg prefetch depth (dense and sparse each fetch this many before RRF); every fused
+    # candidate is reranked, gated by the relevance floor, then capped to rerank_top_n grounded
+    # snippets fed to the answer model. Defaults per the decision doc; tune empirically once the
+    # 50-case eval set exists.
     retrieval_prefetch_k: int = 20
-    rerank_top_n: int = 5
+    rerank_top_n: int = 3
+    # Minimum Cohere rerank score a snippet must clear to be shown AND to reach the answer model
+    # (upstream gate — a weak match never grounds an answer). Nothing clears it -> no evidence, and
+    # the answer is composed without guideline backing rather than on a poor match. NOT calibrated
+    # across queries (0.5 on one query != another); a pragmatic floor to tune against the eval set.
+    # See context/specs/evidence-gating-and-presentation.md §3.1.
+    retrieval_relevance_floor: float = 0.5
 
     # Document extraction (JOS-54 — W2_ARCHITECTURE.md §3.1). The intake-extractor's
     # attach_and_extract tool OCRs an uploaded lab PDF into cited lab facts. Defaults to MISTRAL so
@@ -147,15 +154,42 @@ class Settings(BaseSettings):
     # OCR backend when a lab document is extracted. Production fetches the bytes from OpenEMR by
     # document id (deferred — a scope wall, see the seam spec); until then the real document id is
     # discovered live but the bytes come from this fixture. Null disables extraction.
-    document_pdf_path: str | None = Field(
+    # One per document type: the fixture FHIR client serves these bytes for whichever seeded
+    # document has that type, so an intake extraction reads the intake form's page, not the lab
+    # report's. See the id->path resolution in fhir/fixtures.py for why type alone is not enough.
+    document_pdf_path_lab_pdf: str | None = Field(
         default=None,
+        validation_alias=AliasChoices(
+            "COPILOT_DOCUMENT_PDF_PATH_LAB_PDF", "COPILOT_DOCUMENT_PDF_PATH"
+        ),
         description="Path to the demo lab PDF used as the extractor's byte-source.",
+    )
+    document_pdf_path_intake_form: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("COPILOT_DOCUMENT_PDF_PATH_INTAKE_FORM"),
+        description="Path to the demo intake form used as the extractor's byte-source.",
     )
     # FIXTURE mode only: the recorded Mistral OCR response (`*.ocr.json`) the FixtureOcrBackend
     # replays instead of calling the live API, so extraction tests are deterministic and offline.
-    ocr_fixture_path: str | None = Field(
+    # One per document type, since a recording is of a specific document read through a specific
+    # schema — replaying a lab response for an intake form yields no facts.
+    #
+    # Flat scalars rather than a `dict[DocType, str]` field: pydantic-settings JSON-decodes a
+    # complex field INSIDE the env source, before any validator runs (the same trap `cors_origins`
+    # documents below), so a dict would force JSON into `.env` and turn a typo into a startup
+    # SettingsError. DocType is a closed set, and adding a third type already means code changes.
+    # The unsuffixed COPILOT_OCR_FIXTURE_PATH alias keeps existing .env/Railway config working.
+    ocr_fixture_path_lab_pdf: str | None = Field(
         default=None,
-        description="Path to a recorded OCR response replayed in FIXTURE extractor mode.",
+        validation_alias=AliasChoices(
+            "COPILOT_OCR_FIXTURE_PATH_LAB_PDF", "COPILOT_OCR_FIXTURE_PATH"
+        ),
+        description="FIXTURE mode: the recorded OCR response replayed for a lab_pdf.",
+    )
+    ocr_fixture_path_intake_form: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("COPILOT_OCR_FIXTURE_PATH_INTAKE_FORM"),
+        description="FIXTURE mode: the recorded OCR response replayed for an intake_form.",
     )
 
     # Hard ceiling on tool calls in a single agent turn. Bounds cost/latency: without it the agent

@@ -77,6 +77,7 @@ class QdrantEvidenceRetriever:
         rerank_model: str,
         prefetch_k: int,
         rerank_top_n: int,
+        relevance_floor: float = 0.0,
     ) -> None:
         self._qdrant = qdrant
         self._cohere = cohere_client
@@ -86,6 +87,7 @@ class QdrantEvidenceRetriever:
         self._rerank_model = rerank_model
         self._prefetch_k = prefetch_k
         self._rerank_top_n = rerank_top_n
+        self._relevance_floor = relevance_floor
 
     async def retrieve(
         self,
@@ -134,12 +136,16 @@ class QdrantEvidenceRetriever:
         if not points:
             return []
         candidates = [_parse_payload(point.payload) for point in points]
-        return await self._rerank(query, candidates, limit)
+        ranked = await self._rerank(query, candidates, limit)
+        return _above_floor(ranked, self._relevance_floor)
 
     async def _rerank(
         self, query: str, candidates: list[CorpusChunk], top_n: int
     ) -> list[EvidenceSnippet]:
-        """Rerank fused candidates with Cohere and project the top-n onto EvidenceSnippets.
+        """Rerank the fused candidates with Cohere and project the top-n onto EvidenceSnippets.
+
+        Cohere scores every document and returns the top-n by relevance, so passing the whole fused
+        set yields the true best-n — the caller applies the relevance floor to these.
 
         Raises:
             RetrievalError: If the Cohere rerank call fails.
@@ -178,21 +184,27 @@ class FixtureEvidenceRetriever:
     without Qdrant or Cohere.
     """
 
-    def __init__(self, chunks: list[CorpusChunk], rerank_top_n: int) -> None:
+    def __init__(
+        self, chunks: list[CorpusChunk], rerank_top_n: int, relevance_floor: float = 0.0
+    ) -> None:
         self._chunks = chunks
         self._rerank_top_n = rerank_top_n
+        self._relevance_floor = relevance_floor
 
     @classmethod
     def from_corpus(
-        cls, rerank_top_n: int, corpus_dir: Path | None = None
+        cls, rerank_top_n: int, corpus_dir: Path | None = None, relevance_floor: float = 0.0
     ) -> "FixtureEvidenceRetriever":
         """Build a fixture retriever from the in-repo corpus.
 
         Args:
             rerank_top_n: Default number of snippets to return.
             corpus_dir: Optional override corpus directory; defaults to the repo corpus.
+            relevance_floor: Minimum normalized term-overlap score a chunk must clear (mirrors the
+                live rerank floor). Defaults to 0.0 (ungated) so offline dev/tests stay
+                deterministic; the app wires the configured floor via ``build_retriever``.
         """
-        return cls(load_corpus(corpus_dir), rerank_top_n)
+        return cls(load_corpus(corpus_dir), rerank_top_n, relevance_floor)
 
     async def retrieve(
         self,
@@ -221,11 +233,12 @@ class FixtureEvidenceRetriever:
                 scored.append((overlap, chunk))
         scored.sort(key=lambda item: item[0], reverse=True)
         top = scored[:limit]
-        # Normalize overlap to a [0, 1] pseudo-relevance so the shape matches the live path.
-        # Every chunk in `top` has overlap >= 1 (only positive-overlap chunks enter `scored`), so
-        # `default=1` alone covers the empty case — no extra zero-guard needed.
+        # Normalize overlap to a [0, 1] pseudo-relevance so the shape (and the floor) match the live
+        # path; `top`'s head is the global max (scored is sorted desc), and `default=1` covers the
+        # empty case (only positive-overlap chunks enter `scored`, so no zero-division).
         max_overlap = max((overlap for overlap, _ in top), default=1)
-        return [_to_snippet(chunk, round(overlap / max_overlap, 4)) for overlap, chunk in top]
+        ranked = [_to_snippet(chunk, round(overlap / max_overlap, 4)) for overlap, chunk in top]
+        return _above_floor(ranked, self._relevance_floor)
 
     async def aclose(self) -> None:
         return None
@@ -245,7 +258,9 @@ def build_retriever(settings: Settings) -> EvidenceRetriever | None:
         A retriever, or ``None`` when live mode is selected without full configuration.
     """
     if settings.retrieval_mode is RetrievalMode.FIXTURE:
-        return FixtureEvidenceRetriever.from_corpus(settings.rerank_top_n)
+        return FixtureEvidenceRetriever.from_corpus(
+            settings.rerank_top_n, relevance_floor=settings.retrieval_relevance_floor
+        )
     if not (settings.qdrant_url and settings.cohere_api_key):
         return None
     qdrant = AsyncQdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
@@ -259,6 +274,7 @@ def build_retriever(settings: Settings) -> EvidenceRetriever | None:
         rerank_model=settings.rerank_model,
         prefetch_k=settings.retrieval_prefetch_k,
         rerank_top_n=settings.rerank_top_n,
+        relevance_floor=settings.retrieval_relevance_floor,
     )
 
 
@@ -290,12 +306,32 @@ def _parse_payload(payload: dict[str, object] | None) -> CorpusChunk:
         raise RetrievalError("qdrant payload is missing required chunk metadata") from exc
 
 
+def _above_floor(snippets: list[EvidenceSnippet], floor: float) -> list[EvidenceSnippet]:
+    """Keep the reranked snippets whose relevance clears ``floor``, preserving their order.
+
+    The upstream relevance gate: a snippet below the floor never reaches the answer model, so a weak
+    match cannot ground an answer (the lipids-for-a-23-year-old failure). It runs on the reranked
+    :class:`EvidenceSnippet` list both retrievers already produce — one gate shared by the live and
+    fixture paths — and preserves order (the input is sorted best-first and already capped).
+
+    Args:
+        snippets: Reranked snippets, most relevant first, already capped to the top-n.
+        floor: Minimum ``rerank_score`` a snippet must clear to survive.
+
+    Returns:
+        The snippets at or above ``floor``, in their original order.
+    """
+    return [snippet for snippet in snippets if snippet.rerank_score >= floor]
+
+
 def _to_snippet(chunk: CorpusChunk, rerank_score: float) -> EvidenceSnippet:
     """Project a corpus chunk + relevance score onto an EvidenceSnippet with its citation."""
     return EvidenceSnippet(
         citation=chunk.to_citation(),
         guideline=chunk.guideline,
         source_url=chunk.source_url,
+        year=chunk.date,
+        anchor_quote=chunk.anchor_quote,
         rerank_score=rerank_score,
     )
 

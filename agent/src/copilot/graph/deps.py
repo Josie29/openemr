@@ -1,9 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from copilot.fhir.client import FhirClient
-from copilot.fhir.models import LabDocumentSummary
+from copilot.fhir.models import UploadedDocumentSummary
 from copilot.ingestion.extractor import DocumentExtractor
-from copilot.ingestion.registry import DocumentFactRegistry
+from copilot.ingestion.registry import DocumentFactHandle, DocumentFactRegistry
 from copilot.rag.retriever import EvidenceRetriever
 from copilot.retrieval import ChunkRegistry
 from copilot.verification import FetchLog
@@ -24,10 +24,11 @@ class GraphDeps:
     a follow-up turn can cite a record an earlier turn read, a guideline chunk an earlier turn
     retrieved, or a lab fact an earlier turn extracted.
 
-    The document side (JOS-54): ``extractor`` OCRs an uploaded lab PDF into cited facts (None when
-    extraction is unconfigured — the intake-extractor then reports no document); ``documents`` is
-    the registry those facts are grounded against, joined into the intake-extractor's and the final
-    answer's grounding gates alongside ``fetched``/``chunks``.
+    The document side (JOS-54): ``extractor`` OCRs an uploaded document — a lab report or an intake
+    form, whichever its OpenEMR category says it is — into cited facts (None when extraction is
+    unconfigured, and the intake-extractor then reports no document); ``documents`` is the registry
+    those facts are grounded against, joined into the intake-extractor's and the final answer's
+    grounding gates alongside ``fetched``/``chunks``.
     """
 
     fhir: FhirClient
@@ -38,6 +39,11 @@ class GraphDeps:
     chunks: ChunkRegistry
     documents: DocumentFactRegistry
     extractor: DocumentExtractor | None
-    # Per-turn memo for list_lab_documents: the discovery FHIR read happens once, so repeated tool
+    # Per-turn memo for list_documents: the discovery FHIR read happens once, so repeated tool
     # calls (e.g. a model retrying on an empty result) are cheap cache hits, not extra round-trips.
-    lab_documents_cache: list[LabDocumentSummary] | None = None
+    documents_cache: list[UploadedDocumentSummary] | None = None
+    # Per-turn memo for attach_and_extract, keyed by document id: OCR (Binary fetch + Mistral) is
+    # the expensive hop, so re-extracting the same document in a turn returns the recorded handles.
+    # The handles are the union: which kind a document yields is decided by its type, not the
+    # caller.
+    extracted_documents: dict[str, list[DocumentFactHandle]] = field(default_factory=dict)

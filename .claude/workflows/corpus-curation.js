@@ -25,7 +25,7 @@ const TOPICS = [
   { slug: 'heart-failure', name: 'Heart failure management', focus: 'HF classification/staging (NYHA class, ACC/AHA stages A-D), diagnostic criteria, monitoring. Grounded in Okonkwo (CHF). Criteria/classification only, NOT drug dosing.' },
   { slug: 'ckd', name: 'Chronic kidney disease (stage 3)', focus: 'CKD staging by GFR/albuminuria criteria, monitoring cadence, nephrotoxin/NSAID avoidance guidance. Grounded in Okonkwo (CKD stage 3).', source_hint: 'The KDIGO 2024 CKD guideline PDF on kdigo.org returns HTTP 403 to automated fetches. Use instead a publicly fetchable open-access source that returns real content (verify with WebFetch BEFORE committing to it): prefer NIDDK (niddk.nih.gov), National Kidney Foundation (kidney.org), or an NCBI/PMC-hosted rendering, for CKD staging (CGA / GFR G1-G5 / albuminuria A1-A3 criteria), monitoring cadence, and nephrotoxin/NSAID-avoidance criteria. Extract criteria/classification/monitoring ONLY -- do NOT extract medication-management directives such as stopping/restarting metformin around iodinated contrast.' },
   { slug: 'asthma', name: 'Asthma management (GINA)', focus: 'GINA severity/control classification and step-assessment criteria, monitoring/review cadence. Grounded in seed patient Nakamura + demo patient Sergio (mild intermittent asthma).' },
-  { slug: 'nsaid-safety', name: 'Drug-allergy and NSAID safety / medication reconciliation', focus: 'allergy cross-reactivity criteria (aspirin/NSAID, sulfa, penicillin), medication-reconciliation guidance, criteria for flagging drug-allergy conflicts. Grounded in Sergio (aspirin allergy yet prescribed ibuprofen/naproxen), Reyes (penicillin), Okonkwo (sulfa/codeine). Serves med-reconciliation use case UC-4.' },
+  { slug: 'nsaid-safety', name: 'Drug-allergy and NSAID safety / medication reconciliation', focus: 'allergy cross-reactivity criteria (aspirin/NSAID, sulfa, penicillin), medication-reconciliation guidance, criteria for flagging drug-allergy conflicts. Grounded in Sergio (aspirin allergy yet prescribed ibuprofen/naproxen), Reyes (penicillin), Okonkwo (sulfa/codeine). Serves med-reconciliation use case UC-4.', source_hint: 'The NICE CG183 drug-allergy guideline on nice.org.uk returns HTTP 403 to automated fetches, so anchor_quote cannot be backfilled from it (JOS-85) — do NOT use it. Use instead a publicly fetchable open-access source that returns real content to a plain fetch (verify with WebFetch BEFORE committing): prefer NCBI StatPearls / Bookshelf (ncbi.nlm.nih.gov/books) or a PMC-hosted rendering — e.g. "Penicillin Allergy" (NBK459320, verified fetchable) for penicillin cross-reactivity, plus a StatPearls/PMC article on NSAID/aspirin hypersensitivity cross-reactivity for the aspirin/NSAID side. Extract cross-reactivity criteria, drug-allergy documentation, and medication-reconciliation criteria ONLY — no dosing directives.' },
 ]
 
 const GUARDRAILS = [
@@ -218,6 +218,19 @@ const summary = clean.map(r => {
 // run (e.g. one topic) still produces a complete all-topics README rather than
 // clobbering it with only this run's topics.
 phase('Synthesize')
+// Deep-link data (JOS-85): now that the corpus is final on disk, backfill a verbatim `anchor_quote`
+// onto every chunk so the sidebar's "View source" can text-fragment to the exact passage. It is
+// deterministic (longest common substring vs each fetched source), so it runs as one Bash step, not
+// an LLM task. Best-effort — a source that blocks the fetch just leaves that chunk without an
+// anchor (the sidebar falls back to a plain link), which must not fail the curation run.
+const anchoring = await agent(
+  'ROLE: corpus anchor step. Run this exact command from a shell and report its final summary line '
+  + `verbatim as your entire reply:\n\n    cd ${REPO_ROOT} && make corpus-anchors\n\n`
+  + 'It writes a verbatim anchor_quote into the corpus .jsonl files for deep-linking.',
+  { label: 'anchor:corpus', phase: 'Synthesize', agentType: 'general-purpose', effort: 'low' },
+)
+log(`Anchor backfill — ${anchoring}`)
+
 const thisRunFailures = summary.flatMap(s => s.failures.map(f => ({ topic: s.topic, ...f })))
 const synth = await agent([
   'ROLE: corpus finalizer. You scan the on-disk corpus and (re)write its README from disk truth. Final message is a compact JSON object, no prose.',
@@ -225,7 +238,7 @@ const synth = await agent([
   `1. List every *.jsonl file in ${REPO_ROOT}/${CORPUS_REL}/ . For each, count its lines (= verified chunks kept); the topic is the filename without the .jsonl extension.`,
   `2. Write ${REPO_ROOT}/${CORPUS_REL}/README.md with EXACTLY these sections:`,
   '   - H1: "# Clinical-Guideline Corpus (Week 2 — JOS-52)"',
-  '   - Intro paragraph: a small, static, in-repo corpus of clinical-practice-guideline chunks feeding the hybrid-RAG retriever (JOS-53, Qdrant), reproducible from this repo alone; each chunk carries {chunk_id, guideline, source, source_url, section, date, text} feeding the citation contract (source -> source_id, section -> page_or_section, chunk_id -> field_or_chunk_id).',
+  '   - Intro paragraph: a small, static, in-repo corpus of clinical-practice-guideline chunks feeding the hybrid-RAG retriever (JOS-53, Qdrant), reproducible from this repo alone; each chunk carries {chunk_id, guideline, source, source_url, section, date, text, anchor_quote} feeding the citation contract (source -> source_id, section -> page_or_section, chunk_id -> field_or_chunk_id); anchor_quote is a verbatim source span backfilled for "View source" deep-linking (JOS-85).',
   '   - Note paragraph: curated toward criteria / screening / monitoring / classification content only, NO dosing or treatment directives (persona guardrail); every chunk was adversarially verified against its cited source; chunks that failed verification were pruned, so only verified chunks persist.',
   '   - "## Coverage": a Markdown table with columns | Topic | File | Verified chunks | — one row per file sorted alphabetically, then a Total row.',
   `   - "## Rejected chunks (failed adversarial verification, pruned) — latest run": render each of these as "- **<chunk_id>** (<topic>) — failed \`<invariant>\`: <reason>". If the list is empty, write "None in the latest run." The list: ${JSON.stringify(thisRunFailures)}`,

@@ -401,9 +401,11 @@
     }
 
     /**
-     * Render one grounded answer: prose summary, then every claim with its structured citation.
+     * Render one grounded answer: the synthesized prose, then a collapsed evidence section holding
+     * the deduped guideline source cards (`evidence[]`) and any record-backed claims.
      *
-     * @param {{summary: string, claims: Array<{text: string, source: Object}>}} answer
+     * @param {{summary: string, claims: Array<{text: string, source: Object}>,
+     *   evidence: Array<Object>}} answer
      */
     function appendAnswer(answer) {
         var wrapper = document.createElement('article');
@@ -414,24 +416,50 @@
         summary.textContent = answer.summary || '';
         wrapper.appendChild(summary);
 
+        // Guideline evidence renders as deduped, relevance-ranked source cards (one per distinct
+        // source). Guideline claims are folded into those cards, so only record-backed claims
+        // (patient facts, carrying their click-to-source provenance) still render as claim rows.
+        // Counting distinct sources + record claims — not raw claim sentences — is what makes the
+        // "(N)" honest: a source cited by three sentences is one piece of evidence, not three.
+        var evidence = Array.isArray(answer.evidence) ? answer.evidence : [];
         var claims = Array.isArray(answer.claims) ? answer.claims : [];
-        if (claims.length > 0) {
+        var recordClaims = claims.filter(function (claim) {
+            return !isGuidelineRef(claim && claim.source);
+        });
+        var total = evidence.length + recordClaims.length;
+        if (total > 0) {
             // Provenance is collapsed by default: the clinician reads the narrative; the evidence
-            // trail is one click away for anyone who wants to verify or audit a claim.
+            // trail is one click away for anyone who wants to verify or audit it.
             var details = document.createElement('details');
             details.className = 'ai-copilot__evidence';
 
             var toggle = document.createElement('summary');
             toggle.className = 'ai-copilot__evidence-toggle';
-            toggle.textContent = 'Show evidence (' + claims.length + ')';
+            toggle.textContent = 'Evidence (' + total + ')';
             details.appendChild(toggle);
 
-            var list = document.createElement('ol');
-            list.className = 'ai-copilot__claims';
-            claims.forEach(function (claim) {
-                list.appendChild(renderClaim(claim));
-            });
-            details.appendChild(list);
+            var body = document.createElement('div');
+            body.className = 'ai-copilot__evidence-body';
+
+            if (evidence.length > 0) {
+                var sources = document.createElement('ol');
+                sources.className = 'ai-copilot__sources';
+                evidence.forEach(function (entry, index) {
+                    sources.appendChild(renderEvidenceCard(entry, index));
+                });
+                body.appendChild(sources);
+            }
+
+            if (recordClaims.length > 0) {
+                var list = document.createElement('ol');
+                list.className = 'ai-copilot__claims';
+                recordClaims.forEach(function (claim) {
+                    list.appendChild(renderClaim(claim));
+                });
+                body.appendChild(list);
+            }
+
+            details.appendChild(body);
             wrapper.appendChild(details);
         }
 
@@ -659,6 +687,132 @@
             cite.appendChild(buildViewSourceButton(source));
         }
         return cite;
+    }
+
+    // A citation points at a guideline chunk (vs a FHIR record or an uploaded document). Guideline
+    // claims are represented by the deduped `evidence[]` source cards, so they are filtered out of
+    // the claim rows.
+    function isGuidelineRef(source) {
+        return !!source && source.resource_type === 'guideline';
+    }
+
+    // Derive a short issuing-body label from a corpus source id: the first hyphen segment,
+    // upper-cased ("gina-main-report-2022" -> "GINA", "uspstf-..." -> "USPSTF"). The corpus has no
+    // structured organization field yet, so this is a display heuristic over the slug.
+    function sourceOrg(sourceId) {
+        if (!sourceId) {
+            return 'Guideline';
+        }
+        var head = String(sourceId).split('-')[0];
+        return head ? head.toUpperCase() : 'Guideline';
+    }
+
+    // Percent-encode one text-fragment token. encodeURIComponent covers ',' and '&'; the fragment
+    // grammar also reserves '-' (prefix/suffix marker), which it leaves alone — so encode it too.
+    function fragmentToken(text) {
+        return encodeURIComponent(text).replace(/-/g, '%2D');
+    }
+
+    /**
+     * Build a "View source" href that jumps to — and, in Chromium, highlights — the cited passage,
+     * using a URL text fragment (`…#:~:text=start,end`). This works in Chrome's PDF viewer (110+)
+     * and on HTML sources alike. It is built from the chunk's `anchor_quote` — a span copied
+     * verbatim from the source (the curated card `quote` is lightly reworded and would not match) —
+     * so it lands on the exact passage instead of the document's first page. A long anchor becomes a
+     * start,end range (robust to rendering quirks in the middle); a short one is matched whole. If
+     * the browser can't find the text it simply opens the source at the top — never worse.
+     *
+     * @param {string} url the source URL (already scheme-checked by the caller)
+     * @param {?string} anchor the verbatim source span (evidence[].anchor_quote), if any
+     * @returns {string} the URL, with a text-fragment anchor when one can be built
+     */
+    function sourceDeepLink(url, anchor) {
+        var words = String(anchor || '').trim().split(/\s+/).filter(Boolean);
+        if (words.length < 4) {
+            return url; // too little text to anchor on reliably — link the source as-is
+        }
+        if (words.length <= 12) {
+            return url + '#:~:text=' + fragmentToken(words.join(' '));
+        }
+        var start = fragmentToken(words.slice(0, 6).join(' '));
+        var end = fragmentToken(words.slice(-5).join(' '));
+        return url + '#:~:text=' + start + ',' + end;
+    }
+
+    /**
+     * Render one guideline source as an evidence card: a numbered header (issuing body, year), the
+     * verbatim retrieved quote, and a section line with an optional link to the source. Built from
+     * the response's deduped, relevance-ranked `evidence[]` — one card per distinct source, so the
+     * count reflects sources, not claim sentences.
+     *
+     * `relevance_score` orders the cards server-side but is not shown: the rerank score is
+     * uncalibrated across queries, so a High/Medium badge would flicker on noise and imply a
+     * confidence it can't honestly convey. The [n] rank is the only relevance cue.
+     *
+     * @param {{source_id: string, section: string, quote: string, relevance_score: number,
+     *   source_url: ?string, year: ?string, anchor_quote: ?string}} entry one evidence[] item
+     *   (relevance_score is unused here — it orders the cards server-side)
+     * @param {number} index zero-based rank (drives the [n] badge)
+     * @returns {HTMLElement} an <li> source card
+     */
+    function renderEvidenceCard(entry, index) {
+        entry = entry || {};
+        var card = document.createElement('li');
+        card.className = 'ai-copilot__source';
+
+        var header = document.createElement('div');
+        header.className = 'ai-copilot__source-header';
+
+        var num = document.createElement('span');
+        num.className = 'ai-copilot__source-num';
+        num.textContent = String(index + 1);
+        header.appendChild(num);
+
+        var org = document.createElement('span');
+        org.className = 'ai-copilot__source-org';
+        org.textContent = sourceOrg(entry.source_id);
+        header.appendChild(org);
+
+        if (entry.year) {
+            var year = document.createElement('span');
+            year.className = 'ai-copilot__source-year';
+            year.textContent = entry.year;
+            header.appendChild(year);
+        }
+
+        card.appendChild(header);
+
+        if (entry.quote) {
+            var quote = document.createElement('blockquote');
+            quote.className = 'ai-copilot__source-quote';
+            quote.textContent = entry.quote;
+            card.appendChild(quote);
+        }
+
+        var meta = document.createElement('div');
+        meta.className = 'ai-copilot__source-meta';
+        if (entry.section) {
+            var section = document.createElement('span');
+            section.className = 'ai-copilot__source-section';
+            section.textContent = entry.section;
+            meta.appendChild(section);
+        }
+        // Corpus-owned https guideline URL; guard the scheme anyway so a malformed value can never
+        // become a javascript: link.
+        if (entry.source_url && /^https?:\/\//i.test(entry.source_url)) {
+            var link = document.createElement('a');
+            link.className = 'ai-copilot__source-link';
+            link.href = sourceDeepLink(entry.source_url, entry.anchor_quote);
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = 'View source ↗';   // U+2197 north-east arrow
+            meta.appendChild(link);
+        }
+        if (meta.childNodes.length > 0) {
+            card.appendChild(meta);
+        }
+
+        return card;
     }
 
     function renderClaim(claim) {

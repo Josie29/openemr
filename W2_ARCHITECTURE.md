@@ -32,12 +32,11 @@ documents clinicians actually receive — a scanned **lab PDF** and a front-desk
 and to **route** that new work across a small multi-agent graph without losing grounding. Three
 new capabilities, each a controlled expansion of a Week-1 seam rather than a replacement:
 
-1. **Document ingestion.** A new `attach_and_extract(patient_id, file, doc_type)` tool stores the
-   source document in OpenEMR as a `DocumentReference`, runs **Mistral OCR 4** (schema mode — typed
-   fields + native pixel bounding boxes + per-word confidence in one pass) over it, validates the
+1. **Document ingestion.** A new `attach_and_extract(document_id)` tool reads a document already
+   stored in OpenEMR as a `DocumentReference`, runs **Mistral OCR 4** (schema mode — typed fields +
+   per-word confidence in one pass) over it, locates each value on the page, and validates the
    output against a **strict Pydantic schema** (the canonical contract — raw extractor output never
-   bypasses it), and persists derived lab results as FHIR `Observation` resources. Every extracted
-   fact carries a citation back to the source (§3).
+   bypasses it). Every extracted fact carries a citation back to the source (§3).
 2. **Supervisor + two workers.** The Week-1 single-agent verdict was pre-registered as
    *conditional*: [`ARCHITECTURE.md`](ARCHITECTURE.md) §6.1 named the exact tripwires that would
    flip it to multi-agent. Week 2 fires tripwire #3. We add a **supervisor** that routes to an
@@ -53,11 +52,11 @@ new capabilities, each a controlled expansion of a Week-1 seam rather than a rep
 | Concern | Week-2 decision | Evidence |
 |---|---|---|
 | Orchestration | **Pydantic AI** multi-agent (a router/supervisor agent emits a typed route each hop; plain Python dispatches the worker and loops) — *not* LangGraph | [`agent-framework-week2.md`](context/decisions/agent-framework-week2.md) |
-| Document extraction | **Mistral OCR 4** (schema mode — typed fields + native pixel bboxes + per-word confidence, one pass) → strict Pydantic schema → OpenEMR `DocumentReference` + derived FHIR `Observation` | §3; [`vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md) |
+| Document extraction | **Mistral OCR 4** (schema mode — typed values + per-word confidence, one pass; **no per-field boxes** — a locator chain places each value, §3.5) → strict Pydantic schema | §3; [`vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md) |
 | Vector store | **Qdrant** (dedicated Railway service, private networking) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Hybrid retrieval | FastEmbed dense + sparse → Qdrant Universal Query API `Fusion.RRF` | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Reranker | **Cohere Rerank** (`rerank-v4.0-fast`) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
-| Eval gate | 50-case golden set · 5 boolean rubrics · **PR-blocking**, fails on >5% regression | §7 |
+| Eval gate | 52-case golden set · 5 boolean rubrics · **PR-blocking**, fails on >5% regression | §7 |
 | Grounding | Week-1 `output_validator` + `ModelRetry` **ported to each worker + the final answer** | §4; [`ARCHITECTURE.md`](ARCHITECTURE.md) §7 |
 
 **The through-line.** Week 2 is deliberately *narrower than the original spec* — two document
@@ -96,7 +95,7 @@ so this expansion would be additive.
 | **Grounding gate** | One `output_validator` on the single agent's answer | Same gate **ported to each worker** + the final answer |
 | **Services on Railway** | OpenEMR · agent · MySQL | + **Qdrant** service · Cohere API · document storage |
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
-| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **50 cases, 5 boolean rubrics, PR-blocking, >5% = fail** |
+| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, >5% = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs, FHIR writes |
 | **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
 
@@ -116,33 +115,61 @@ backwards-compatibility break in the existing tool contracts.
 
 ## 3. Document ingestion flow
 
-The new tool is `attach_and_extract(patient_id, file, doc_type)`, supporting `doc_type ∈
-{lab_pdf, intake_form}`. It is the intake-extractor worker's single tool. Its job: store the
-source, see it, extract to a strict schema, and persist derived facts — with every fact traceable
-to a location in the source document.
+The new tool is `attach_and_extract(document_id)`, reading a document already filed in OpenEMR and
+supporting `doc_type ∈ {lab_pdf, intake_form}`. It is the intake-extractor worker's single tool. Its
+job: see the source, extract to a strict schema, and locate every fact on the page.
+
+**The tool takes no `doc_type` argument, deliberately.** The type is resolved from the document's
+own OpenEMR **category** at discovery (`Lab Report` → `lab_pdf`, `Patient Information` →
+`intake_form`) and rides on the summary `list_documents` returns. The model chooses *which* document
+to read, never *how* to read it — a model-supplied `doc_type` would let it pick the schema a
+document is interpreted through, which is exactly the decision the category exists to make. Intake
+matches its category **exactly** while labs match on a substring: `Lab Report` is a purpose-built
+OpenEMR category, but `Patient Information` is the identity bucket (its children are `Patient ID
+card` and `Patient Photograph`), so a loose match there would read a driver's licence through the
+intake schema.
 
 **Decided extractor: Mistral OCR 4 in schema mode**
 ([`vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md)). It returns, in **one
-pass**, each typed field with its **native pixel bounding box + page** and a **per-field / per-word
-confidence** — the three things Core Reqs 2, 5, and 7 ask for. This replaces the previous plan of
-Claude vision + a separate OCR pass + a fuzzy quote↔token match: there is **no separate OCR step
-and no string-alignment heuristic on the critical path**. The choice is driven by Core Req 5's
+pass**, each typed field plus **per-field / per-word confidence**. This replaces the previous plan of
+Claude vision + a separate OCR pass: there is **no separate OCR step on the critical path**. The
+choice is driven by Core Req 5's
 pixel-accurate overlay requirement — Claude vision is the wrong tool for it (its Citations API
 grounds to **page/section, not pixels**, and citations are **incompatible with structured output**,
-returning 400), so a geometry-native extractor is cleaner than forcing Claude into the role. The
+returning 400). The
 extractor's raw output is still **untrusted until validated into the strict Pydantic schema** (the
 schema is the boundary), and the `output_validator` grounding gate still refuses any fact that
 doesn't resolve to a source span. Mistral is a **managed external API** (like Cohere Rerank; §10),
 wired into the same client/tracing surface. A possible fallback to revisit only if intake evals
 regress is Claude vision for the reasoning-heavy free-text fields (§12) — not built now.
 
+**Correction (JOS-80, verified against the live API): Mistral does NOT return a per-field bounding
+box.** It returns the field VALUES plus whole-**block** geometry (a table's box, not a cell's), so
+the "geometry-native, one-pass, no string-alignment" premise above holds only for the values — not
+for the boxes. Where each value SITS is resolved separately, by a **locator chain** bound to that
+field (§3.5). This is the single biggest gap between the original decision and what shipped; the
+decision to use Mistral still stands (its values and confidence are good, and the locators are
+deterministic code rather than a model), but the overlay is earned by our geometry layer, not by the
+extractor.
+
+Two further probe rules were learned the same way, and both are load-bearing:
+
+- **Every probe field must be REQUIRED** (nullable, never defaulted). The SDK's schema generator
+  omits a defaulted field from the JSON Schema's `required` list, and Mistral then silently drops it
+  from `document_annotation` — this cost **six of nine intake fields**, and looked for weeks like a
+  stale fixture rather than an API behaviour.
+- **Values must be demanded verbatim.** Asked plainly, Mistral normalizes (`03 / 14 / 1979` →
+  `1979-03-14`). A normalized value cannot be located on the page, so the fact is correctly dropped
+  rather than boxed wrongly — but the field is lost. Every probe field says "exactly as printed".
+
 ### 3.1 The flow
 
 ```mermaid
 flowchart TB
-    up["attach_and_extract(patient_id, file, doc_type)"] --> store["1. Store source in OpenEMR\nFHIR DocumentReference\n(the authoritative source-of-truth blob)"]
-    store --> ext["2. Mistral OCR 4 (schema mode)\none pass: typed fields + native pixel bboxes\n+ per-field/word confidence"]
-    ext --> parse["3. Parse-don't-validate\nraw extractor output → strict Pydantic schema\n(LabReport | IntakeForm)"]
+    up["attach_and_extract(document_id)"] --> store["1. Resolve doc_type from the source's\nOpenEMR category (NOT from the model)\nFHIR DocumentReference"]
+    store --> ext["2. Mistral OCR 4 (schema mode)\none pass: typed VALUES + per-word confidence\n(block geometry only — no per-field boxes)"]
+    ext --> locate["2b. Locator chain per field\ntext layer / table band / checkbox / line band\n→ a box in PDF points, or the fact is dropped"]
+    locate --> parse["3. Parse-don't-validate\nraw extractor output → strict Pydantic schema\n(LabReport | IntakeForm)"]
     parse -->|schema violation| retry["reject / retry\n(raw output NEVER bypasses the schema)"]
     parse -->|valid| conf["4. Confidence gate\nMistral per-field/word confidence"]
     conf --> derive["5. Derive FHIR Observations\n(lab results only) — provenance-tagged"]
@@ -265,6 +292,82 @@ intake-extractor needs facts from document X:
   per-document lock (or an upsert keyed on `provenance + field`) makes first-touch extraction
   safe. Low-risk at demo scale, called out so it is a decision, not an accident.
 
+### 3.5 Where a value sits — the locator chain (JOS-80)
+
+Mistral gives the field VALUES; it does not say where they are (§3.1). Every extracted fact must
+still resolve to a box on the page or it cannot back the click-to-source overlay — so location is
+its own layer, `copilot.ingestion.geometry`.
+
+**The problem it solves.** The first implementation welded geometry to one layout: a lab table. The
+anchor had to sit in a left-hand column, the fallback needed an OCR *table block* to band, and the
+order was hardcoded. An intake form breaks all three — and not because "forms differ from tables".
+One committed intake fixture contains **four idioms at once**: label:value demographics, a checkbox
+for `sex`, header tables for medications and allergies, and checkbox rows for family history. The
+second fixture renders the same facts with **zero tables and zero checkboxes**. So the axis is not
+document type; it is the FIELD.
+
+**The shape.** A `ValueLocator` is one strategy for placing a value. Each field binds an ordered,
+layout-agnostic `LocatorChain`; the first locator that applies wins:
+
+| Locator | Places a value by |
+|---|---|
+| `RowSpanLocator` | its row's left-column anchor (the lab table join) |
+| `LabelSpanLocator` | a printed label, `RIGHT` **then** `BELOW` — forms disagree about which |
+| `SectionSpanLocator` | a section heading scoping the search (free text, em-dash lists) |
+| `CheckboxLocator` | a marked box — and it can REFUTE (below) |
+| `TableRowBandLocator` | banding an OCR table block by row count (scans) |
+| `LineBandLocator` | the value's text line (coarse form fallback) |
+| `PageBoxLocator` | the page, honestly labelled `PAGE` |
+
+Two properties make the chain work rather than merely compile:
+
+- **A box declares what it is.** `BoxPrecision` (`EXACT` / `ROW_BAND` / `LINE_BAND` / `PAGE`) plus a
+  per-doc-type **floor**. "Has a box" is not "is click-to-source": the lab path could previously
+  satisfy its box requirement with a whole-page rectangle. Intake's floor is `LINE_BAND`, so a fact
+  that can only be placed "somewhere on page 1" is dropped rather than cited with a useless
+  highlight.
+- **A locator can say NO.** `LocateOutcome` is three-valued: `LOCATED`, `NOT_APPLICABLE` (wrong
+  layout — try the next locator), and **`REFUTED`** (I own this field and the page contradicts the
+  value — stop the chain). See §3.6.
+
+**The scalability seam is data, not code.** A `FieldSpec` carries a `frozenset` of **label
+aliases**, because the same field is introduced differently per form (`Patient Name (Last, First)`
+vs `Full Name:`; `Home Address` vs `Address:`). Supporting another form's wording is one line in a
+set. Only a genuinely new *idiom* warrants a new locator, which then composes into existing chains.
+The two disjoint fixtures are the anti-overfit test: **one spec set must extract both**, and a
+locator set tuned to either returns nothing on the other.
+
+### 3.6 The checkbox hazard — why a box can be worse than no box
+
+A form **preprints every option it offers**. "Male" and "Female" both sit on the page; a
+family-history checklist prints "Cancer" whether or not the patient claims it. Only the tick asserts
+an answer.
+
+That breaks an assumption the citation contract quietly rests on. The contract asks that
+`quote_or_value` appear **exactly as printed on the source page** — and for a fabricated
+`family_history: cancer`, it *does*. A text-matching locator finds the word, boxes it, and returns a
+citation that resolves. The grounding gate passes it. The physician clicks through and the highlight
+lands on **real ink**. The hallucination is not caught by the overlay; it is **laundered** by it.
+
+Verified on the committed fixture: `Female` is a bare word at x0=492.3 beside an **unticked** box.
+(`Male` escapes only because the text layer merged the tick into the token `✕Male` — a kerning
+accident, not a safety property.)
+
+The defence has three parts:
+
+1. **Checkboxes are extracted from the page's rects, not its words** — an unticked box is a border
+   with no text, invisible to a word-level view. A box is ticked when a mark glyph's centre falls
+   inside it (containment, so the `X` in "TX 78745" is not a tick).
+2. **`REFUTED` stops the chain.** Returning "no box" is not enough: the chain would fall through to
+   a coarser locator, which would match the preprinted text and hand back a box anyway.
+3. **Evidence is a property of the BOX, never of the field.** `BoxEvidence` is `PRINTED_VALUE` or
+   `CHECKED_MARK`. It is tempting to declare "`sex` requires a tick" — but the second fixture states
+   `Sex: Male` as plain text, so that rule would make the field permanently unextractable there.
+   Where boxes exist the checkbox locator owns the field and refuses; where they don't it defers.
+
+A refused fact is never recorded, so the model cannot cite it, so the gate rejects the claim as
+ungrounded. Enforcement is at map time; the gate is the backstop, not the mechanism.
+
 ---
 
 ## 4. Worker graph — supervisor + two workers
@@ -357,21 +460,49 @@ follows, each carrying source metadata. Raw scale is not the deciding axis; nati
 quality, Railway footprint, and metadata filtering are
 ([`vector-db-week2.md`](context/decisions/vector-db-week2.md)).
 
+**Curation & chunking.** The corpus is built in-repo by the `corpus-curation` workflow
+(`.claude/workflows/`, agent chain `guideline-researcher → corpus-chunker → citation-verifier`): the
+researcher sources one publicly-fetchable authoritative guideline per topic and extracts short
+verbatim quotes with section provenance; the chunker turns **one statement into one self-contained
+chunk** (layout-aware — a criterion is never split mid-thought, unrelated statements never merged),
+writing one JSON object per line to `agent/src/copilot/rag/corpus/<topic>.jsonl`; the verifier
+adversarially checks each chunk against its cited source and prunes any that fail. The corpus is
+**reproducible from the repo alone** (§11) — the Qdrant index is a rebuildable artifact, not the
+source of truth.
+
+Each chunk carries `{chunk_id, guideline, source, source_url, section, date, text, anchor_quote}`.
+`text` is what gets embedded and cited — the verbatim quote plus a short framing clause so it reads
+standalone. `anchor_quote` is a **verbatim source span** (the longest substring the chunk shares with
+its fetched source, backfilled by `scripts/backfill_corpus_anchors.py` as the workflow's final step);
+the sidebar turns it into a URL **text fragment** so a citation's "View source" deep-links to the exact
+passage in the source PDF/page instead of opening at page 1 (JOS-85). It is optional — a source that
+blocks the fetch keeps no anchor and falls back to a plain link.
+
 ### 5.1 The pipeline
 
 ```
-Guideline corpus (curated chunks · payload = {guideline, source, section})
+Guideline corpus (curated chunks · Qdrant payload = full chunk; filterable: guideline, source, section)
    │  FastEmbed inside qdrant-client: dense embed + sparse (bm25 / minicoil)
    ▼
 Qdrant  (dedicated Railway service · private networking)
    │  Universal Query API: prefetch(dense) + prefetch(sparse) → Fusion.RRF → top-k
    ▼
-Cohere Rerank  (rerank-v4.0-fast)  → keep top-n grounded snippets
+Cohere Rerank  (rerank-v4.0-fast)  → relevance floor τ, then top-K survivors
    ▼
-Answer model  ← receives ONLY the reranked evidence + source metadata
+Answer model  ← receives ONLY the surviving evidence + source metadata
    ▼
 output_validator gate — no unattributable evidence claim ships
 ```
+
+**Relevance gate (τ-floor + top-K, JOS-53/#31).** After rerank, a snippet ships only if it both
+clears the relevance floor **τ = 0.5** *and* ranks in the **top K = 3** — i.e. the highest-scoring
+survivors minus any below τ (`_above_floor` on the top-K, `retriever.py`). Two outcomes: ≥1 survivor
+→ a **grounded** answer with cited evidence cards; **nothing clears τ → no evidence section**, and
+the answer is composed without guideline grounding rather than fabricating it. `rerank_score` is
+Cohere relevance in [0,1] (live) / normalized term-overlap (fixture) — same shape, same gate. τ is a
+pragmatic floor, not a calibrated probability; τ/K are `config.py` values (`retrieval_relevance_floor`,
+`rerank_top_n`), tuned on the eval set. Full contract:
+[`evidence-gating-and-presentation.md`](context/specs/evidence-gating-and-presentation.md).
 
 Each choice traces to a requirement
 ([`vector-db-week2.md`](context/decisions/vector-db-week2.md)):
@@ -396,7 +527,7 @@ Each choice traces to a requirement
 **Implementation status (JOS-53).** The pipeline above is built in `agent/src/copilot/rag/`
 (`retriever.py` hybrid+rerank, `index.py` content-correct indexer, `corpus.py`, `models.py`),
 with the concrete choices: dense `BAAI/bge-small-en-v1.5` (384-dim), sparse `Qdrant/bm25`
-(IDF), `prefetch_k=20`, `rerank_top_n=5`. Retrieved snippets carry the §3.3 `guideline`
+(IDF), `prefetch_k=20`, `rerank_top_n=3` (τ-floor 0.5). Retrieved snippets carry the §3.3 `guideline`
 citation arm; `/ready` now probes Qdrant (`/readyz`) and Cohere (§10). Design contract:
 [`context/specs/hybrid-rag-pipeline.md`](context/specs/hybrid-rag-pipeline.md). The retriever
 began as a standalone capability this increment; **the JOS-56 supervisor/worker graph** (§4) that
@@ -448,7 +579,7 @@ Requirements, "data authority must be explicit").
 |---|---|---|---|---|
 | **Extracted lab observations** | OpenEMR — FHIR `Observation` | Derived from a stored `DocumentReference` via Mistral OCR 4 extraction; provenance tag points back to the source | Same patient-scoped SMART read as all FHIR data ([`ARCHITECTURE.md`](ARCHITECTURE.md) §5) | `LabReport` schema; abnormal-flag + reference-range sanity checks |
 | **Intake facts** | OpenEMR (demographics / meds / allergies / family history records) | Derived from a stored `DocumentReference` via extraction | Patient-scoped | `IntakeForm` schema |
-| **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{guideline, source, section}` metadata |
+| **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{chunk_id, guideline, source, source_url, section, date, text, anchor_quote}` (anchor_quote optional) |
 | **Citation records** | The agent (emitted per claim) | Composed from an extraction or a retrieval result; for `lab_pdf`, the page + pixel bbox are **native output of Mistral OCR 4**, not a reconstructed rectangle | Rides with the answer payload | Must satisfy the full citation shape (§3.3); a `lab_pdf` citation whose field lacks a resolved bbox is refused, not shipped with a fabricated box |
 | **Extraction-result cache (sidecar)** | Derived cache — **rebuildable**, not a system of record | One extraction pass over a stored source document; keyed to `(document id, content hash)` (§3.4) | Same patient scope as the source document it derives from | Holds the validated facts + page/bbox citations; superseded when the source version (hash) changes |
 
@@ -493,8 +624,10 @@ evaluators, in a **report-only** CI workflow that ran only on `qa → main` prom
 ([`ARCHITECTURE.md`](ARCHITECTURE.md) §11, `should_fail_on_regression: false`). Week 2 hardens
 this into the gate the PRD demands:
 
-- **50-case golden set** exercising extraction, evidence retrieval, citations, refusals, and
-  missing-data behavior.
+- **52-case golden set** exercising extraction, evidence retrieval, citations, refusals, and
+  missing-data behavior — including one both-tools synthesis case (`angulo-lab-ckd-nsaid`) that
+  fires the vision extractor (`attach_and_extract`) and the retriever (`search_guidelines`) in a
+  single turn.
 - **Five boolean rubrics** (booleans, not 1–10 ratings, so failures are actionable):
   `schema_valid` · `citation_present` · `factually_consistent` · `safe_refusal` ·
   `no_phi_in_logs`.
@@ -502,16 +635,18 @@ this into the gate the PRD demands:
   rubric category **regresses by more than 5%** or drops below its pass threshold.
 
 > **As-built (JOS-50).** The eval harness now runs the **supervisor graph** (§4); the Week-1 single
-> agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **50-case golden
+> agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **52-case golden
 > set** lives in `agent/src/copilot/evals/cases.py`, scored by the five rubrics above across the four
 > fixture patients and the 8-topic guideline corpus. Every case is **falsifiable** (a plausible
 > failure tied to a primary rubric — each rubric has a floor of cases that *can* fail it),
 > **fixture-verified** (`verify_cases.py` + its test confirm each case's ground truth against the
 > fixtures/corpus — a free, model-call-free guard, so the set cannot silently rot), **deterministic**
-> (fixture FHIR + fixture retriever), and **non-redundant** (unique primary-rubric × mechanism ×
-> patient × topic). **Cost discipline:** the CI gate runs only the **3-case subset**
-> (`copilot-golden-ci`, ~$0.10/run); the full 50 (`copilot-golden-v1`) is an on-demand,
-> approval-gated run (~$2). Still **report-only** (`should_fail_on_regression: false`) pending one
+> (fixture FHIR + fixture retriever + fixture OCR extractor — the one case with an uploaded lab
+> document replays a recorded OCR response, so extraction is exercised with no live API call), and
+> **non-redundant** (unique primary-rubric × mechanism × patient × topic). **Cost discipline:** the
+> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 51
+> (`copilot-golden-v1`) is an on-demand, approval-gated run (~$2). Still **report-only**
+> (`should_fail_on_regression: false`) pending one
 > approved calibration run to set the thresholds — flipping to the PR-blocking >5% gate above is a
 > single config change.
 
@@ -548,7 +683,7 @@ LLM and Mistral OCR 4 extractor responses against fixture documents.
 | **Integration** | Full **ingestion→answer path** with fixture PDFs/form images and a **stubbed Mistral OCR 4 extractor** (fixture schema-mode responses — typed fields + native bboxes + confidence) | The store→extract→derive→cite chain breaking at a seam (e.g. a derived Observation losing its provenance link, §6; a native bbox failing to thread into the citation record) |
 | **Integration** | RAG pipeline: FastEmbed → Qdrant hybrid → Cohere rerank, against a fixture corpus | Retrieval returning wrong/empty results, or fusion/rerank silently degrading |
 | **Integration** | Supervisor↔worker **contract tests** (typed handoff payloads) | A handoff payload drifting from its Pydantic contract — the interface breaking undetected |
-| **Eval (golden set)** | Agent *behavior* — the 5 rubrics over 50 cases (§7) | The behavioral regressions the hard gate exists to catch |
+| **Eval (golden set)** | Agent *behavior* — the 5 rubrics over 52 cases (§7) | The behavioral regressions the hard gate exists to catch |
 | **CI meta** | Dependency audit + security scan on every PR; **PHI-detection check** on logs/traces/eval data | Vulnerable dependencies shipping; PHI leaking into observability (§9) |
 
 **Not tested, and why:**
@@ -725,7 +860,8 @@ verbal talking points from the architecture defense, recorded here as the risk r
   fragility and three-part complexity**: the overlay rode a string-alignment heuristic on the
   critical path (a normalized value could miss its box), and it stood up an OCR pass + match layer
   purely to work around Claude's page-level-only citations. **Mistral OCR 4** returns typed fields +
-  native pixel bboxes + per-word confidence in one pass instead (§3). Claude vision remains the
+  per-word confidence in one pass instead (§3; it returns no per-field box — see §3.5). Claude
+  vision remains the
   **fallback to revisit only if intake evals regress** (§12 risk row above). Full analysis:
   [`vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md).
 - **pgvector** (rejected vector store) — OpenEMR runs on **MySQL, not Postgres**, so pgvector
@@ -753,8 +889,9 @@ decision — including the options not taken — is recorded in `/context/`:
 - [`context/planning/w2-arch-defense-deck.md`](context/planning/w2-arch-defense-deck.md) — the
   slide-by-slide architecture defense this document expands.
 - [`context/decisions/vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md) — the
-  document-extraction decision (§3): Mistral OCR 4 schema mode (typed fields + native pixel bboxes +
-  per-word confidence in one pass) validated into the strict Pydantic schema, why Claude vision is
-  the wrong tool for the pixel-bbox requirement (rejected as the previous OCR-match plan), and the
-  reasoning-VLM fallback if intake evals regress.
+  document-extraction decision (§3): Mistral OCR 4 schema mode (typed values + per-word confidence
+  in one pass) validated into the strict Pydantic schema, why Claude vision is the wrong tool for
+  the pixel-bbox requirement, and the reasoning-VLM fallback if intake evals regress. Note the
+  decision's "geometry-native, one-pass" premise holds for the VALUES only — Mistral returns no
+  per-field box, so the boxes are earned by the locator chain (§3.5).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the Week-1 baseline every section here cross-references.

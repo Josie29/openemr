@@ -15,6 +15,20 @@ def test_load_corpus_parses_every_chunk_with_full_provenance() -> None:
         assert chunk.section and chunk.source_url and chunk.text
 
 
+def test_most_chunks_carry_a_deep_link_anchor() -> None:
+    # anchor_quote is the verbatim span the sidebar text-fragments to for "View source" (JOS-85),
+    # backfilled by scripts/backfill_corpus_anchors.py. It is optional (a source that blocks the
+    # fetch yields none), but if the backfill silently stopped populating it, "View source" would
+    # regress to opening every guideline at page 1. Guard the healthy majority, not every chunk.
+    chunks = load_corpus()
+    anchored = [c for c in chunks if c.anchor_quote]
+
+    # ~47/55 today; only the fetch-blocked NICE set lacks an anchor.
+    assert len(anchored) >= 0.7 * len(chunks)
+    for chunk in anchored:
+        assert chunk.anchor_quote and chunk.anchor_quote.strip() == chunk.anchor_quote
+
+
 def test_load_corpus_rejects_a_malformed_row(tmp_path) -> None:  # type: ignore[no-untyped-def]
     # Parse-don't-validate at the boundary: a corrupt JSONL line must raise loudly, never be
     # silently skipped into a partial index that looks complete.

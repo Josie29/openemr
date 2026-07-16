@@ -12,7 +12,8 @@ async def test_golden_set_ground_truth_is_honest() -> None:
     assert problems == [], "golden set defects:\n" + "\n".join(problems)
 
 
-def test_golden_set_is_fifty_cases() -> None:
-    # The suite is sized at 50 by design (the coverage matrix). A large accidental change to the
-    # count means the matrix allocation drifted and coverage should be re-reviewed.
-    assert len(CASES) == 50
+def test_golden_set_size() -> None:
+    # The suite is sized by the coverage matrix (50 cases, + the both-tools extract+guideline
+    # synthesis case = 51). A large accidental change to the count means the matrix allocation
+    # drifted and coverage should be re-reviewed.
+    assert len(CASES) == 52

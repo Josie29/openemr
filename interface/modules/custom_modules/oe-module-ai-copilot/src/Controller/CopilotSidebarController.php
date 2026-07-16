@@ -36,13 +36,24 @@ final readonly class CopilotSidebarController
      * physician to review and send — it does not auto-send (spec §6). Chart-aware and
      * conversation-tailored prompts are a later increment.
      *
+     * The set spans the agent's capabilities without assuming any specific condition, so the empty
+     * state doubles as a capability demo for any patient: a record summary, a guideline question
+     * scoped to whatever problems the chart holds, an uploaded-lab-report (vision extraction)
+     * question, and a synthesis question that pairs the lab results with matching guidance. The two
+     * lab-report prompts assume an uploaded lab document is on file (the demo patient has one); for
+     * a patient without one the agent reports that no lab report is on file.
+     *
      * @var list<string>
      */
     private const STARTER_PROMPTS = [
+        // Record route (extract_intake -> answer): orientation summary from the chart.
         'Summarize this patient',
-        "What's overdue?",
-        'Any medication or allergy conflicts?',
-        'Summarize recent visits',
+        // Record + guideline: reads the chart's problems, then retrieves guidance matching them.
+        "What do guidelines recommend for this patient's active problems?",
+        // Vision route (attach_and_extract -> answer): OCR the uploaded lab report, no retrieval.
+        'What does the latest uploaded lab report show?',
+        // Synthesis (both workers -> answer): extract the lab results AND retrieve matching guidance.
+        'How do the latest lab results compare to relevant clinical guidelines?',
     ];
 
     /**

@@ -1,1585 +1,1585 @@
 {
+  "document_annotation": "{\"full_name\": \"Angulo, Sergio\", \"date_of_birth\": \"1979-03-14\", \"sex\": \"Male\", \"address\": \"2117 Cypress Bend Dr, Austin, TX 78745\", \"phone\": \"(512) 555-0184\", \"chief_concern\": \"'Here for my 6-month check-up. My lower back has been sore for about two weeks after helping a friend move; my rescue inhaler use is also up lately.'\", \"current_medications\": [{\"name\": \"Budesonide inhaler\", \"dose\": \"1 puff\", \"frequency\": \"twice daily (controller)\"}, {\"name\": \"Albuterol (Ventolin) inhaler\", \"dose\": null, \"frequency\": \"as needed \u2014 4\u20135\u00d7/week lately\"}, {\"name\": \"Fexofenadine (Allegra)\", \"dose\": \"180 mg\", \"frequency\": \"once daily\"}, {\"name\": \"EpiPen (epinephrine)\", \"dose\": \"0.3 mg\", \"frequency\": \"as needed for severe allergic reaction\"}], \"allergies\": [{\"substance\": \"Aspirin\", \"reaction\": \"hives + wheezing / trouble breathing\"}, {\"substance\": \"Peanuts\", \"reaction\": \"throat swelling, used EpiPen before\"}, {\"substance\": \"Fish\", \"reaction\": \"hives, trouble breathing\"}, {\"substance\": \"Environmental (pollen, dust, mold, cats)\", \"reaction\": \"sneezing, congestion, itchy watery eyes\"}], \"family_history\": [{\"condition\": \"Asthma\", \"relation\": \"Mother, Brother\"}, {\"condition\": \"Allergies/Eczema\", \"relation\": \"Mother\"}, {\"condition\": \"High Blood Pressure\", \"relation\": \"Father\"}, {\"condition\": \"Kidney Disease\", \"relation\": \"Father (on dialysis)\"}, {\"condition\": \"Type 2 Diabetes\", \"relation\": \"Father\"}]}",
+  "model": "mistral-ocr-latest",
   "pages": [
     {
-      "index": 0,
-      "markdown": "SYNTHETIC DEMO DATA \u2014 FICTIONAL PATIENT & CLINIC \u2014 NOT A REAL MEDICAL RECORD\n\n## Riverbend Family Medicine\n\n1809 Wells Branch Pkwy, Austin, TX 78728 \u00b7 (512) 555-0170\n\n### Patient Intake & Health History\n\nForm INT-05 \u00b7 Date: 2026-07-14\n\n#### PATIENT INFORMATION\n\n**Full Name:** Angulo, Sergio\n\n**Date of Birth:** 1979-03-14\n\n**Sex:** Male\n\n**MRN:** OE-000023\n\n**Phone:** (512) 555-0184\n\n**Address:** 2117 Cypress Bend Dr, Austin, TX 78745\n\n**Email:** sergio.angulo@example.com\n\n**Preferred Language:** English\n\n**Emergency Contact:** Marisol Angulo \u2014 (512) 555-0199\n\n#### REASON FOR TODAY'S VISIT\n\n*'Here for my 6-month check-up. My lower back has been sore for about two weeks after helping a friend move; my rescue inhaler use is also up lately.'*\n\n#### CURRENT MEDICATIONS\n\nBudesonide inhaler \u2014 1 puff \u2014 twice daily (controller)\n\nAlbuterol (Ventolin) inhaler \u2014 as needed \u2014 4\u20135\u00d7/week lately\n\nFexofenadine (Allegra) \u2014 180 mg \u2014 once daily\n\nEpiPen (epinephrine) \u2014 0.3 mg \u2014 as needed for severe allergic reaction\n\n#### ALLERGIES\n\nAspirin \u2014 hives + wheezing / trouble breathing\n\nPeanuts \u2014 throat swelling, used EpiPen before\n\nFish \u2014 hives, trouble breathing\n\nEnvironmental (pollen, dust, mold, cats) \u2014 sneezing, congestion, itchy watery eyes\n\n#### FAMILY HISTORY\n\nAsthma \u2014 Mother, Brother\n\nAllergies/Eczema \u2014 Mother\n\nHigh Blood Pressure \u2014 Father\n\nKidney Disease \u2014 Father (on dialysis)\n\nType 2 Diabetes \u2014 Father\n\n#### SOCIAL HISTORY\n\n**Tobacco:** Never\n\n**Alcohol:** Occasional (1\u20132 drinks/week)\n\n**Exercise:** 2\u20133\u00d7/week\n\n*Sergio Angulo*\n\nPATIENT SIGNATURE\n\nDate: 2026-07-14\n\nRiverbend Family Medicine \u00b7 Patient: Angulo, Sergio \u00b7 DOB 1979-03-14 \u00b7 MRN OE-000023 \u00b7 Page 1 of 1",
-      "images": [],
-      "dimensions": {
-        "dpi": 93,
-        "height": 1023,
-        "width": 791
-      },
-      "tables": [],
-      "hyperlinks": [],
-      "header": null,
-      "footer": null,
+      "blocks": [
+        {
+          "bottom_right_x": 598,
+          "bottom_right_y": 50,
+          "content": "SYNTHETIC DEMO DATA \u2014 FICTIONAL PATIENT & CLINIC \u2014 NOT A REAL MEDICAL RECORD",
+          "top_left_x": 188,
+          "top_left_y": 39,
+          "type": "header"
+        },
+        {
+          "bottom_right_x": 253,
+          "bottom_right_y": 86,
+          "content": "## Riverbend Family Medicine",
+          "top_left_x": 61,
+          "top_left_y": 68,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 298,
+          "bottom_right_y": 101,
+          "content": "1809 Wells Branch Pkwy, Austin, TX 78728 \u00b7 (512) 555-0170",
+          "top_left_x": 61,
+          "top_left_y": 89,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 242,
+          "bottom_right_y": 124,
+          "content": "### Patient Intake & Health History",
+          "top_left_x": 61,
+          "top_left_y": 109,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 189,
+          "bottom_right_y": 137,
+          "content": "Form INT-05 \u00b7 Date: 2026-07-14",
+          "top_left_x": 61,
+          "top_left_y": 125,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 177,
+          "bottom_right_y": 169,
+          "content": "#### PATIENT INFORMATION",
+          "top_left_x": 61,
+          "top_left_y": 157,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 186,
+          "bottom_right_y": 190,
+          "content": "**Full Name:** Angulo, Sergio",
+          "top_left_x": 61,
+          "top_left_y": 177,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 185,
+          "bottom_right_y": 210,
+          "content": "**Date of Birth:** 1979-03-14",
+          "top_left_x": 61,
+          "top_left_y": 196,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 111,
+          "bottom_right_y": 230,
+          "content": "**Sex:** Male",
+          "top_left_x": 61,
+          "top_left_y": 217,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 146,
+          "bottom_right_y": 249,
+          "content": "**MRN:** OE-000023",
+          "top_left_x": 61,
+          "top_left_y": 236,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 170,
+          "bottom_right_y": 269,
+          "content": "**Phone:** (512) 555-0184",
+          "top_left_x": 61,
+          "top_left_y": 256,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 296,
+          "bottom_right_y": 291,
+          "content": "**Address:** 2117 Cypress Bend Dr, Austin, TX 78745",
+          "top_left_x": 61,
+          "top_left_y": 276,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 229,
+          "bottom_right_y": 310,
+          "content": "**Email:** sergio.angulo@example.com",
+          "top_left_x": 61,
+          "top_left_y": 296,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 200,
+          "bottom_right_y": 330,
+          "content": "**Preferred Language:** English",
+          "top_left_x": 61,
+          "top_left_y": 316,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 318,
+          "bottom_right_y": 351,
+          "content": "**Emergency Contact:** Marisol Angulo \u2014 (512) 555-0199",
+          "top_left_x": 61,
+          "top_left_y": 337,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 203,
+          "bottom_right_y": 375,
+          "content": "#### REASON FOR TODAY'S VISIT",
+          "top_left_x": 61,
+          "top_left_y": 361,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 714,
+          "bottom_right_y": 410,
+          "content": "*'Here for my 6-month check-up. My lower back has been sore for about two weeks after helping a friend move; my rescue inhaler use is also up lately.'*",
+          "top_left_x": 61,
+          "top_left_y": 383,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 184,
+          "bottom_right_y": 433,
+          "content": "#### CURRENT MEDICATIONS",
+          "top_left_x": 61,
+          "top_left_y": 421,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 310,
+          "bottom_right_y": 455,
+          "content": "Budesonide inhaler \u2014 1 puff \u2014 twice daily (controller)",
+          "top_left_x": 61,
+          "top_left_y": 441,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 338,
+          "bottom_right_y": 475,
+          "content": "Albuterol (Ventolin) inhaler \u2014 as needed \u2014 4\u20135\u00d7/week lately",
+          "top_left_x": 61,
+          "top_left_y": 461,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 279,
+          "bottom_right_y": 494,
+          "content": "Fexofenadine (Allegra) \u2014 180 mg \u2014 once daily",
+          "top_left_x": 61,
+          "top_left_y": 480,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 392,
+          "bottom_right_y": 512,
+          "content": "EpiPen (epinephrine) \u2014 0.3 mg \u2014 as needed for severe allergic reaction",
+          "top_left_x": 61,
+          "top_left_y": 499,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 120,
+          "bottom_right_y": 538,
+          "content": "#### ALLERGIES",
+          "top_left_x": 61,
+          "top_left_y": 525,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 276,
+          "bottom_right_y": 558,
+          "content": "Aspirin \u2014 hives + wheezing / trouble breathing",
+          "top_left_x": 61,
+          "top_left_y": 545,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 279,
+          "bottom_right_y": 578,
+          "content": "Peanuts \u2014 throat swelling, used EpiPen before",
+          "top_left_x": 61,
+          "top_left_y": 564,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 206,
+          "bottom_right_y": 596,
+          "content": "Fish \u2014 hives, trouble breathing",
+          "top_left_x": 61,
+          "top_left_y": 583,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 441,
+          "bottom_right_y": 615,
+          "content": "Environmental (pollen, dust, mold, cats) \u2014 sneezing, congestion, itchy watery eyes",
+          "top_left_x": 61,
+          "top_left_y": 602,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 146,
+          "bottom_right_y": 640,
+          "content": "#### FAMILY HISTORY",
+          "top_left_x": 61,
+          "top_left_y": 627,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 186,
+          "bottom_right_y": 660,
+          "content": "Asthma \u2014 Mother, Brother",
+          "top_left_x": 61,
+          "top_left_y": 648,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 192,
+          "bottom_right_y": 680,
+          "content": "Allergies/Eczema \u2014 Mother",
+          "top_left_x": 61,
+          "top_left_y": 667,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 203,
+          "bottom_right_y": 699,
+          "content": "High Blood Pressure \u2014 Father",
+          "top_left_x": 61,
+          "top_left_y": 686,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 236,
+          "bottom_right_y": 718,
+          "content": "Kidney Disease \u2014 Father (on dialysis)",
+          "top_left_x": 61,
+          "top_left_y": 705,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 183,
+          "bottom_right_y": 737,
+          "content": "Type 2 Diabetes \u2014 Father",
+          "top_left_x": 61,
+          "top_left_y": 724,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 147,
+          "bottom_right_y": 762,
+          "content": "#### SOCIAL HISTORY",
+          "top_left_x": 61,
+          "top_left_y": 750,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 139,
+          "bottom_right_y": 783,
+          "content": "**Tobacco:** Never",
+          "top_left_x": 61,
+          "top_left_y": 770,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 241,
+          "bottom_right_y": 803,
+          "content": "**Alcohol:** Occasional (1\u20132 drinks/week)",
+          "top_left_x": 61,
+          "top_left_y": 790,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 162,
+          "bottom_right_y": 823,
+          "content": "**Exercise:** 2\u20133\u00d7/week",
+          "top_left_x": 61,
+          "top_left_y": 810,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 150,
+          "bottom_right_y": 860,
+          "content": "*Sergio Angulo*",
+          "top_left_x": 61,
+          "top_left_y": 841,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 146,
+          "bottom_right_y": 876,
+          "content": "PATIENT SIGNATURE",
+          "top_left_x": 61,
+          "top_left_y": 864,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 145,
+          "bottom_right_y": 899,
+          "content": "Date: 2026-07-14",
+          "top_left_x": 61,
+          "top_left_y": 886,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 422,
+          "bottom_right_y": 995,
+          "content": "Riverbend Family Medicine \u00b7 Patient: Angulo, Sergio \u00b7 DOB 1979-03-14 \u00b7 MRN OE-000023 \u00b7 Page 1 of 1",
+          "top_left_x": 61,
+          "top_left_y": 984,
+          "type": "footer"
+        }
+      ],
       "confidence_scores": {
         "average_page_confidence_score": 0.9961395358083849,
         "minimum_page_confidence_score": 0.6769616311719501,
         "word_confidence_scores": [
           {
-            "text": "SYNTHETIC",
             "confidence": 0.9996002947338716,
-            "start_index": 0
+            "start_index": 0,
+            "text": "SYNTHETIC"
           },
           {
-            "text": " DEMO",
             "confidence": 0.9998306170653393,
-            "start_index": 9
+            "start_index": 9,
+            "text": " DEMO"
           },
           {
-            "text": " DATA",
             "confidence": 0.9999984502816872,
-            "start_index": 14
+            "start_index": 14,
+            "text": " DATA"
           },
           {
-            "text": " \u2014",
             "confidence": 0.8472281921931913,
-            "start_index": 19
+            "start_index": 19,
+            "text": " \u2014"
           },
           {
-            "text": " FICTIONAL",
             "confidence": 0.9441825709224931,
-            "start_index": 21
+            "start_index": 21,
+            "text": " FICTIONAL"
           },
           {
-            "text": " PATIENT",
             "confidence": 0.9999443929145758,
-            "start_index": 31
+            "start_index": 31,
+            "text": " PATIENT"
           },
           {
-            "text": " &",
             "confidence": 0.9999679337281997,
-            "start_index": 39
+            "start_index": 39,
+            "text": " &"
           },
           {
-            "text": " CLINIC",
             "confidence": 0.9999845371979101,
-            "start_index": 41
+            "start_index": 41,
+            "text": " CLINIC"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9998122806128164,
-            "start_index": 48
+            "start_index": 48,
+            "text": " \u2014"
           },
           {
-            "text": " NOT",
             "confidence": 0.9999969005680498,
-            "start_index": 50
+            "start_index": 50,
+            "text": " NOT"
           },
           {
-            "text": " A",
             "confidence": 0.9999798540367254,
-            "start_index": 54
+            "start_index": 54,
+            "text": " A"
           },
           {
-            "text": " REAL",
             "confidence": 0.9999994039539004,
-            "start_index": 56
+            "start_index": 56,
+            "text": " REAL"
           },
           {
-            "text": " MEDICAL",
             "confidence": 0.9999987483040389,
-            "start_index": 61
+            "start_index": 61,
+            "text": " MEDICAL"
           },
           {
-            "text": " RECORD",
             "confidence": 0.9999985694905718,
-            "start_index": 69
+            "start_index": 69,
+            "text": " RECORD"
           },
           {
-            "text": "##",
             "confidence": 0.9980491386185387,
-            "start_index": 78
+            "start_index": 78,
+            "text": "##"
           },
           {
-            "text": " Riverbend",
             "confidence": 0.9998970161364309,
-            "start_index": 80
+            "start_index": 80,
+            "text": " Riverbend"
           },
           {
-            "text": " Family",
             "confidence": 0.9999990463265931,
-            "start_index": 90
+            "start_index": 90,
+            "text": " Family"
           },
           {
-            "text": " Medicine",
             "confidence": 0.9999997615814777,
-            "start_index": 97
+            "start_index": 97,
+            "text": " Medicine"
           },
           {
-            "text": "1809",
             "confidence": 0.9997332227841315,
-            "start_index": 108
+            "start_index": 108,
+            "text": "1809"
           },
           {
-            "text": " Wells",
             "confidence": 0.9999326512895288,
-            "start_index": 112
+            "start_index": 112,
+            "text": " Wells"
           },
           {
-            "text": " Branch",
             "confidence": 0.9999940395710211,
-            "start_index": 118
+            "start_index": 118,
+            "text": " Branch"
           },
           {
-            "text": " Pkwy,",
             "confidence": 0.9984102930298921,
-            "start_index": 125
+            "start_index": 125,
+            "text": " Pkwy,"
           },
           {
-            "text": " Austin,",
             "confidence": 0.9998494031194879,
-            "start_index": 131
+            "start_index": 131,
+            "text": " Austin,"
           },
           {
-            "text": " TX",
             "confidence": 0.9999963045256735,
-            "start_index": 139
+            "start_index": 139,
+            "text": " TX"
           },
           {
-            "text": " 78728",
             "confidence": 0.9997451478965573,
-            "start_index": 142
+            "start_index": 142,
+            "text": " 78728"
           },
           {
-            "text": " \u00b7",
             "confidence": 0.6769616311719501,
-            "start_index": 148
+            "start_index": 148,
+            "text": " \u00b7"
           },
           {
-            "text": " (512)",
             "confidence": 0.9995110829683994,
-            "start_index": 150
+            "start_index": 150,
+            "text": " (512)"
           },
           {
-            "text": " 555-0170",
             "confidence": 0.9999243371777101,
-            "start_index": 156
+            "start_index": 156,
+            "text": " 555-0170"
           },
           {
-            "text": "###",
             "confidence": 0.9980252714052922,
-            "start_index": 167
+            "start_index": 167,
+            "text": "###"
           },
           {
-            "text": " Patient",
             "confidence": 0.9999701985655173,
-            "start_index": 170
+            "start_index": 170,
+            "text": " Patient"
           },
           {
-            "text": " Intake",
             "confidence": 0.9999822553680346,
-            "start_index": 178
+            "start_index": 178,
+            "text": " Intake"
           },
           {
-            "text": " &",
             "confidence": 0.9999926090786457,
-            "start_index": 185
+            "start_index": 185,
+            "text": " &"
           },
           {
-            "text": " Health",
             "confidence": 0.9999960661089133,
-            "start_index": 187
+            "start_index": 187,
+            "text": " Health"
           },
           {
-            "text": " History",
             "confidence": 0.9999997615814777,
-            "start_index": 194
+            "start_index": 194,
+            "text": " History"
           },
           {
-            "text": "Form",
             "confidence": 0.9989472991944555,
-            "start_index": 204
+            "start_index": 204,
+            "text": "Form"
           },
           {
-            "text": " INT-05",
             "confidence": 0.9985854585491731,
-            "start_index": 208
+            "start_index": 208,
+            "text": " INT-05"
           },
           {
-            "text": " \u00b7",
             "confidence": 0.9784305990493581,
-            "start_index": 215
+            "start_index": 215,
+            "text": " \u00b7"
           },
           {
-            "text": " Date:",
             "confidence": 0.999732308666163,
-            "start_index": 217
+            "start_index": 217,
+            "text": " Date:"
           },
           {
-            "text": " 2026-07-14",
             "confidence": 0.9998820726453205,
-            "start_index": 223
+            "start_index": 223,
+            "text": " 2026-07-14"
           },
           {
-            "text": "####",
             "confidence": 0.9984397237216812,
-            "start_index": 236
+            "start_index": 236,
+            "text": "####"
           },
           {
-            "text": " PATIENT",
             "confidence": 0.9999213310105803,
-            "start_index": 240
+            "start_index": 240,
+            "text": " PATIENT"
           },
           {
-            "text": " INFORMATION",
             "confidence": 0.9999996423722521,
-            "start_index": 248
+            "start_index": 248,
+            "text": " INFORMATION"
           },
           {
-            "text": "**Full",
             "confidence": 0.9986152079288124,
-            "start_index": 262
+            "start_index": 262,
+            "text": "**Full"
           },
           {
-            "text": " Name:**",
             "confidence": 0.9999895394965105,
-            "start_index": 268
+            "start_index": 268,
+            "text": " Name:**"
           },
           {
-            "text": " Angulo,",
             "confidence": 0.9992565486319895,
-            "start_index": 276
+            "start_index": 276,
+            "text": " Angulo,"
           },
           {
-            "text": " Sergio",
             "confidence": 0.9999997615814777,
-            "start_index": 284
+            "start_index": 284,
+            "text": " Sergio"
           },
           {
-            "text": "**Date",
             "confidence": 0.999973973864649,
-            "start_index": 293
+            "start_index": 293,
+            "text": "**Date"
           },
           {
-            "text": " of",
             "confidence": 0.9999991655356624,
-            "start_index": 299
+            "start_index": 299,
+            "text": " of"
           },
           {
-            "text": " Birth:**",
             "confidence": 0.9999885561677145,
-            "start_index": 302
+            "start_index": 302,
+            "text": " Birth:**"
           },
           {
-            "text": " 1979-03-14",
             "confidence": 0.9999887294921636,
-            "start_index": 311
+            "start_index": 311,
+            "text": " 1979-03-14"
           },
           {
-            "text": "**Sex:**",
             "confidence": 0.9998183020453091,
-            "start_index": 324
+            "start_index": 324,
+            "text": "**Sex:**"
           },
           {
-            "text": " Male",
             "confidence": 0.9999772315450165,
-            "start_index": 332
+            "start_index": 332,
+            "text": " Male"
           },
           {
-            "text": "**MRN:**",
             "confidence": 0.9997927574335016,
-            "start_index": 339
+            "start_index": 339,
+            "text": "**MRN:**"
           },
           {
-            "text": " OE-000023",
             "confidence": 0.9991118317443545,
-            "start_index": 347
+            "start_index": 347,
+            "text": " OE-000023"
           },
           {
-            "text": "**Phone:**",
             "confidence": 0.9993511505995339,
-            "start_index": 359
+            "start_index": 359,
+            "text": "**Phone:**"
           },
           {
-            "text": " (512)",
             "confidence": 0.999990046198728,
-            "start_index": 369
+            "start_index": 369,
+            "text": " (512)"
           },
           {
-            "text": " 555-0184",
             "confidence": 0.9999332772523702,
-            "start_index": 375
+            "start_index": 375,
+            "text": " 555-0184"
           },
           {
-            "text": "**Address:**",
             "confidence": 0.9999925396665936,
-            "start_index": 386
+            "start_index": 386,
+            "text": "**Address:**"
           },
           {
-            "text": " 2117",
             "confidence": 0.9999727972707276,
-            "start_index": 398
+            "start_index": 398,
+            "text": " 2117"
           },
           {
-            "text": " Cypress",
             "confidence": 0.9999509333755203,
-            "start_index": 403
+            "start_index": 403,
+            "text": " Cypress"
           },
           {
-            "text": " Bend",
             "confidence": 0.9999903441405488,
-            "start_index": 411
+            "start_index": 411,
+            "text": " Bend"
           },
           {
-            "text": " Dr,",
             "confidence": 0.9997214422775401,
-            "start_index": 416
+            "start_index": 416,
+            "text": " Dr,"
           },
           {
-            "text": " Austin,",
             "confidence": 0.9999918044331402,
-            "start_index": 420
+            "start_index": 420,
+            "text": " Austin,"
           },
           {
-            "text": " TX",
             "confidence": 0.9999994039539004,
-            "start_index": 428
+            "start_index": 428,
+            "text": " TX"
           },
           {
-            "text": " 78745",
             "confidence": 0.9999951919196431,
-            "start_index": 431
+            "start_index": 431,
+            "text": " 78745"
           },
           {
-            "text": "**Email:**",
             "confidence": 0.9999424555136822,
-            "start_index": 439
+            "start_index": 439,
+            "text": "**Email:**"
           },
           {
-            "text": " sergio.angulo@example.com",
             "confidence": 0.9997112270683449,
-            "start_index": 449
+            "start_index": 449,
+            "text": " sergio.angulo@example.com"
           },
           {
-            "text": "**Preferred",
             "confidence": 0.9998045277718206,
-            "start_index": 477
+            "start_index": 477,
+            "text": "**Preferred"
           },
           {
-            "text": " Language:**",
             "confidence": 0.999998927117737,
-            "start_index": 488
+            "start_index": 488,
+            "text": " Language:**"
           },
           {
-            "text": " English",
             "confidence": 0.9999997615814777,
-            "start_index": 500
+            "start_index": 500,
+            "text": " English"
           },
           {
-            "text": "**Emergency",
             "confidence": 0.999986454033156,
-            "start_index": 510
+            "start_index": 510,
+            "text": "**Emergency"
           },
           {
-            "text": " Contact:**",
             "confidence": 0.9999993606054873,
-            "start_index": 521
+            "start_index": 521,
+            "text": " Contact:**"
           },
           {
-            "text": " Marisol",
             "confidence": 0.9999651925912305,
-            "start_index": 532
+            "start_index": 532,
+            "text": " Marisol"
           },
           {
-            "text": " Angulo",
             "confidence": 0.9999550606489759,
-            "start_index": 540
+            "start_index": 540,
+            "text": " Angulo"
           },
           {
-            "text": " \u2014",
             "confidence": 0.998109939554045,
-            "start_index": 547
+            "start_index": 547,
+            "text": " \u2014"
           },
           {
-            "text": " (512)",
             "confidence": 0.9999922316383489,
-            "start_index": 549
+            "start_index": 549,
+            "text": " (512)"
           },
           {
-            "text": " 555-0199",
             "confidence": 0.9999893905422628,
-            "start_index": 555
+            "start_index": 555,
+            "text": " 555-0199"
           },
           {
-            "text": "####",
             "confidence": 0.9999761587100603,
-            "start_index": 566
+            "start_index": 566,
+            "text": "####"
           },
           {
-            "text": " REASON",
             "confidence": 0.9999938352261458,
-            "start_index": 570
+            "start_index": 570,
+            "text": " REASON"
           },
           {
-            "text": " FOR",
             "confidence": 0.9999998807907247,
-            "start_index": 577
+            "start_index": 577,
+            "text": " FOR"
           },
           {
-            "text": " TODAY'S",
             "confidence": 0.9685973722091203,
-            "start_index": 581
+            "start_index": 581,
+            "text": " TODAY'S"
           },
           {
-            "text": " VISIT",
             "confidence": 0.9999982118671061,
-            "start_index": 589
+            "start_index": 589,
+            "text": " VISIT"
           },
           {
-            "text": "*'Here",
             "confidence": 0.8780389361693067,
-            "start_index": 597
+            "start_index": 597,
+            "text": "*'Here"
           },
           {
-            "text": " for",
             "confidence": 0.99998354938796,
-            "start_index": 603
+            "start_index": 603,
+            "text": " for"
           },
           {
-            "text": " my",
             "confidence": 0.999997854237364,
-            "start_index": 607
+            "start_index": 607,
+            "text": " my"
           },
           {
-            "text": " 6-month",
             "confidence": 0.9999819699533846,
-            "start_index": 610
+            "start_index": 610,
+            "text": " 6-month"
           },
           {
-            "text": " check-up.",
             "confidence": 0.9999196170253482,
-            "start_index": 618
+            "start_index": 618,
+            "text": " check-up."
           },
           {
-            "text": " My",
             "confidence": 0.9999939203633587,
-            "start_index": 628
+            "start_index": 628,
+            "text": " My"
           },
           {
-            "text": " lower",
             "confidence": 0.9999934435319415,
-            "start_index": 631
+            "start_index": 631,
+            "text": " lower"
           },
           {
-            "text": " back",
             "confidence": 0.9999973774024795,
-            "start_index": 637
+            "start_index": 637,
+            "text": " back"
           },
           {
-            "text": " has",
             "confidence": 0.9999858142961154,
-            "start_index": 642
+            "start_index": 642,
+            "text": " has"
           },
           {
-            "text": " been",
             "confidence": 0.9999866487378297,
-            "start_index": 646
+            "start_index": 646,
+            "text": " been"
           },
           {
-            "text": " sore",
             "confidence": 0.9999965429426269,
-            "start_index": 651
+            "start_index": 651,
+            "text": " sore"
           },
           {
-            "text": " for",
             "confidence": 0.9999738938465109,
-            "start_index": 656
+            "start_index": 656,
+            "text": " for"
           },
           {
-            "text": " about",
             "confidence": 0.9999995231630692,
-            "start_index": 660
+            "start_index": 660,
+            "text": " about"
           },
           {
-            "text": " two",
             "confidence": 0.9999854566779314,
-            "start_index": 666
+            "start_index": 666,
+            "text": " two"
           },
           {
-            "text": " weeks",
             "confidence": 0.9999997615814777,
-            "start_index": 670
+            "start_index": 670,
+            "text": " weeks"
           },
           {
-            "text": " after",
             "confidence": 0.9999995231630692,
-            "start_index": 676
+            "start_index": 676,
+            "text": " after"
           },
           {
-            "text": " helping",
             "confidence": 0.9999876023871354,
-            "start_index": 682
+            "start_index": 682,
+            "text": " helping"
           },
           {
-            "text": " a",
             "confidence": 0.9999846222381212,
-            "start_index": 690
+            "start_index": 690,
+            "text": " a"
           },
           {
-            "text": " friend",
             "confidence": 0.9999705561718785,
-            "start_index": 692
+            "start_index": 692,
+            "text": " friend"
           },
           {
-            "text": " move;",
             "confidence": 0.999727091319058,
-            "start_index": 699
+            "start_index": 699,
+            "text": " move;"
           },
           {
-            "text": " my",
             "confidence": 0.9999995231630692,
-            "start_index": 705
+            "start_index": 705,
+            "text": " my"
           },
           {
-            "text": " rescue",
             "confidence": 0.999979258013377,
-            "start_index": 708
+            "start_index": 708,
+            "text": " rescue"
           },
           {
-            "text": " inhaler",
             "confidence": 0.9998646879049256,
-            "start_index": 715
+            "start_index": 715,
+            "text": " inhaler"
           },
           {
-            "text": " use",
             "confidence": 0.999979258013377,
-            "start_index": 723
+            "start_index": 723,
+            "text": " use"
           },
           {
-            "text": " is",
             "confidence": 0.9999967813595916,
-            "start_index": 727
+            "start_index": 727,
+            "text": " is"
           },
           {
-            "text": " also",
             "confidence": 0.9999921322487634,
-            "start_index": 730
+            "start_index": 730,
+            "text": " also"
           },
           {
-            "text": " up",
             "confidence": 0.9997090947623125,
-            "start_index": 735
+            "start_index": 735,
+            "text": " up"
           },
           {
-            "text": " lately.'*",
             "confidence": 0.9985424690299783,
-            "start_index": 738
+            "start_index": 738,
+            "text": " lately.'*"
           },
           {
-            "text": "####",
             "confidence": 0.9999849798550975,
-            "start_index": 750
+            "start_index": 750,
+            "text": "####"
           },
           {
-            "text": " CURRENT",
             "confidence": 0.9998985631837561,
-            "start_index": 754
+            "start_index": 754,
+            "text": " CURRENT"
           },
           {
-            "text": " MEDICATIONS",
             "confidence": 0.9999716292836688,
-            "start_index": 762
+            "start_index": 762,
+            "text": " MEDICATIONS"
           },
           {
-            "text": "Budesonide",
             "confidence": 0.9998244620879092,
-            "start_index": 776
+            "start_index": 776,
+            "text": "Budesonide"
           },
           {
-            "text": " inhaler",
             "confidence": 0.9999721059126723,
-            "start_index": 786
+            "start_index": 786,
+            "text": " inhaler"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999073829640566,
-            "start_index": 794
+            "start_index": 794,
+            "text": " \u2014"
           },
           {
-            "text": " 1",
             "confidence": 0.9999995231631829,
-            "start_index": 796
+            "start_index": 796,
+            "text": " 1"
           },
           {
-            "text": " puff",
             "confidence": 0.9998938231890127,
-            "start_index": 798
+            "start_index": 798,
+            "text": " puff"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999539873315005,
-            "start_index": 803
+            "start_index": 803,
+            "text": " \u2014"
           },
           {
-            "text": " twice",
             "confidence": 0.9999997615814777,
-            "start_index": 805
+            "start_index": 805,
+            "text": " twice"
           },
           {
-            "text": " daily",
             "confidence": 0.999998927117538,
-            "start_index": 811
+            "start_index": 811,
+            "text": " daily"
           },
           {
-            "text": " (controller)",
             "confidence": 0.9999769565178448,
-            "start_index": 817
+            "start_index": 817,
+            "text": " (controller)"
           },
           {
-            "text": "Albuterol",
             "confidence": 0.9999695497131692,
-            "start_index": 832
+            "start_index": 832,
+            "text": "Albuterol"
           },
           {
-            "text": " (Ventolin)",
             "confidence": 0.9998968885803688,
-            "start_index": 841
+            "start_index": 841,
+            "text": " (Ventolin)"
           },
           {
-            "text": " inhaler",
             "confidence": 0.9999982118641455,
-            "start_index": 852
+            "start_index": 852,
+            "text": " inhaler"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999929667012066,
-            "start_index": 860
+            "start_index": 860,
+            "text": " \u2014"
           },
           {
-            "text": " as",
             "confidence": 0.9999532721416701,
-            "start_index": 862
+            "start_index": 862,
+            "text": " as"
           },
           {
-            "text": " needed",
             "confidence": 0.9999991655356624,
-            "start_index": 865
+            "start_index": 865,
+            "text": " needed"
           },
           {
-            "text": " \u2014",
             "confidence": 0.999935750323403,
-            "start_index": 872
+            "start_index": 872,
+            "text": " \u2014"
           },
           {
-            "text": " 4\u20135\u00d7/week",
             "confidence": 0.9504880178228968,
-            "start_index": 874
+            "start_index": 874,
+            "text": " 4\u20135\u00d7/week"
           },
           {
-            "text": " lately",
             "confidence": 0.9999308633958958,
-            "start_index": 884
+            "start_index": 884,
+            "text": " lately"
           },
           {
-            "text": "Fexofenadine",
             "confidence": 0.9997685830731394,
-            "start_index": 893
+            "start_index": 893,
+            "text": "Fexofenadine"
           },
           {
-            "text": " (Allegra)",
             "confidence": 0.9994481324098319,
-            "start_index": 905
+            "start_index": 905,
+            "text": " (Allegra)"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999930859092101,
-            "start_index": 915
+            "start_index": 915,
+            "text": " \u2014"
           },
           {
-            "text": " 180",
             "confidence": 0.9999816719517183,
-            "start_index": 917
+            "start_index": 917,
+            "text": " 180"
           },
           {
-            "text": " mg",
             "confidence": 0.9999924898711537,
-            "start_index": 921
+            "start_index": 921,
+            "text": " mg"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999378958168175,
-            "start_index": 924
+            "start_index": 924,
+            "text": " \u2014"
           },
           {
-            "text": " once",
             "confidence": 0.9999954700677164,
-            "start_index": 926
+            "start_index": 926,
+            "text": " once"
           },
           {
-            "text": " daily",
             "confidence": 0.999995112442896,
-            "start_index": 931
+            "start_index": 931,
+            "text": " daily"
           },
           {
-            "text": "EpiPen",
             "confidence": 0.9999401226941976,
-            "start_index": 939
+            "start_index": 939,
+            "text": "EpiPen"
           },
           {
-            "text": " (epinephrine)",
             "confidence": 0.9999679943755374,
-            "start_index": 945
+            "start_index": 945,
+            "text": " (epinephrine)"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999957084838798,
-            "start_index": 959
+            "start_index": 959,
+            "text": " \u2014"
           },
           {
-            "text": " 0.3",
             "confidence": 0.9999909700394051,
-            "start_index": 961
+            "start_index": 961,
+            "text": " 0.3"
           },
           {
-            "text": " mg",
             "confidence": 0.9999952316511552,
-            "start_index": 965
+            "start_index": 965,
+            "text": " mg"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999915362117302,
-            "start_index": 968
+            "start_index": 968,
+            "text": " \u2014"
           },
           {
-            "text": " as",
             "confidence": 0.9999965429424904,
-            "start_index": 970
+            "start_index": 970,
+            "text": " as"
           },
           {
-            "text": " needed",
             "confidence": 0.9999990463265931,
-            "start_index": 973
+            "start_index": 973,
+            "text": " needed"
           },
           {
-            "text": " for",
             "confidence": 0.9999922514562126,
-            "start_index": 980
+            "start_index": 980,
+            "text": " for"
           },
           {
-            "text": " severe",
             "confidence": 0.9999941587791524,
-            "start_index": 984
+            "start_index": 984,
+            "text": " severe"
           },
           {
-            "text": " allergic",
             "confidence": 0.9999996423722521,
-            "start_index": 991
+            "start_index": 991,
+            "text": " allergic"
           },
           {
-            "text": " reaction",
             "confidence": 0.9999563713049341,
-            "start_index": 1000
+            "start_index": 1000,
+            "text": " reaction"
           },
           {
-            "text": "####",
             "confidence": 0.9999713905890374,
-            "start_index": 1011
+            "start_index": 1011,
+            "text": "####"
           },
           {
-            "text": " ALLERGIES",
             "confidence": 0.9998766563345596,
-            "start_index": 1015
+            "start_index": 1015,
+            "text": " ALLERGIES"
           },
           {
-            "text": "Aspirin",
             "confidence": 0.9999952146223451,
-            "start_index": 1027
+            "start_index": 1027,
+            "text": "Aspirin"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999574440950153,
-            "start_index": 1034
+            "start_index": 1034,
+            "text": " \u2014"
           },
           {
-            "text": " hives",
             "confidence": 0.9999798143496023,
-            "start_index": 1036
+            "start_index": 1036,
+            "text": " hives"
           },
           {
-            "text": " +",
             "confidence": 0.9998180005388472,
-            "start_index": 1042
+            "start_index": 1042,
+            "text": " +"
           },
           {
-            "text": " wheezing",
             "confidence": 0.999988370644085,
-            "start_index": 1044
+            "start_index": 1044,
+            "text": " wheezing"
           },
           {
-            "text": " /",
             "confidence": 0.9999297906597954,
-            "start_index": 1053
+            "start_index": 1053,
+            "text": " /"
           },
           {
-            "text": " trouble",
             "confidence": 0.9999699601613475,
-            "start_index": 1055
+            "start_index": 1055,
+            "text": " trouble"
           },
           {
-            "text": " breathing",
             "confidence": 0.9999884368330701,
-            "start_index": 1063
+            "start_index": 1063,
+            "text": " breathing"
           },
           {
-            "text": "Peanuts",
             "confidence": 0.9999512478195982,
-            "start_index": 1075
+            "start_index": 1075,
+            "text": "Peanuts"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999933243243502,
-            "start_index": 1082
+            "start_index": 1082,
+            "text": " \u2014"
           },
           {
-            "text": " throat",
             "confidence": 0.9999867679437158,
-            "start_index": 1084
+            "start_index": 1084,
+            "text": " throat"
           },
           {
-            "text": " swelling,",
             "confidence": 0.9999588030515177,
-            "start_index": 1091
+            "start_index": 1091,
+            "text": " swelling,"
           },
           {
-            "text": " used",
             "confidence": 0.9999765163221908,
-            "start_index": 1101
+            "start_index": 1101,
+            "text": " used"
           },
           {
-            "text": " EpiPen",
             "confidence": 0.9999807227729678,
-            "start_index": 1106
+            "start_index": 1106,
+            "text": " EpiPen"
           },
           {
-            "text": " before",
             "confidence": 0.9999971389852362,
-            "start_index": 1113
+            "start_index": 1113,
+            "text": " before"
           },
           {
-            "text": "Fish",
             "confidence": 0.9999460011086556,
-            "start_index": 1122
+            "start_index": 1122,
+            "text": "Fish"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999754434898208,
-            "start_index": 1126
+            "start_index": 1126,
+            "text": " \u2014"
           },
           {
-            "text": " hives,",
             "confidence": 0.9999875853820042,
-            "start_index": 1128
+            "start_index": 1128,
+            "text": " hives,"
           },
           {
-            "text": " trouble",
             "confidence": 0.9998485079505216,
-            "start_index": 1135
+            "start_index": 1135,
+            "text": " trouble"
           },
           {
-            "text": " breathing",
             "confidence": 0.9999994039539004,
-            "start_index": 1143
+            "start_index": 1143,
+            "text": " breathing"
           },
           {
-            "text": "Environmental",
             "confidence": 0.9999970656277749,
-            "start_index": 1155
+            "start_index": 1155,
+            "text": "Environmental"
           },
           {
-            "text": " (pollen,",
             "confidence": 0.9993195080118372,
-            "start_index": 1168
+            "start_index": 1168,
+            "text": " (pollen,"
           },
           {
-            "text": " dust,",
             "confidence": 0.9999830129800606,
-            "start_index": 1177
+            "start_index": 1177,
+            "text": " dust,"
           },
           {
-            "text": " mold,",
             "confidence": 0.9999691258101059,
-            "start_index": 1183
+            "start_index": 1183,
+            "text": " mold,"
           },
           {
-            "text": " cats)",
             "confidence": 0.9999042651485162,
-            "start_index": 1189
+            "start_index": 1189,
+            "text": " cats)"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999772315450165,
-            "start_index": 1195
+            "start_index": 1195,
+            "text": " \u2014"
           },
           {
-            "text": " sneezing,",
             "confidence": 0.9999964237419675,
-            "start_index": 1197
+            "start_index": 1197,
+            "text": " sneezing,"
           },
           {
-            "text": " congestion,",
             "confidence": 0.9999949137629123,
-            "start_index": 1207
+            "start_index": 1207,
+            "text": " congestion,"
           },
           {
-            "text": " itchy",
             "confidence": 0.9999664437573762,
-            "start_index": 1219
+            "start_index": 1219,
+            "text": " itchy"
           },
           {
-            "text": " watery",
             "confidence": 0.9999699942928957,
-            "start_index": 1225
+            "start_index": 1225,
+            "text": " watery"
           },
           {
-            "text": " eyes",
             "confidence": 0.999995112442896,
-            "start_index": 1232
+            "start_index": 1232,
+            "text": " eyes"
           },
           {
-            "text": "####",
             "confidence": 0.9999740130508765,
-            "start_index": 1239
+            "start_index": 1239,
+            "text": "####"
           },
           {
-            "text": " FAMILY",
             "confidence": 0.9999495948888171,
-            "start_index": 1243
+            "start_index": 1243,
+            "text": " FAMILY"
           },
           {
-            "text": " HISTORY",
             "confidence": 0.9999995231630692,
-            "start_index": 1250
+            "start_index": 1250,
+            "text": " HISTORY"
           },
           {
-            "text": "Asthma",
             "confidence": 0.9998459544413564,
-            "start_index": 1260
+            "start_index": 1260,
+            "text": "Asthma"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999860527077029,
-            "start_index": 1266
+            "start_index": 1266,
+            "text": " \u2014"
           },
           {
-            "text": " Mother,",
             "confidence": 0.9999868722506967,
-            "start_index": 1268
+            "start_index": 1268,
+            "text": " Mother,"
           },
           {
-            "text": " Brother",
             "confidence": 0.9999921322487634,
-            "start_index": 1276
+            "start_index": 1276,
+            "text": " Brother"
           },
           {
-            "text": "Allergies/Eczema",
             "confidence": 0.9999255722690179,
-            "start_index": 1286
+            "start_index": 1286,
+            "text": "Allergies/Eczema"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999977350285647,
-            "start_index": 1302
+            "start_index": 1302,
+            "text": " \u2014"
           },
           {
-            "text": " Mother",
             "confidence": 0.9999966621509202,
-            "start_index": 1304
+            "start_index": 1304,
+            "text": " Mother"
           },
           {
-            "text": "High",
             "confidence": 0.9999572056975242,
-            "start_index": 1313
+            "start_index": 1313,
+            "text": "High"
           },
           {
-            "text": " Blood",
             "confidence": 0.9999948740268748,
-            "start_index": 1317
+            "start_index": 1317,
+            "text": " Blood"
           },
           {
-            "text": " Pressure",
             "confidence": 0.9999926090786457,
-            "start_index": 1323
+            "start_index": 1323,
+            "text": " Pressure"
           },
           {
-            "text": " \u2014",
             "confidence": 0.999998927117538,
-            "start_index": 1332
+            "start_index": 1332,
+            "text": " \u2014"
           },
           {
-            "text": " Father",
             "confidence": 0.9999977350285647,
-            "start_index": 1334
+            "start_index": 1334,
+            "text": " Father"
           },
           {
-            "text": "Kidney",
             "confidence": 0.9999960462564276,
-            "start_index": 1343
+            "start_index": 1343,
+            "text": "Kidney"
           },
           {
-            "text": " Disease",
             "confidence": 0.9999960661089133,
-            "start_index": 1349
+            "start_index": 1349,
+            "text": " Disease"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999945164027223,
-            "start_index": 1357
+            "start_index": 1357,
+            "text": " \u2014"
           },
           {
-            "text": " Father",
             "confidence": 0.9999955892755635,
-            "start_index": 1359
+            "start_index": 1359,
+            "text": " Father"
           },
           {
-            "text": " (on",
             "confidence": 0.9999629875503475,
-            "start_index": 1366
+            "start_index": 1366,
+            "text": " (on"
           },
           {
-            "text": " dialysis)",
             "confidence": 0.9999992966661894,
-            "start_index": 1370
+            "start_index": 1370,
+            "text": " dialysis)"
           },
           {
-            "text": "Type",
             "confidence": 0.9999809268774651,
-            "start_index": 1382
+            "start_index": 1382,
+            "text": "Type"
           },
           {
-            "text": " 2",
             "confidence": 0.9999967813648212,
-            "start_index": 1386
+            "start_index": 1386,
+            "text": " 2"
           },
           {
-            "text": " Diabetes",
             "confidence": 0.9999774699527387,
-            "start_index": 1388
+            "start_index": 1388,
+            "text": " Diabetes"
           },
           {
-            "text": " \u2014",
             "confidence": 0.9999986886995842,
-            "start_index": 1397
+            "start_index": 1397,
+            "text": " \u2014"
           },
           {
-            "text": " Father",
             "confidence": 0.999998927117538,
-            "start_index": 1399
+            "start_index": 1399,
+            "text": " Father"
           },
           {
-            "text": "####",
             "confidence": 0.9996291582711716,
-            "start_index": 1408
+            "start_index": 1408,
+            "text": "####"
           },
           {
-            "text": " SOCIAL",
             "confidence": 0.9999986886995842,
-            "start_index": 1412
+            "start_index": 1412,
+            "text": " SOCIAL"
           },
           {
-            "text": " HISTORY",
             "confidence": 0.9999999552965201,
-            "start_index": 1419
+            "start_index": 1419,
+            "text": " HISTORY"
           },
           {
-            "text": "**Tobacco:**",
             "confidence": 0.9999674591793528,
-            "start_index": 1429
+            "start_index": 1429,
+            "text": "**Tobacco:**"
           },
           {
-            "text": " Never",
             "confidence": 0.9999847414437658,
-            "start_index": 1441
+            "start_index": 1441,
+            "text": " Never"
           },
           {
-            "text": "**Alcohol:**",
             "confidence": 0.9999927383129009,
-            "start_index": 1449
+            "start_index": 1449,
+            "text": "**Alcohol:**"
           },
           {
-            "text": " Occasional",
             "confidence": 0.9999272239992291,
-            "start_index": 1461
+            "start_index": 1461,
+            "text": " Occasional"
           },
           {
-            "text": " (1\u20132",
             "confidence": 0.9997879073884767,
-            "start_index": 1472
+            "start_index": 1472,
+            "text": " (1\u20132"
           },
           {
-            "text": " drinks/week)",
             "confidence": 0.9999948190084658,
-            "start_index": 1477
+            "start_index": 1477,
+            "text": " drinks/week)"
           },
           {
-            "text": "**Exercise:**",
             "confidence": 0.9999875474129564,
-            "start_index": 1492
+            "start_index": 1492,
+            "text": "**Exercise:**"
           },
           {
-            "text": " 2\u20133\u00d7/week",
             "confidence": 0.999686849615388,
-            "start_index": 1505
+            "start_index": 1505,
+            "text": " 2\u20133\u00d7/week"
           },
           {
-            "text": "*Sergio",
             "confidence": 0.9958662314258001,
-            "start_index": 1517
+            "start_index": 1517,
+            "text": "*Sergio"
           },
           {
-            "text": " Angulo*",
             "confidence": 0.99935787369389,
-            "start_index": 1524
+            "start_index": 1524,
+            "text": " Angulo*"
           },
           {
-            "text": "PATIENT",
             "confidence": 0.9988783447472075,
-            "start_index": 1534
+            "start_index": 1534,
+            "text": "PATIENT"
           },
           {
-            "text": " SIGNATURE",
             "confidence": 0.9998660949963134,
-            "start_index": 1541
+            "start_index": 1541,
+            "text": " SIGNATURE"
           },
           {
-            "text": "Date:",
             "confidence": 0.9999273832057152,
-            "start_index": 1553
+            "start_index": 1553,
+            "text": "Date:"
           },
           {
-            "text": " 2026-07-14",
             "confidence": 0.9999904850568548,
-            "start_index": 1558
+            "start_index": 1558,
+            "text": " 2026-07-14"
           },
           {
-            "text": "Riverbend",
             "confidence": 0.9701899988138568,
-            "start_index": 1571
+            "start_index": 1571,
+            "text": "Riverbend"
           },
           {
-            "text": " Family",
             "confidence": 0.9999871255623688,
-            "start_index": 1580
+            "start_index": 1580,
+            "text": " Family"
           },
           {
-            "text": " Medicine",
             "confidence": 0.9999964237340748,
-            "start_index": 1587
+            "start_index": 1587,
+            "text": " Medicine"
           },
           {
-            "text": " \u00b7",
             "confidence": 0.9014839138242055,
-            "start_index": 1596
+            "start_index": 1596,
+            "text": " \u00b7"
           },
           {
-            "text": " Patient:",
             "confidence": 0.9998388268251847,
-            "start_index": 1598
+            "start_index": 1598,
+            "text": " Patient:"
           },
           {
-            "text": " Angulo,",
             "confidence": 0.9994875278975334,
-            "start_index": 1607
+            "start_index": 1607,
+            "text": " Angulo,"
           },
           {
-            "text": " Sergio",
             "confidence": 0.9998967754092747,
-            "start_index": 1615
+            "start_index": 1615,
+            "text": " Sergio"
           },
           {
-            "text": " \u00b7",
             "confidence": 0.9952463464584795,
-            "start_index": 1622
+            "start_index": 1622,
+            "text": " \u00b7"
           },
           {
-            "text": " DOB",
             "confidence": 0.9954622632775445,
-            "start_index": 1624
+            "start_index": 1624,
+            "text": " DOB"
           },
           {
-            "text": " 1979-03-14",
             "confidence": 0.9987671754062872,
-            "start_index": 1628
+            "start_index": 1628,
+            "text": " 1979-03-14"
           },
           {
-            "text": " \u00b7",
             "confidence": 0.9946226922185584,
-            "start_index": 1639
+            "start_index": 1639,
+            "text": " \u00b7"
           },
           {
-            "text": " MRN",
             "confidence": 0.9989837634329698,
-            "start_index": 1641
+            "start_index": 1641,
+            "text": " MRN"
           },
           {
-            "text": " OE-000023",
             "confidence": 0.9951587997737331,
-            "start_index": 1645
+            "start_index": 1645,
+            "text": " OE-000023"
           },
           {
-            "text": " \u00b7",
             "confidence": 0.9952574460926666,
-            "start_index": 1655
+            "start_index": 1655,
+            "text": " \u00b7"
           },
           {
-            "text": " Page",
             "confidence": 0.9998822350907428,
-            "start_index": 1657
+            "start_index": 1657,
+            "text": " Page"
           },
           {
-            "text": " 1",
             "confidence": 0.9997012322657313,
-            "start_index": 1662
+            "start_index": 1662,
+            "text": " 1"
           },
           {
-            "text": " of",
             "confidence": 0.9999446899472569,
-            "start_index": 1664
+            "start_index": 1664,
+            "text": " of"
           },
           {
-            "text": " 1",
             "confidence": 0.999896477715142,
-            "start_index": 1667
+            "start_index": 1667,
+            "text": " 1"
           }
         ]
       },
-      "blocks": [
-        {
-          "top_left_x": 188,
-          "top_left_y": 39,
-          "bottom_right_x": 598,
-          "bottom_right_y": 50,
-          "content": "SYNTHETIC DEMO DATA \u2014 FICTIONAL PATIENT & CLINIC \u2014 NOT A REAL MEDICAL RECORD",
-          "type": "header"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 68,
-          "bottom_right_x": 253,
-          "bottom_right_y": 86,
-          "content": "## Riverbend Family Medicine",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 89,
-          "bottom_right_x": 298,
-          "bottom_right_y": 101,
-          "content": "1809 Wells Branch Pkwy, Austin, TX 78728 \u00b7 (512) 555-0170",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 109,
-          "bottom_right_x": 242,
-          "bottom_right_y": 124,
-          "content": "### Patient Intake & Health History",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 125,
-          "bottom_right_x": 189,
-          "bottom_right_y": 137,
-          "content": "Form INT-05 \u00b7 Date: 2026-07-14",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 157,
-          "bottom_right_x": 177,
-          "bottom_right_y": 169,
-          "content": "#### PATIENT INFORMATION",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 177,
-          "bottom_right_x": 186,
-          "bottom_right_y": 190,
-          "content": "**Full Name:** Angulo, Sergio",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 196,
-          "bottom_right_x": 185,
-          "bottom_right_y": 210,
-          "content": "**Date of Birth:** 1979-03-14",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 217,
-          "bottom_right_x": 111,
-          "bottom_right_y": 230,
-          "content": "**Sex:** Male",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 236,
-          "bottom_right_x": 146,
-          "bottom_right_y": 249,
-          "content": "**MRN:** OE-000023",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 256,
-          "bottom_right_x": 170,
-          "bottom_right_y": 269,
-          "content": "**Phone:** (512) 555-0184",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 276,
-          "bottom_right_x": 296,
-          "bottom_right_y": 291,
-          "content": "**Address:** 2117 Cypress Bend Dr, Austin, TX 78745",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 296,
-          "bottom_right_x": 229,
-          "bottom_right_y": 310,
-          "content": "**Email:** sergio.angulo@example.com",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 316,
-          "bottom_right_x": 200,
-          "bottom_right_y": 330,
-          "content": "**Preferred Language:** English",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 337,
-          "bottom_right_x": 318,
-          "bottom_right_y": 351,
-          "content": "**Emergency Contact:** Marisol Angulo \u2014 (512) 555-0199",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 361,
-          "bottom_right_x": 203,
-          "bottom_right_y": 375,
-          "content": "#### REASON FOR TODAY'S VISIT",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 383,
-          "bottom_right_x": 714,
-          "bottom_right_y": 410,
-          "content": "*'Here for my 6-month check-up. My lower back has been sore for about two weeks after helping a friend move; my rescue inhaler use is also up lately.'*",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 421,
-          "bottom_right_x": 184,
-          "bottom_right_y": 433,
-          "content": "#### CURRENT MEDICATIONS",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 441,
-          "bottom_right_x": 310,
-          "bottom_right_y": 455,
-          "content": "Budesonide inhaler \u2014 1 puff \u2014 twice daily (controller)",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 461,
-          "bottom_right_x": 338,
-          "bottom_right_y": 475,
-          "content": "Albuterol (Ventolin) inhaler \u2014 as needed \u2014 4\u20135\u00d7/week lately",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 480,
-          "bottom_right_x": 279,
-          "bottom_right_y": 494,
-          "content": "Fexofenadine (Allegra) \u2014 180 mg \u2014 once daily",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 499,
-          "bottom_right_x": 392,
-          "bottom_right_y": 512,
-          "content": "EpiPen (epinephrine) \u2014 0.3 mg \u2014 as needed for severe allergic reaction",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 525,
-          "bottom_right_x": 120,
-          "bottom_right_y": 538,
-          "content": "#### ALLERGIES",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 545,
-          "bottom_right_x": 276,
-          "bottom_right_y": 558,
-          "content": "Aspirin \u2014 hives + wheezing / trouble breathing",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 564,
-          "bottom_right_x": 279,
-          "bottom_right_y": 578,
-          "content": "Peanuts \u2014 throat swelling, used EpiPen before",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 583,
-          "bottom_right_x": 206,
-          "bottom_right_y": 596,
-          "content": "Fish \u2014 hives, trouble breathing",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 602,
-          "bottom_right_x": 441,
-          "bottom_right_y": 615,
-          "content": "Environmental (pollen, dust, mold, cats) \u2014 sneezing, congestion, itchy watery eyes",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 627,
-          "bottom_right_x": 146,
-          "bottom_right_y": 640,
-          "content": "#### FAMILY HISTORY",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 648,
-          "bottom_right_x": 186,
-          "bottom_right_y": 660,
-          "content": "Asthma \u2014 Mother, Brother",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 667,
-          "bottom_right_x": 192,
-          "bottom_right_y": 680,
-          "content": "Allergies/Eczema \u2014 Mother",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 686,
-          "bottom_right_x": 203,
-          "bottom_right_y": 699,
-          "content": "High Blood Pressure \u2014 Father",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 705,
-          "bottom_right_x": 236,
-          "bottom_right_y": 718,
-          "content": "Kidney Disease \u2014 Father (on dialysis)",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 724,
-          "bottom_right_x": 183,
-          "bottom_right_y": 737,
-          "content": "Type 2 Diabetes \u2014 Father",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 750,
-          "bottom_right_x": 147,
-          "bottom_right_y": 762,
-          "content": "#### SOCIAL HISTORY",
-          "type": "title"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 770,
-          "bottom_right_x": 139,
-          "bottom_right_y": 783,
-          "content": "**Tobacco:** Never",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 790,
-          "bottom_right_x": 241,
-          "bottom_right_y": 803,
-          "content": "**Alcohol:** Occasional (1\u20132 drinks/week)",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 810,
-          "bottom_right_x": 162,
-          "bottom_right_y": 823,
-          "content": "**Exercise:** 2\u20133\u00d7/week",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 841,
-          "bottom_right_x": 150,
-          "bottom_right_y": 860,
-          "content": "*Sergio Angulo*",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 864,
-          "bottom_right_x": 146,
-          "bottom_right_y": 876,
-          "content": "PATIENT SIGNATURE",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 886,
-          "bottom_right_x": 145,
-          "bottom_right_y": 899,
-          "content": "Date: 2026-07-14",
-          "type": "text"
-        },
-        {
-          "top_left_x": 61,
-          "top_left_y": 984,
-          "bottom_right_x": 422,
-          "bottom_right_y": 995,
-          "content": "Riverbend Family Medicine \u00b7 Patient: Angulo, Sergio \u00b7 DOB 1979-03-14 \u00b7 MRN OE-000023 \u00b7 Page 1 of 1",
-          "type": "footer"
-        }
-      ]
+      "dimensions": {
+        "dpi": 93,
+        "height": 1023,
+        "width": 791
+      },
+      "footer": null,
+      "header": null,
+      "hyperlinks": [],
+      "images": [],
+      "index": 0,
+      "markdown": "SYNTHETIC DEMO DATA \u2014 FICTIONAL PATIENT & CLINIC \u2014 NOT A REAL MEDICAL RECORD\n\n## Riverbend Family Medicine\n\n1809 Wells Branch Pkwy, Austin, TX 78728 \u00b7 (512) 555-0170\n\n### Patient Intake & Health History\n\nForm INT-05 \u00b7 Date: 2026-07-14\n\n#### PATIENT INFORMATION\n\n**Full Name:** Angulo, Sergio\n\n**Date of Birth:** 1979-03-14\n\n**Sex:** Male\n\n**MRN:** OE-000023\n\n**Phone:** (512) 555-0184\n\n**Address:** 2117 Cypress Bend Dr, Austin, TX 78745\n\n**Email:** sergio.angulo@example.com\n\n**Preferred Language:** English\n\n**Emergency Contact:** Marisol Angulo \u2014 (512) 555-0199\n\n#### REASON FOR TODAY'S VISIT\n\n*'Here for my 6-month check-up. My lower back has been sore for about two weeks after helping a friend move; my rescue inhaler use is also up lately.'*\n\n#### CURRENT MEDICATIONS\n\nBudesonide inhaler \u2014 1 puff \u2014 twice daily (controller)\n\nAlbuterol (Ventolin) inhaler \u2014 as needed \u2014 4\u20135\u00d7/week lately\n\nFexofenadine (Allegra) \u2014 180 mg \u2014 once daily\n\nEpiPen (epinephrine) \u2014 0.3 mg \u2014 as needed for severe allergic reaction\n\n#### ALLERGIES\n\nAspirin \u2014 hives + wheezing / trouble breathing\n\nPeanuts \u2014 throat swelling, used EpiPen before\n\nFish \u2014 hives, trouble breathing\n\nEnvironmental (pollen, dust, mold, cats) \u2014 sneezing, congestion, itchy watery eyes\n\n#### FAMILY HISTORY\n\nAsthma \u2014 Mother, Brother\n\nAllergies/Eczema \u2014 Mother\n\nHigh Blood Pressure \u2014 Father\n\nKidney Disease \u2014 Father (on dialysis)\n\nType 2 Diabetes \u2014 Father\n\n#### SOCIAL HISTORY\n\n**Tobacco:** Never\n\n**Alcohol:** Occasional (1\u20132 drinks/week)\n\n**Exercise:** 2\u20133\u00d7/week\n\n*Sergio Angulo*\n\nPATIENT SIGNATURE\n\nDate: 2026-07-14\n\nRiverbend Family Medicine \u00b7 Patient: Angulo, Sergio \u00b7 DOB 1979-03-14 \u00b7 MRN OE-000023 \u00b7 Page 1 of 1",
+      "tables": []
     }
   ],
-  "model": "mistral-ocr-latest",
   "usage_info": {
-    "pages_processed": 1,
-    "doc_size_bytes": 93225
-  },
-  "document_annotation": "{\"address\": \"2117 Cypress Bend Dr, Austin, TX 78745\", \"allergies\": [{\"substance\": \"Aspirin\", \"reaction\": \"hives + wheezing / trouble breathing\"}, {\"substance\": \"Peanuts\", \"reaction\": \"throat swelling, used EpiPen before\"}, {\"substance\": \"Fish\", \"reaction\": \"hives, trouble breathing\"}, {\"substance\": \"Environmental (pollen, dust, mold, cats)\", \"reaction\": \"sneezing, congestion, itchy watery eyes\"}], \"family_history\": [{\"condition\": \"Asthma\", \"relation\": \"Mother, Brother\"}, {\"condition\": \"Allergies/Eczema\", \"relation\": \"Mother\"}, {\"condition\": \"High Blood Pressure\", \"relation\": \"Father\"}, {\"condition\": \"Kidney Disease\", \"relation\": \"Father (on dialysis)\"}, {\"condition\": \"Type 2 Diabetes\", \"relation\": \"Father\"}]}"
+    "doc_size_bytes": 93225,
+    "pages_processed": 1
+  }
 }

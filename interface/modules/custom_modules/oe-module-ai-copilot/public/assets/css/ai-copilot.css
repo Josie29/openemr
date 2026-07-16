@@ -517,6 +517,114 @@ body.ai-copilot-resizing {
     margin-top: var(--copilot-space-2);
 }
 
+/*
+ * ---- Guideline evidence source cards ----
+ * The evidence panel shows SOURCES, not claim sentences: `evidence[]` arrives deduped by chunk and
+ * ranked by relevance, so each card is one distinct retrieved guideline source. Leads with the
+ * verbatim quote (the trust object), not a paraphrase.
+ */
+.ai-copilot__evidence-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-3);
+}
+
+.ai-copilot__evidence[open] .ai-copilot__evidence-body {
+    margin-top: var(--copilot-space-2);
+}
+
+.ai-copilot__sources {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+}
+
+.ai-copilot__source {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+    padding: var(--copilot-space-2);
+    border: 1px solid var(--copilot-border);
+    border-radius: var(--copilot-radius);
+    background: var(--copilot-surface-alt);
+}
+
+.ai-copilot__source-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--copilot-space-1) var(--copilot-space-2);
+}
+
+/* The [n] badge tying a card to its rank in the list. */
+.ai-copilot__source-num {
+    flex: none;
+    min-width: 1.4em;
+    padding: 0 0.35em;
+    border-radius: var(--copilot-radius);
+    background: var(--copilot-accent);
+    color: #fff;
+    font-size: var(--copilot-font-sm);
+    font-weight: 700;
+    line-height: 1.4em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Issuing body ("GINA", "USPSTF") — the name a physician recognizes, not the raw slug. */
+.ai-copilot__source-org {
+    color: var(--copilot-text);
+    font-weight: 700;
+}
+
+.ai-copilot__source-year {
+    color: var(--copilot-muted);
+    font-size: var(--copilot-font-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+/* The verbatim retrieved guideline text — the record's own words, the trust object of the card. */
+.ai-copilot__source-quote {
+    margin: 0;
+    padding-left: var(--copilot-space-2);
+    border-left: 2px solid var(--copilot-accent);
+    color: var(--copilot-text);
+    font-style: normal;
+}
+
+.ai-copilot__source-quote::before {
+    content: '\201C';                 /* U+201C left double quotation mark */
+}
+
+.ai-copilot__source-quote::after {
+    content: '\201D';                 /* U+201D right double quotation mark */
+}
+
+.ai-copilot__source-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--copilot-space-1) var(--copilot-space-2);
+    font-size: var(--copilot-font-sm);
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__source-link {
+    color: var(--copilot-accent);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.ai-copilot__source-link:hover,
+.ai-copilot__source-link:focus {
+    text-decoration: underline;
+}
+
 /* ---- Composer ---- */
 
 .ai-copilot__composer {

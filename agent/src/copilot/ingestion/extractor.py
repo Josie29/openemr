@@ -2,9 +2,9 @@ import asyncio
 import base64
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -12,33 +12,53 @@ from pydantic import BaseModel, Field
 
 from copilot.config import ExtractorMode, Settings
 from copilot.fhir.client import FhirClient, FhirError
-from copilot.ingestion.pdf_geometry import Word, extract_word_boxes, locate_value_box
+from copilot.ingestion.errors import ExtractionError
+from copilot.ingestion.geometry.document import DocumentGeometry
+from copilot.ingestion.geometry.fields import FieldId, spec_for
+from copilot.ingestion.geometry.locators import LocateRequest, LocatorState
 from copilot.ingestion.schemas import (
     AbnormalFlag,
+    Allergy,
     BoundingBox,
     Citation,
+    CitedText,
+    Demographics,
     DocType,
+    FamilyHistoryItem,
+    IntakeForm,
     LabReport,
     LabResult,
+    Medication,
+    paths_by_doc_type,
 )
 
 logger = logging.getLogger("copilot")
 
-_POINTS_PER_INCH = 72.0
+# Re-exported: ExtractionError moved to `errors` so the geometry layer can raise it without
+# importing this module, but it is part of this module's established public surface.
+__all__ = [
+    "DocumentExtractor",
+    "ExtractedDocument",
+    "ExtractionError",
+    "FhirBinaryByteSource",
+    "FixtureOcrBackend",
+    "FixturePdfByteSource",
+    "MistralOcrBackend",
+    "build_extractor",
+    "map_intake_form",
+    "map_lab_report",
+]
 
 
-class ExtractionError(RuntimeError):
-    """Raised when an OCR response cannot be mapped into the strict ingestion schema.
-
-    Carries enough context to log and let the agent degrade (report that the document could not be
-    read, never fabricate facts), without leaking transport detail into user-facing output.
-    """
-
-
-# --- Mistral OCR schema-mode probe (JOS-47 spike, productionized) ------------------------------
+# --- Mistral OCR schema-mode probes (JOS-47 spike, productionized) -----------------------------
 # Deliberately FLAT: the values Mistral extracts into `document_annotation`. Geometry does NOT come
-# from here (Mistral returns whole-table blocks, not per-field boxes) — it is estimated per row from
-# the table block below. Kept minimal so the schema-mode request stays cheap and robust.
+# from here (Mistral returns whole-table blocks, not per-field boxes) — each value is placed by the
+# locator chain bound to its field (`geometry.fields`). Kept minimal so the schema-mode request
+# stays cheap and robust.
+#
+# These probes are NOT the ingestion schemas. The probe is what we ASK the model for; the schema in
+# `ingestion.schemas` is what we ACCEPT, and it is the contract (W2_ARCHITECTURE §3.1 step 3) — raw
+# probe output is mapped and validated into it, never returned directly.
 
 
 class _LabResultProbe(BaseModel):
@@ -52,6 +72,85 @@ class _LabResultProbe(BaseModel):
 
 class _LabReportProbe(BaseModel):
     results: list[_LabResultProbe] = Field(description="Every lab result on the report")
+
+
+# VERBATIM is not a stylistic preference here — it is what makes a fact citable. Every extracted
+# value must be located on the page to earn a bounding box, so a value the model has tidied up
+# (reformatting "03 / 14 / 1979" to "1979-03-14") cannot be found, and the fact is dropped rather
+# than shown with a box that points at something else. Say "exactly as printed" on every field.
+_VERBATIM = "EXACTLY as printed on the form, character for character. Do NOT reformat or normalize."
+
+
+class _IntakeMedicationProbe(BaseModel):
+    name: str = Field(description=f"Medication name {_VERBATIM}")
+    dose: str | None = Field(description=f"Dose/strength {_VERBATIM} Null if not given.")
+    frequency: str | None = Field(description=f"How often it is taken, {_VERBATIM} Null if absent.")
+
+
+class _IntakeAllergyProbe(BaseModel):
+    substance: str = Field(description=f"Allergen/substance {_VERBATIM}")
+    reaction: str | None = Field(description=f"Reaction {_VERBATIM} Null if not given.")
+
+
+class _IntakeFamilyHistoryProbe(BaseModel):
+    condition: str = Field(description=f"Condition {_VERBATIM}")
+    relation: str | None = Field(description=f"Affected relative, {_VERBATIM} Null if not given.")
+
+
+class _IntakeFormProbe(BaseModel):
+    """The intake values to read off the form.
+
+    Two rules make this schema work, both learned the hard way:
+
+    **Every field is REQUIRED (nullable, but never defaulted.)** The SDK's schema generator leaves a
+    defaulted field out of the JSON schema's ``required`` list, and Mistral then simply omits it
+    from ``document_annotation`` — silently, for six of nine fields. A field that may be absent is
+    typed ``str | None`` with NO default, so it stays required and comes back as null.
+
+    **Only what the form ASSERTS.** A patient-intake form preprints every option it offers — both
+    "Male" and "Female", a whole checklist of conditions — and the tick is what makes one of them
+    this patient's answer. The model is told to report only what is marked; the checkbox locator
+    then independently verifies the mark and refuses the fact if it is absent.
+    """
+
+    full_name: str | None = Field(description=f"Patient full name {_VERBATIM}")
+    date_of_birth: str | None = Field(
+        description=f"Date of birth {_VERBATIM} If the form prints '03 / 14 / 1979', return that, "
+        "NOT an ISO date."
+    )
+    sex: str | None = Field(
+        description="The sex option that is TICKED/marked, exactly as printed beside the mark. "
+        "Null if none is marked."
+    )
+    address: str | None = Field(description=f"Mailing address {_VERBATIM}")
+    phone: str | None = Field(description=f"Contact phone {_VERBATIM}")
+    chief_concern: str | None = Field(description=f"Reason for the visit {_VERBATIM}")
+    current_medications: list[_IntakeMedicationProbe] = Field(
+        description="Every current medication listed. Empty if none."
+    )
+    allergies: list[_IntakeAllergyProbe] = Field(
+        description="Every allergy listed. Empty if none."
+    )
+    family_history: list[_IntakeFamilyHistoryProbe] = Field(
+        description="ONLY family-history conditions that are TICKED/marked. Never list an "
+        "unmarked condition, even though it is printed on the form. Empty if none are marked.",
+    )
+
+
+def _probe_for(doc_type: DocType) -> type[BaseModel]:
+    """The schema-mode probe to request for a document type.
+
+    Args:
+        doc_type: Which document schema is being extracted.
+
+    Returns:
+        The flat probe model describing what to read off this kind of document.
+    """
+    match doc_type:
+        case DocType.LAB_PDF:
+            return _LabReportProbe
+        case DocType.INTAKE_FORM:
+            return _IntakeFormProbe
 
 
 # --- OCR backends ------------------------------------------------------------------------------
@@ -91,16 +190,14 @@ class MistralOcrBackend:
 
         Args:
             pdf_bytes: The raw document bytes.
-            doc_type: Which document schema to extract (only ``LAB_PDF`` is wired in this slice).
+            doc_type: Which document schema to extract; selects the probe requested.
 
         Returns:
             The raw ``resp.model_dump()`` dict (``document_annotation`` + ``pages[].blocks``).
 
         Raises:
-            ExtractionError: If the SDK import fails, the doc type is unsupported, or OCR fails.
+            ExtractionError: If the SDK import fails or the OCR call fails.
         """
-        if doc_type is not DocType.LAB_PDF:
-            raise ExtractionError(f"extraction not implemented for {doc_type.value}")
         try:
             # mistralai 2.x is a namespace package: Mistral lives in the `client` subpackage.
             from mistralai.client import Mistral
@@ -121,10 +218,14 @@ class MistralOcrBackend:
                     "type": "document_url",
                     "document_url": f"data:application/pdf;base64,{b64}",
                 },
-                document_annotation_format=response_format_from_pydantic_model(_LabReportProbe),
+                document_annotation_format=response_format_from_pydantic_model(
+                    _probe_for(doc_type)
+                ),
                 include_blocks=True,  # OCR 4+: block bboxes (whole-table for tabular data)
                 confidence_scores_granularity="word",  # opt-in per-word confidence
-                table_format="html",  # lab data is tabular
+                # Both document types carry tables (a lab's results, an intake form's medication
+                # and allergy grids), and the block geometry backs the row-band fallback.
+                table_format="html",
             )
         except Exception as exc:
             # The SDK raises varied transport/validation errors; treat all as an OCR failure.
@@ -134,25 +235,34 @@ class MistralOcrBackend:
 
 
 class FixtureOcrBackend:
-    """Replays a recorded Mistral OCR response (``*.ocr.json``) with no live API call.
+    """Replays a recorded Mistral OCR response (``*.ocr.json``) per document type, no API call.
 
     The extraction counterpart to ``FixtureFhirClient`` / ``FixtureEvidenceRetriever``: it lets the
     graph run the real mapping pipeline over a deterministic response in tests and offline dev.
+
+    Keyed BY DOCUMENT TYPE, and unconfigured types are a loud error rather than a silent fallback.
+    A backend that ignored ``doc_type`` and replayed its one recording for every call would hand a
+    lab report's response to the intake mapper, which finds no intake fields in it and yields no
+    facts — a turn that looks like "this document has nothing in it" rather than a misconfiguration.
     """
 
-    def __init__(self, fixture_path: str) -> None:
-        self._fixture_path = Path(fixture_path)
+    def __init__(self, fixture_paths: Mapping[DocType, str]) -> None:
+        self._fixture_paths = {doc_type: Path(path) for doc_type, path in fixture_paths.items()}
 
     async def process(self, pdf_bytes: bytes, doc_type: DocType) -> dict[str, Any]:
-        """Return the recorded OCR response, ignoring the input bytes.
+        """Return the recorded OCR response for ``doc_type``, ignoring the input bytes.
 
         Raises:
-            ExtractionError: If the fixture file is missing or not valid JSON.
+            ExtractionError: If no recording is configured for the document type, or the fixture
+                file is missing or not valid JSON.
         """
+        path = self._fixture_paths.get(doc_type)
+        if path is None:
+            raise ExtractionError(f"no OCR fixture recorded for {doc_type.value}")
         try:
-            data: dict[str, Any] = json.loads(self._fixture_path.read_text())
+            data: dict[str, Any] = json.loads(path.read_text())
         except (OSError, ValueError) as exc:
-            raise ExtractionError(f"could not read OCR fixture {self._fixture_path}") from exc
+            raise ExtractionError(f"could not read OCR fixture {path}") from exc
         return data
 
 
@@ -223,21 +333,50 @@ class FixturePdfByteSource:
 
 @dataclass(frozen=True)
 class ExtractedDocument:
-    """One document's strict extraction: the cited lab facts, boxed for click-to-source.
+    """One document's strict extraction: its cited facts, boxed for click-to-source.
 
-    ``report`` carries each lab fact with its ``bounding_box`` already in **PDF points** (top-left
-    origin) — the exact space the overlay renders in — so nothing downstream converts coordinates
-    (the JOS-57 seam). Boxes come from the PDF text layer where present, else the coarse OCR
-    row-estimate.
+    ``report`` is the schema the document's TYPE selected — a ``LabReport`` for a lab_pdf, an
+    ``IntakeForm`` for an intake_form. Which one it is was decided by the document's OpenEMR
+    category, never by the model.
+
+    Every fact's ``bounding_box`` is already in **PDF points** (top-left origin) — the exact space
+    the overlay renders in — so nothing downstream converts coordinates (the JOS-57 seam).
     """
 
     document_id: str
     doc_type: DocType
-    report: LabReport
+    report: LabReport | IntakeForm
+
+
+def _map_report(
+    doc_type: DocType, raw: dict[str, Any], pdf_bytes: bytes
+) -> LabReport | IntakeForm:
+    """Map a raw OCR response into the strict schema the document's type names.
+
+    The single place a document type selects its schema. Exhaustive over ``DocType`` with no default
+    branch, so adding a third document type is a type error here rather than a silent fallthrough.
+
+    Args:
+        doc_type: The schema to map into, resolved from the document's category.
+        raw: The raw OCR response.
+        pdf_bytes: The document's bytes, for text-layer geometry.
+
+    Returns:
+        The validated report.
+
+    Raises:
+        ExtractionError: If the response cannot be mapped.
+    """
+    geometry = DocumentGeometry.from_document(pdf_bytes, raw)
+    match doc_type:
+        case DocType.LAB_PDF:
+            return map_lab_report(raw, geometry)
+        case DocType.INTAKE_FORM:
+            return map_intake_form(raw, geometry)
 
 
 class DocumentExtractor:
-    """OCRs a document's bytes and maps the result into a strict ``LabReport``.
+    """OCRs a document's bytes and maps the result into the strict schema its type names.
 
     The byte-source is supplied per call (not held) so the bytes ride the request's own
     patient-scoped FHIR client; the OCR backend is app-lifetime and stateless.
@@ -249,12 +388,12 @@ class DocumentExtractor:
     async def extract(
         self, document_id: str, doc_type: DocType, byte_source: DocumentByteSource
     ) -> ExtractedDocument:
-        """Extract one document end-to-end: bytes -> OCR -> strict ``LabReport``.
+        """Extract one document end-to-end: bytes -> OCR -> the strict schema its type names.
 
         Args:
             document_id: The source document's FHIR ``DocumentReference`` id (used for citations
                 and to fetch the bytes).
-            doc_type: The document schema to extract (``LAB_PDF`` in this slice).
+            doc_type: The document schema to extract, resolved from its OpenEMR category.
             byte_source: Where to fetch this document's bytes (the per-request FHIR client in prod).
 
         Returns:
@@ -265,10 +404,7 @@ class DocumentExtractor:
         """
         pdf_bytes = await byte_source.fetch(document_id)
         raw = await self._ocr.process(pdf_bytes, doc_type)
-        # The PDF text layer gives exact word boxes (points); empty for a scanned/image-only PDF,
-        # in which case the mapper falls back to the coarse OCR row-estimate.
-        words = extract_word_boxes(pdf_bytes)
-        report = map_lab_report(raw, words)
+        report = _map_report(doc_type, raw, pdf_bytes)
         return ExtractedDocument(document_id=document_id, doc_type=doc_type, report=report)
 
 
@@ -287,10 +423,16 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
         A wired :class:`DocumentExtractor`, or None when extraction cannot be configured.
     """
     if settings.extractor_mode is ExtractorMode.FIXTURE:
-        if settings.ocr_fixture_path is None:
-            logger.warning("extractor FIXTURE mode without ocr_fixture_path; extraction disabled")
+        paths = paths_by_doc_type(
+            lab_pdf=settings.ocr_fixture_path_lab_pdf,
+            intake_form=settings.ocr_fixture_path_intake_form,
+        )
+        if not paths:
+            logger.warning("extractor FIXTURE mode without an OCR fixture; extraction disabled")
             return None
-        ocr: OcrBackend = FixtureOcrBackend(settings.ocr_fixture_path)
+        # A partial map is fine and stays enabled: a deployment that only replays labs extracts
+        # labs, and an intake document then fails per-call rather than at startup.
+        ocr: OcrBackend = FixtureOcrBackend(paths)
     else:
         if settings.mistral_api_key is None:
             logger.warning("extractor MISTRAL mode without an API key; extraction disabled")
@@ -299,22 +441,42 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
     return DocumentExtractor(ocr)
 
 
-# --- OCR values + PDF geometry -> strict LabReport ---------------------------------------------
+# --- OCR values + document geometry -> strict LabReport ----------------------------------------
 #
 # Mistral OCR gives the field VALUES (`document_annotation`, schema mode) but only whole-table
-# geometry. Exact per-value boxes come from the PDF's own TEXT LAYER (pdfplumber, points): each
-# Mistral value is matched to its word on the row its test name anchors (see pdf_geometry). When the
-# PDF has no text layer (a scan), we fall back to the coarse OCR row-estimate (native pixels)
-# converted to points here. Every emitted box is in PDF points — the space the overlay renders in.
+# geometry. Where each value SITS is resolved by the locator chain bound to the field (see
+# `geometry.fields`): the PDF text layer pins it exactly where there is one, and the coarse OCR
+# row band or the page stands in where there is not. Every box the chain emits is already in PDF
+# points — the space the overlay renders in — because `DocumentGeometry` normalizes once.
 
 
-def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
-    """Map a Mistral OCR response + PDF word boxes into a strict ``LabReport`` (boxes in points).
+def _annotation_dict(ocr: dict[str, Any]) -> dict[str, Any]:
+    """Parse the OCR response's ``document_annotation`` into a dict.
+
+    Args:
+        ocr: The raw OCR response dict.
+
+    Returns:
+        The parsed annotation, or ``{}`` when absent or not an object.
+
+    Raises:
+        ExtractionError: If the annotation is a string that is not valid JSON.
+    """
+    annotation = ocr.get("document_annotation")
+    if isinstance(annotation, str):
+        try:
+            annotation = json.loads(annotation)
+        except ValueError as exc:  # JSONDecodeError subclasses ValueError
+            raise ExtractionError("OCR document_annotation is not valid JSON") from exc
+    return annotation if isinstance(annotation, dict) else {}
+
+
+def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport:
+    """Map a Mistral OCR response + document geometry into a strict ``LabReport`` (boxes in points).
 
     Args:
         ocr: The raw OCR response dict (``document_annotation`` + ``pages[].blocks``/``tables``).
-        words: The PDF text-layer words (from :func:`extract_word_boxes`); empty for a scanned PDF,
-            in which case each value falls back to the coarse OCR row-estimate.
+        geometry: The document's normalized evidence (:meth:`DocumentGeometry.from_document`).
 
     Returns:
         The strict :class:`LabReport`; every ``LabResult``'s ``bounding_box`` is in PDF points.
@@ -324,39 +486,21 @@ def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
             but not valid JSON. Any mapping failure surfaces as this one type so the caller can
             degrade to "no facts" rather than crashing the turn.
     """
-    annotation = ocr.get("document_annotation")
-    if isinstance(annotation, str):
-        try:
-            annotation = json.loads(annotation)
-        except ValueError as exc:  # JSONDecodeError subclasses ValueError
-            raise ExtractionError("OCR document_annotation is not valid JSON") from exc
-    if not isinstance(annotation, dict):
-        annotation = {}
+    annotation = _annotation_dict(ocr)
     raw_annotation_results = annotation.get("results")
     raw_results = raw_annotation_results if isinstance(raw_annotation_results, list) else []
 
-    pages = ocr.get("pages") or []
-    if not pages or not isinstance(pages[0], dict):
-        raise ExtractionError("OCR response carries no usable page")
-    page = pages[0]
-    page_no = int(page.get("index", 0)) + 1  # `index` is 0-based; BoundingBox.page is 1-based.
-    dims = page.get("dimensions") or {}
-    dpi = float(dims.get("dpi") or _POINTS_PER_INCH)
-
-    # Fallback geometry (native pixels), used only where the text layer has no word for a value.
-    table_box = _find_table_box(page)
-    fallback_box = _page_box(page, page_no)
-    if not words and raw_results:
+    # The raw page is still needed for per-word confidence, which is OCR metadata, not geometry.
+    page: dict[str, Any] = (ocr.get("pages") or [{}])[0]
+    if not geometry.words and raw_results:
         logger.warning(
-            "PDF has no text layer; using the coarse OCR row-estimate for box geometry",
+            "PDF has no text layer; using the coarse OCR row band for box geometry",
             extra={"result_count": len(raw_results)},
         )
-    rows = _parse_table_rows(_table_html(page))
-    name_to_index = {_norm(cells[0]): i for i, cells in enumerate(rows) if cells}
-    total_rows = len(rows) or 1
 
+    spec = spec_for(DocType.LAB_PDF, FieldId.LAB_RESULT_VALUE)
+    state = LocatorState()
     results: list[LabResult] = []
-    cursor = 0  # advances through `words` so repeated test names map to successive rows, in order.
     for ordinal, raw in enumerate(raw_results):
         if not isinstance(raw, dict):
             continue  # skip a malformed (non-object) result entry rather than crashing the turn
@@ -371,52 +515,183 @@ def map_lab_report(ocr: dict[str, Any], words: list[Word]) -> LabReport:
                 extra={"test_name": raw.get("test_name"), "value": raw.get("value")},
             )
             continue
-        box: BoundingBox | None
-        # PRIMARY: the exact box from the PDF text layer, already in points.
-        located = locate_value_box(test_name, value, words, cursor)
-        if located is not None:
-            box, cursor = located
-        else:
-            # FALLBACK: the coarse OCR row-estimate (native pixels), converted to points.
-            estimate = (
-                _estimate_row_box(
-                    test_name,
-                    ordinal,
-                    len(raw_results),
-                    table_box,
-                    name_to_index,
-                    total_rows,
-                    page_no,
-                )
-                or fallback_box
-            )
-            box = _px_to_points(estimate, dpi) if estimate is not None else None
-        if box is None:
+        located = spec.chain.locate(
+            LocateRequest(
+                value=value,
+                anchors=(test_name,),
+                ordinal=ordinal,
+                total=len(raw_results),
+            ),
+            geometry,
+            state,
+        )
+        if located is None or not located.precision.meets(spec.floor):
             # No text-layer word, no table geometry, no page box — drop rather than fabricate.
             logger.warning("dropping lab result with no locatable box", extra={"test": test_name})
             continue
-        results.append(_build_lab_result(raw, box, page))
+        results.append(_build_lab_result(raw, located.box, page))
     return LabReport(results=results)
 
 
-def _px_to_points(box: BoundingBox, dpi: float) -> BoundingBox:
-    """Convert a native-pixel box (OCR render space) to PDF points: ``point = pixel * 72 / dpi``.
+def map_intake_form(ocr: dict[str, Any], geometry: DocumentGeometry) -> IntakeForm:
+    """Map a Mistral OCR response + document geometry into a strict ``IntakeForm``.
 
-    Only the fallback OCR row-estimate needs this — text-layer boxes are already in points. Keeps
-    every emitted box in one coordinate space (points) so nothing downstream converts again.
+    Mirrors :func:`map_lab_report`: schema mode gives the VALUES, the locator chain bound to each
+    field decides where they sit. A value that cannot be placed to the intake precision floor — or
+    that the page refutes, as an unticked option does — is dropped rather than cited with a box
+    that points at something which does not support it.
+
+    Unlike ``LabResult``, ``IntakeForm``'s sub-models do not require a bounding box, so the floor
+    is enforced here: this function is the only owner of "every intake fact carries a usable box".
+
+    Args:
+        ocr: The raw OCR response dict.
+        geometry: The document's normalized evidence — including the tick boxes, which alone
+            assert a checkbox-backed answer (:meth:`DocumentGeometry.from_document`).
+
+    Returns:
+        The strict :class:`IntakeForm`; every emitted citation's box is in PDF points.
+
+    Raises:
+        ExtractionError: If the response has no usable page, or ``document_annotation`` is present
+            but not valid JSON.
     """
-    scale = _POINTS_PER_INCH / dpi if dpi else 1.0
-    return BoundingBox(
-        page=box.page,
-        x=box.x * scale,
-        y=box.y * scale,
-        width=box.width * scale,
-        height=box.height * scale,
+    annotation = _annotation_dict(ocr)
+    state = LocatorState()
+
+    def cited(field: FieldId, value: Any) -> CitedText | None:
+        text = _clean(value)
+        if text is None:
+            return None
+        citation = _locate(field, text, geometry, state)
+        return CitedText(value=text, citation=citation) if citation is not None else None
+
+    demographics = Demographics(
+        full_name=cited(FieldId.DEMOGRAPHICS_FULL_NAME, annotation.get("full_name")),
+        date_of_birth=cited(FieldId.DEMOGRAPHICS_DATE_OF_BIRTH, annotation.get("date_of_birth")),
+        sex=cited(FieldId.DEMOGRAPHICS_SEX, annotation.get("sex")),
+        address=cited(FieldId.DEMOGRAPHICS_ADDRESS, annotation.get("address")),
+        phone=cited(FieldId.DEMOGRAPHICS_PHONE, annotation.get("phone")),
+    )
+    return IntakeForm(
+        demographics=demographics,
+        chief_concern=cited(FieldId.CHIEF_CONCERN, annotation.get("chief_concern")),
+        current_medications=_map_medications(annotation, geometry, state),
+        allergies=_map_allergies(annotation, geometry, state),
+        family_history=_map_family_history(annotation, geometry, state),
     )
 
 
+def _locate(
+    field: FieldId, value: str, geometry: DocumentGeometry, state: LocatorState
+) -> Citation | None:
+    """Place one intake value on the page and build its citation, or None when it cannot be proven.
+
+    The one place a field selects its locator chain. Returns None — so the caller drops the field —
+    when no locator applies, when the page refutes the value, or when the best box misses the
+    document type's precision floor.
+
+    Args:
+        field: The semantic field being placed.
+        value: The verbatim value to box.
+        geometry: The document's normalized geometry.
+        state: Per-document cursors.
+
+    Returns:
+        The fact's :class:`Citation`, or None when it should not be emitted.
+    """
+    spec = spec_for(DocType.INTAKE_FORM, field)
+    located = spec.chain.locate(
+        LocateRequest(value=value, anchors=spec.labels), geometry, state
+    )
+    if located is None:
+        logger.warning(
+            "dropping intake fact the page does not support",
+            extra={"field": field.value},
+        )
+        return None
+    if not located.precision.meets(spec.floor):
+        logger.warning(
+            "dropping intake fact below the precision floor",
+            extra={"field": field.value, "precision": located.precision.value},
+        )
+        return None
+    return Citation(quote_or_value=value, bounding_box=located.box)
+
+
+def _map_medications(
+    annotation: dict[str, Any], geometry: DocumentGeometry, state: LocatorState
+) -> list[Medication]:
+    """Map the medication rows, dropping any whose name cannot be located on the form."""
+    items: list[Medication] = []
+    for raw in annotation.get("current_medications") or []:
+        if not isinstance(raw, dict):
+            continue
+        name = _clean(raw.get("name"))
+        if name is None:
+            continue
+        citation = _locate(FieldId.CURRENT_MEDICATIONS, name, geometry, state)
+        if citation is None:
+            continue
+        items.append(
+            Medication(
+                name=name,
+                dose=_clean(raw.get("dose")),
+                frequency=_clean(raw.get("frequency")),
+                citation=citation,
+            )
+        )
+    return items
+
+
+def _map_allergies(
+    annotation: dict[str, Any], geometry: DocumentGeometry, state: LocatorState
+) -> list[Allergy]:
+    """Map the allergy rows, dropping any whose substance cannot be located on the form."""
+    items: list[Allergy] = []
+    for raw in annotation.get("allergies") or []:
+        if not isinstance(raw, dict):
+            continue
+        substance = _clean(raw.get("substance"))
+        if substance is None:
+            continue
+        citation = _locate(FieldId.ALLERGIES, substance, geometry, state)
+        if citation is None:
+            continue
+        items.append(
+            Allergy(substance=substance, reaction=_clean(raw.get("reaction")), citation=citation)
+        )
+    return items
+
+
+def _map_family_history(
+    annotation: dict[str, Any], geometry: DocumentGeometry, state: LocatorState
+) -> list[FamilyHistoryItem]:
+    """Map the family-history rows.
+
+    The checkbox chain does the real work: a condition the form merely prints, unticked, is refuted
+    and never becomes a fact — so a model that over-reads the checklist is corrected by the page.
+    """
+    items: list[FamilyHistoryItem] = []
+    for raw in annotation.get("family_history") or []:
+        if not isinstance(raw, dict):
+            continue
+        condition = _clean(raw.get("condition"))
+        if condition is None:
+            continue
+        citation = _locate(FieldId.FAMILY_HISTORY, condition, geometry, state)
+        if citation is None:
+            continue
+        items.append(
+            FamilyHistoryItem(
+                condition=condition, relation=_clean(raw.get("relation")), citation=citation
+            )
+        )
+    return items
+
+
 def _build_lab_result(raw: dict[str, Any], box: BoundingBox, page: dict[str, Any]) -> LabResult:
-    """Build one cited ``LabResult`` from a document_annotation row and its estimated box."""
+    """Build one cited ``LabResult`` from a document_annotation row and its located box."""
     value = str(raw.get("value", "")).strip()
     return LabResult(
         test_name=str(raw.get("test_name", "")).strip(),
@@ -428,135 +703,6 @@ def _build_lab_result(raw: dict[str, Any], box: BoundingBox, page: dict[str, Any
         citation=Citation(quote_or_value=value, bounding_box=box),
         confidence=_value_confidence(value, page),
     )
-
-
-def _estimate_row_box(
-    test_name: str,
-    ordinal: int,
-    result_count: int,
-    table_box: tuple[float, float, float, float] | None,
-    name_to_index: dict[str, int],
-    total_rows: int,
-    page_no: int,
-) -> BoundingBox | None:
-    """Estimate the full-width row band for one lab value within the table block.
-
-    The value's visual row index is found by matching its test name against the parsed table rows
-    (falling back to its ordinal position when the name is not matched); the table block's y-range
-    is split evenly by row count to give that row's band.
-
-    Returns:
-        A native-pixel :class:`BoundingBox` spanning the table width at the value's row, or None
-        when the page has no table block to place it on.
-    """
-    if table_box is None:
-        return None
-    x0, y0, x1, y1 = table_box
-    row_index = name_to_index.get(_norm(test_name))
-    if row_index is None:
-        # Name not matched (annotation reworded it): estimate by ordinal across the table height.
-        denom = result_count or 1
-        row_index = min(total_rows - 1, round((ordinal + 0.5) / denom * total_rows))
-    row_height = (y1 - y0) / total_rows
-    band_top = y0 + row_index * row_height
-    return BoundingBox(
-        page=page_no,
-        x=x0,
-        y=band_top,
-        width=max(x1 - x0, 1.0),
-        height=max(row_height, 1.0),
-    )
-
-
-def _find_table_box(page: dict[str, Any]) -> tuple[float, float, float, float] | None:
-    """Return the (x0, y0, x1, y1) box of the page's first ``table`` block, or None.
-
-    Tolerant of a malformed block (missing or non-numeric corner keys): such a block is skipped
-    rather than raising, so a bad OCR payload degrades to "no table box" instead of crashing.
-    """
-    corners = ("top_left_x", "top_left_y", "bottom_right_x", "bottom_right_y")
-    for block in page.get("blocks") or []:
-        if not isinstance(block, dict) or block.get("type") != "table":
-            continue
-        nums = [c for c in (block.get(key) for key in corners) if isinstance(c, (int, float))]
-        if len(nums) != 4:
-            continue
-        x0, y0, x1, y1 = (float(nums[0]), float(nums[1]), float(nums[2]), float(nums[3]))
-        # Require a sane box (positive extent); an inverted/degenerate one would produce a negative
-        # row-band coordinate that fails BoundingBox validation — fall through to the page box.
-        if x1 > x0 and y1 > y0 and x0 >= 0 and y0 >= 0:
-            return (x0, y0, x1, y1)
-    return None
-
-
-def _page_box(page: dict[str, Any], page_no: int) -> BoundingBox | None:
-    """A whole-page native-pixel box — the coarse fallback when no table rows can be located.
-
-    Returns None when the page carries no usable dimensions (so the caller drops the value rather
-    than emit a zero-area box the schema would reject).
-    """
-    dims = page.get("dimensions") or {}
-    width = dims.get("width")
-    height = dims.get("height")
-    if not (
-        isinstance(width, (int, float))
-        and isinstance(height, (int, float))
-        and width > 0
-        and height > 0
-    ):
-        return None
-    return BoundingBox(page=page_no, x=0, y=0, width=float(width), height=float(height))
-
-
-def _table_html(page: dict[str, Any]) -> str:
-    """Return the page's table HTML (from ``tables[0]`` or the table block), or ''."""
-    tables = page.get("tables") or []
-    if tables and isinstance(tables[0], dict):
-        content = tables[0].get("content")
-        if isinstance(content, str):
-            return content
-    for block in page.get("blocks") or []:
-        content = block.get("content")
-        if block.get("type") == "table" and isinstance(content, str):
-            return content
-    return ""
-
-
-class _TableRowParser(HTMLParser):
-    """Extracts table rows as lists of cell texts, in document (visual) order."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.rows: list[list[str]] = []
-        self._row: list[str] | None = None
-        self._cell: list[str] | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "tr":
-            self._row = []
-        elif tag in ("td", "th") and self._row is not None:
-            self._cell = []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ("td", "th") and self._cell is not None and self._row is not None:
-            self._row.append("".join(self._cell).strip())
-            self._cell = None
-        elif tag == "tr" and self._row is not None:
-            self.rows.append(self._row)
-            self._row = None
-
-    def handle_data(self, data: str) -> None:
-        if self._cell is not None:
-            self._cell.append(data)
-
-
-def _parse_table_rows(html: str) -> list[list[str]]:
-    """Parse an HTML table into a list of rows, each a list of cell strings, in visual order."""
-    if not html:
-        return []
-    parser = _TableRowParser()
-    parser.feed(html)
-    return parser.rows
 
 
 def _value_confidence(value: str, page: dict[str, Any]) -> float | None:
@@ -615,5 +761,12 @@ def _clean(raw: Any) -> str | None:
 
 
 def _norm(text: str) -> str:
-    """Lowercase and collapse whitespace, for tolerant name/value matching."""
+    """Lowercase and collapse whitespace, for matching an OCR word against a value.
+
+    Deliberately NOT ``geometry.spans.norm``, despite the near-identical name: that one also strips
+    surrounding punctuation so a label matches whether or not the form prints a trailing colon.
+    Here the text being matched is a lab VALUE, where punctuation is significant — "(H)" is an
+    abnormal flag, not "h" — so stripping it would match the wrong OCR word and report that word's
+    confidence. Keep them separate.
+    """
     return " ".join(str(text).split()).lower()

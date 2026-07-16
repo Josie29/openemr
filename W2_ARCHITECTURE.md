@@ -357,10 +357,28 @@ follows, each carrying source metadata. Raw scale is not the deciding axis; nati
 quality, Railway footprint, and metadata filtering are
 ([`vector-db-week2.md`](context/decisions/vector-db-week2.md)).
 
+**Curation & chunking.** The corpus is built in-repo by the `corpus-curation` workflow
+(`.claude/workflows/`, agent chain `guideline-researcher → corpus-chunker → citation-verifier`): the
+researcher sources one publicly-fetchable authoritative guideline per topic and extracts short
+verbatim quotes with section provenance; the chunker turns **one statement into one self-contained
+chunk** (layout-aware — a criterion is never split mid-thought, unrelated statements never merged),
+writing one JSON object per line to `agent/src/copilot/rag/corpus/<topic>.jsonl`; the verifier
+adversarially checks each chunk against its cited source and prunes any that fail. The corpus is
+**reproducible from the repo alone** (§11) — the Qdrant index is a rebuildable artifact, not the
+source of truth.
+
+Each chunk carries `{chunk_id, guideline, source, source_url, section, date, text, anchor_quote}`.
+`text` is what gets embedded and cited — the verbatim quote plus a short framing clause so it reads
+standalone. `anchor_quote` is a **verbatim source span** (the longest substring the chunk shares with
+its fetched source, backfilled by `scripts/backfill_corpus_anchors.py` as the workflow's final step);
+the sidebar turns it into a URL **text fragment** so a citation's "View source" deep-links to the exact
+passage in the source PDF/page instead of opening at page 1 (JOS-85). It is optional — a source that
+blocks the fetch keeps no anchor and falls back to a plain link.
+
 ### 5.1 The pipeline
 
 ```
-Guideline corpus (curated chunks · payload = {guideline, source, section})
+Guideline corpus (curated chunks · Qdrant payload = full chunk; filterable: guideline, source, section)
    │  FastEmbed inside qdrant-client: dense embed + sparse (bm25 / minicoil)
    ▼
 Qdrant  (dedicated Railway service · private networking)
@@ -406,7 +424,7 @@ Each choice traces to a requirement
 **Implementation status (JOS-53).** The pipeline above is built in `agent/src/copilot/rag/`
 (`retriever.py` hybrid+rerank, `index.py` content-correct indexer, `corpus.py`, `models.py`),
 with the concrete choices: dense `BAAI/bge-small-en-v1.5` (384-dim), sparse `Qdrant/bm25`
-(IDF), `prefetch_k=20`, `rerank_top_n=5`. Retrieved snippets carry the §3.3 `guideline`
+(IDF), `prefetch_k=20`, `rerank_top_n=3` (τ-floor 0.5). Retrieved snippets carry the §3.3 `guideline`
 citation arm; `/ready` now probes Qdrant (`/readyz`) and Cohere (§10). Design contract:
 [`context/specs/hybrid-rag-pipeline.md`](context/specs/hybrid-rag-pipeline.md). The retriever
 began as a standalone capability this increment; **the JOS-56 supervisor/worker graph** (§4) that
@@ -458,7 +476,7 @@ Requirements, "data authority must be explicit").
 |---|---|---|---|---|
 | **Extracted lab observations** | OpenEMR — FHIR `Observation` | Derived from a stored `DocumentReference` via Mistral OCR 4 extraction; provenance tag points back to the source | Same patient-scoped SMART read as all FHIR data ([`ARCHITECTURE.md`](ARCHITECTURE.md) §5) | `LabReport` schema; abnormal-flag + reference-range sanity checks |
 | **Intake facts** | OpenEMR (demographics / meds / allergies / family history records) | Derived from a stored `DocumentReference` via extraction | Patient-scoped | `IntakeForm` schema |
-| **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{guideline, source, section}` metadata |
+| **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{chunk_id, guideline, source, source_url, section, date, text, anchor_quote}` (anchor_quote optional) |
 | **Citation records** | The agent (emitted per claim) | Composed from an extraction or a retrieval result; for `lab_pdf`, the page + pixel bbox are **native output of Mistral OCR 4**, not a reconstructed rectangle | Rides with the answer payload | Must satisfy the full citation shape (§3.3); a `lab_pdf` citation whose field lacks a resolved bbox is refused, not shipped with a fabricated box |
 | **Extraction-result cache (sidecar)** | Derived cache — **rebuildable**, not a system of record | One extraction pass over a stored source document; keyed to `(document id, content hash)` (§3.4) | Same patient scope as the source document it derives from | Holds the validated facts + page/bbox citations; superseded when the source version (hash) changes |
 

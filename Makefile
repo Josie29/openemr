@@ -59,7 +59,7 @@ define kill_agent
 	  done; true
 endef
 
-.PHONY: agent agent-live qdrant index dev stop qdrant-down
+.PHONY: agent agent-live qdrant index corpus-anchors dev stop qdrant-down
 
 ## Agent in FIXTURE mode: seed patients, no OpenEMR dependency. Foreground, auto-reload.
 agent:
@@ -109,6 +109,13 @@ qdrant:
 ## recreate the collection (clears orphan points left by deleted chunks). Qdrant config from agent/.env.
 index: qdrant
 	cd $(AGENT_DIR) && $(PYTHON) -m copilot.rag.index $(if $(FORCE),--force)
+
+## Backfill a verbatim `anchor_quote` onto every corpus chunk so the sidebar's "View source" can
+## deep-link (text fragment) to the exact passage (JOS-85). Fetches each source and matches by
+## longest common substring. Run after curating/editing the corpus, before `make index`. Not a
+## dependency of `index` (it re-fetches every source — too slow to run on every index).
+corpus-anchors:
+	cd $(AGENT_DIR) && $(PYTHON) -m scripts.backfill_corpus_anchors
 
 ## Full local co-pilot stack in one command: bring Qdrant up, index the corpus (if needed), then run
 ## the live agent in the foreground. OpenEMR (:8300) must already be up — see the header note.

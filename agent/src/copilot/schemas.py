@@ -185,7 +185,10 @@ class Evidence(BaseModel):
     quote: str = Field(description="The verbatim guideline text that grounded the answer")
     chunk_id: str = Field(description="The retrieval chunk id — the dedup key")
     relevance_score: float = Field(
-        description="Cohere rerank score in [0, 1]; higher is more relevant to the query"
+        description=(
+            "Cohere rerank score in [0, 1]; higher is more relevant. Orders the cards; not shown in "
+            "the UI (uncalibrated across queries, so a displayed band would imply false precision)."
+        )
     )
     source_url: str | None = Field(default=None, description="Public URL of the source guideline")
     year: str | None = Field(default=None, description="Source publication year, e.g. '2022'")

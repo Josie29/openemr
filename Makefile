@@ -8,7 +8,11 @@
 # Commands:
 #   make agent       # agent in FIXTURE mode (seed patients, no OpenEMR needed) — fast dev loop
 #   make agent-live  # agent in live-FHIR mode for browser testing against a running OpenEMR
+#   make qdrant      # start the local Qdrant vector DB (idempotent) — backs guideline evidence
+#   make index       # (re)index the guideline corpus into Qdrant — idempotent; FORCE=1 rebuilds clean
+#   make dev         # full local stack: Qdrant + corpus index, then agent-live (foreground)
 #   make stop        # stop the agent (from another terminal)
+#   make qdrant-down # remove the Qdrant container (its named volume / indexed data persists)
 #
 # Both agent targets run uvicorn in the foreground: logs (colored) stream to the terminal, and
 # Ctrl-C stops it cleanly. --reload picks up code edits without a manual restart.
@@ -25,10 +29,21 @@
 #   make agent-live OEMR_ORIGIN=http://localhost:8301 FHIR_BASE=http://localhost:8301/apis/default/fhir
 #
 # COPILOT_* config is passed inline, so agent/.env is never mutated (real env vars beat .env).
+#
+# Guideline evidence (the RAG panel) needs a local Qdrant holding the indexed corpus. `make dev`
+# brings it up and indexes before starting the agent; `make agent-live` alone assumes Qdrant is
+# already up (`make qdrant`). Without it, every guideline query fails and the evidence panel is empty.
 
 AGENT_DIR  := agent
 AGENT_PORT := 8000
 UVICORN    := .venv/bin/uvicorn
+PYTHON     := .venv/bin/python
+
+# Local Qdrant vector DB backing the guideline-evidence RAG path (see `make qdrant` / `make index`).
+QDRANT_CONTAINER := qdrant-copilot
+QDRANT_PORT      := 6333
+QDRANT_IMAGE     := qdrant/qdrant
+QDRANT_VOLUME    := qdrant_copilot_storage
 
 # Origin the browser loads OpenEMR from (must equal the agent's CORS origin, same scheme) and the
 # FHIR base the agent reads (a server-side hop — plain http is fine).
@@ -44,7 +59,7 @@ define kill_agent
 	  done; true
 endef
 
-.PHONY: agent agent-live stop
+.PHONY: agent agent-live qdrant index dev stop qdrant-down
 
 ## Agent in FIXTURE mode: seed patients, no OpenEMR dependency. Foreground, auto-reload.
 agent:
@@ -68,3 +83,38 @@ agent-live:
 ## Stop the agent (OpenEMR keeps running — it is slow to boot and rarely needs restarting).
 stop:
 	$(call kill_agent)
+
+## Start the local Qdrant vector DB (idempotent) and block until it answers. Data persists in a
+## named docker volume, so the corpus survives restarts — index once, not every boot.
+qdrant:
+	@if [ -n "$$(docker ps -q -f name=^$(QDRANT_CONTAINER)$$)" ]; then \
+	    echo "-- qdrant already up on http://localhost:$(QDRANT_PORT)"; \
+	elif [ -n "$$(docker ps -aq -f name=^$(QDRANT_CONTAINER)$$)" ]; then \
+	    echo "-- starting existing qdrant container"; \
+	    docker start $(QDRANT_CONTAINER) >/dev/null; \
+	else \
+	    echo "-- creating qdrant container on http://localhost:$(QDRANT_PORT)"; \
+	    docker run -d --name $(QDRANT_CONTAINER) \
+	        -p $(QDRANT_PORT):6333 -p 6334:6334 \
+	        -v $(QDRANT_VOLUME):/qdrant/storage $(QDRANT_IMAGE) >/dev/null; \
+	fi
+	@printf '%s' '-- waiting for qdrant '; \
+	for i in $$(seq 1 30); do \
+	    if curl -sf http://localhost:$(QDRANT_PORT)/collections >/dev/null 2>&1; then echo 'ready'; exit 0; fi; \
+	    printf '.'; sleep 1; \
+	done; echo ' TIMEOUT — is docker running?'; exit 1
+
+## Index the guideline corpus into Qdrant. Idempotent — every run upserts all chunks by stable id
+## (edits land in place, no duplicates), so it is safe to re-run any time. Pass FORCE=1 to drop and
+## recreate the collection (clears orphan points left by deleted chunks). Qdrant config from agent/.env.
+index: qdrant
+	cd $(AGENT_DIR) && $(PYTHON) -m copilot.rag.index $(if $(FORCE),--force)
+
+## Full local co-pilot stack in one command: bring Qdrant up, index the corpus (if needed), then run
+## the live agent in the foreground. OpenEMR (:8300) must already be up — see the header note.
+dev: qdrant index agent-live
+
+## Remove the local Qdrant container. The named volume ($(QDRANT_VOLUME)) persists, so a later
+## `make qdrant` restores the data without re-indexing. Drop that volume manually to wipe the corpus.
+qdrant-down:
+	-@docker rm -f $(QDRANT_CONTAINER) >/dev/null 2>&1; true

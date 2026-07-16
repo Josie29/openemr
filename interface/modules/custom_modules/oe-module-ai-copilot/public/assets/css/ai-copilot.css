@@ -586,36 +586,6 @@ body.ai-copilot-resizing {
     font-variant-numeric: tabular-nums;
 }
 
-/* Coarse relevance band — a confidence cue, pushed to the end of the header row. */
-.ai-copilot__source-band {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--copilot-space-1);
-    font-size: var(--copilot-font-sm);
-    font-weight: 600;
-    padding: 0.1em 0.6em;
-    border-radius: var(--copilot-radius-bubble);
-}
-
-.ai-copilot__source-band::before {
-    content: '';
-    width: 0.5em;
-    height: 0.5em;
-    border-radius: 50%;
-    background: currentColor;
-}
-
-.ai-copilot__source-band--high {
-    color: var(--copilot-accent-strong);
-    background: var(--copilot-accent-light);
-}
-
-.ai-copilot__source-band--medium {
-    color: var(--copilot-muted);
-    background: var(--copilot-surface);
-}
-
 /* The verbatim retrieved guideline text — the record's own words, the trust object of the card. */
 .ai-copilot__source-quote {
     margin: 0;

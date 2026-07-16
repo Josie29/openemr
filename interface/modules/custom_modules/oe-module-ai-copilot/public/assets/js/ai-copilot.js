@@ -707,23 +707,18 @@
         return head ? head.toUpperCase() : 'Guideline';
     }
 
-    // Coarse relevance band for a rerank score. Everything shown already cleared the retrieval
-    // floor, so the band is High vs Medium — a confidence cue without exposing an uncalibrated raw
-    // number the physician might over-read.
-    function relevanceBand(score) {
-        return (typeof score === 'number' && score >= 0.7)
-            ? { key: 'high', label: 'High match' }
-            : { key: 'medium', label: 'Medium match' };
-    }
-
     /**
-     * Render one guideline source as an evidence card: a numbered header (issuing body, year,
-     * relevance band), the verbatim retrieved quote, and a section line with an optional link to the
-     * source. Built from the response's deduped, relevance-ranked `evidence[]` — one card per
-     * distinct source, so the section count reflects sources, not claim sentences.
+     * Render one guideline source as an evidence card: a numbered header (issuing body, year), the
+     * verbatim retrieved quote, and a section line with an optional link to the source. Built from
+     * the response's deduped, relevance-ranked `evidence[]` — one card per distinct source, so the
+     * count reflects sources, not claim sentences.
+     *
+     * `relevance_score` orders the cards server-side but is not shown: the rerank score is
+     * uncalibrated across queries, so a High/Medium badge would flicker on noise and imply a
+     * confidence it can't honestly convey. The [n] rank is the only relevance cue.
      *
      * @param {{source_id: string, section: string, quote: string, relevance_score: number,
-     *   source_url: ?string, year: ?string}} entry one evidence[] item
+     *   source_url: ?string, year: ?string}} entry one evidence[] item (relevance_score unused here)
      * @param {number} index zero-based rank (drives the [n] badge)
      * @returns {HTMLElement} an <li> source card
      */
@@ -751,13 +746,6 @@
             year.textContent = entry.year;
             header.appendChild(year);
         }
-
-        var band = relevanceBand(entry.relevance_score);
-        var rel = document.createElement('span');
-        rel.className = 'ai-copilot__source-band ai-copilot__source-band--' + band.key;
-        rel.textContent = band.label;
-        rel.title = 'Retrieval relevance';
-        header.appendChild(rel);
 
         card.appendChild(header);
 

@@ -401,11 +401,11 @@
     }
 
     /**
-     * Render one grounded answer: the synthesized prose, then a collapsed evidence section holding
-     * the deduped guideline source cards (`evidence[]`) and any record-backed claims.
+     * Render one grounded answer: the synthesized prose, then a collapsed evidence section grouping
+     * the answer's provenance into trust tiers (spec §3.5).
      *
-     * @param {{summary: string, claims: Array<{text: string, source: Object}>,
-     *   evidence: Array<Object>}} answer
+     * @param {{summary: string, evidence: Array<Object>,
+     *   claims: Array<{text: string, source: Object, citations: Array<{source_type: string}>}>}} answer
      */
     function appendAnswer(answer) {
         var wrapper = document.createElement('article');
@@ -416,51 +416,15 @@
         summary.textContent = answer.summary || '';
         wrapper.appendChild(summary);
 
-        // Guideline evidence renders as deduped, relevance-ranked source cards (one per distinct
-        // source). Guideline claims are folded into those cards, so only record-backed claims
-        // (patient facts, carrying their click-to-source provenance) still render as claim rows.
-        // Counting distinct sources + record claims — not raw claim sentences — is what makes the
-        // "(N)" honest: a source cited by three sentences is one piece of evidence, not three.
-        var evidence = Array.isArray(answer.evidence) ? answer.evidence : [];
-        var claims = Array.isArray(answer.claims) ? answer.claims : [];
-        var recordClaims = claims.filter(function (claim) {
-            return !isGuidelineRef(claim && claim.source);
-        });
-        var total = evidence.length + recordClaims.length;
-        if (total > 0) {
-            // Provenance is collapsed by default: the clinician reads the narrative; the evidence
-            // trail is one click away for anyone who wants to verify or audit it.
-            var details = document.createElement('details');
-            details.className = 'ai-copilot__evidence';
-
-            var toggle = document.createElement('summary');
-            toggle.className = 'ai-copilot__evidence-toggle';
-            toggle.textContent = 'Evidence (' + total + ')';
-            details.appendChild(toggle);
-
-            var body = document.createElement('div');
-            body.className = 'ai-copilot__evidence-body';
-
-            if (evidence.length > 0) {
-                var sources = document.createElement('ol');
-                sources.className = 'ai-copilot__sources';
-                evidence.forEach(function (entry, index) {
-                    sources.appendChild(renderEvidenceCard(entry, index));
-                });
-                body.appendChild(sources);
-            }
-
-            if (recordClaims.length > 0) {
-                var list = document.createElement('ol');
-                list.className = 'ai-copilot__claims';
-                recordClaims.forEach(function (claim) {
-                    list.appendChild(renderClaim(claim));
-                });
-                body.appendChild(list);
-            }
-
-            details.appendChild(body);
-            wrapper.appendChild(details);
+        // Evidence is grouped into provenance tiers (spec §3.5). Counting distinct sources — not raw
+        // claim sentences — is what makes the counts honest: a source cited by three sentences is one
+        // piece of evidence, not three.
+        var section = renderEvidenceSection(
+            Array.isArray(answer.evidence) ? answer.evidence : [],
+            Array.isArray(answer.claims) ? answer.claims : []
+        );
+        if (section) {
+            wrapper.appendChild(section);
         }
 
         var followUps = renderFollowUps(answer.follow_ups);
@@ -675,7 +639,7 @@
     // (name-led, verbatim quote); every other resource keeps the coded chip with its type badge. A
     // claim can draw on more than one record, so this runs once per citation (primary `source` +
     // each supporting).
-    function renderCitation(source) {
+    function renderCitation(source, tier) {
         source = source || {};
         var cite = source.resource_type === 'DocumentReference'
             ? renderDocumentCitation(source)
@@ -684,16 +648,360 @@
         // derived from an uploaded PDF. Absent a bbox the chip stands exactly as before; a rectangle
         // is never fabricated.
         if (hasBoundingBox(source)) {
-            cite.appendChild(buildViewSourceButton(source));
+            cite.appendChild(buildViewSourceButton(source, tier));
         }
         return cite;
     }
 
-    // A citation points at a guideline chunk (vs a FHIR record or an uploaded document). Guideline
-    // claims are represented by the deduped `evidence[]` source cards, so they are filtered out of
-    // the claim rows.
-    function isGuidelineRef(source) {
-        return !!source && source.resource_type === 'guideline';
+    // ---- provenance tiers (spec §3.5) ------------------------------------
+    //
+    // A coded record value and a value a vision model read off a scan are not the same kind of fact.
+    // Rendering them alike is what lets click-to-source *launder* the weaker one: the physician
+    // clicks, sees a box drawn on a scan, and reads that as confirmation. The tier is switched off
+    // the wire's `source_type` discriminant (`main.py` projects every claim's source + supporting
+    // into `citations[]`) — never re-derived from `resource_type`, which cannot tell a Patient read
+    // from FHIR apart from a Patient read off an intake form.
+    //
+    // Four `source_type` values collapse to three tiers: LAB_PDF and INTAKE_FORM make the same claim
+    // about trust and differ only in *which* document — the grouping key one level down, inside the
+    // tier.
+
+    var TIER_GUIDELINE = 'guideline';
+    var TIER_RECORD = 'record';
+    var TIER_DOCUMENT = 'document';
+
+    /**
+     * Map a citation's `source_type` onto its trust tier.
+     *
+     * An unrecognized or missing tag degrades to the document tier — the most conservative one — so
+     * a future union arm can never render as a fact of record by default.
+     *
+     * @param {string|undefined} sourceType The wire `source_type` discriminant.
+     * @returns {string} One of TIER_GUIDELINE, TIER_RECORD, TIER_DOCUMENT.
+     */
+    function tierForSourceType(sourceType) {
+        switch (sourceType) {
+            case 'guideline':
+                return TIER_GUIDELINE;
+            case 'fhir':
+                return TIER_RECORD;
+            case 'lab_pdf':
+            case 'intake_form':
+                return TIER_DOCUMENT;
+            default:
+                return TIER_DOCUMENT;
+        }
+    }
+
+    /**
+     * The claim's primary citation. `main.py` projects `[source, *supporting]` in order, so index 0
+     * is the primary — and a claim's tier is its primary citation's tier.
+     *
+     * @param {object} claim A claim from the answer payload.
+     * @returns {object|null} The primary citation, or null when the claim carries none.
+     */
+    function primaryCitation(claim) {
+        var citations = (claim && Array.isArray(claim.citations)) ? claim.citations : [];
+        return citations.length > 0 ? citations[0] : null;
+    }
+
+    function claimTier(claim) {
+        var citation = primaryCitation(claim);
+        return tierForSourceType(citation ? citation.source_type : undefined);
+    }
+
+    function claimsInTier(claims, tier) {
+        return claims.filter(function (claim) {
+            return claimTier(claim) === tier;
+        });
+    }
+
+    /**
+     * Build the collapsed evidence section, grouped into provenance tiers.
+     *
+     * The section's own summary carries the composition line ("2 guideline · 4 record · 3 read from
+     * scan") because that *is* the safety signal and it must cost zero clicks: the physician learns
+     * the answer leaned on three machine-read facts before deciding whether to open anything.
+     *
+     * Tiers are individually collapsible, but the document tier defaults open — hiding the tier that
+     * most needs scrutiny behind an extra click would quietly invert the point of the grouping.
+     * Empty tiers are omitted rather than rendered as "(0)": a zero row reads as retrieval having
+     * *failed*, when the honest meaning is that nothing qualified.
+     *
+     * @param {Array<object>} evidence Deduped, relevance-ranked guideline sources.
+     * @param {Array<object>} claims The answer's claims, each carrying `citations[]`.
+     * @returns {HTMLElement|null} The section, or null when no tier has anything to show.
+     */
+    function renderEvidenceSection(evidence, claims) {
+        var recordClaims = claimsInTier(claims, TIER_RECORD);
+        var documentClaims = claimsInTier(claims, TIER_DOCUMENT);
+
+        var tiers = [];
+        if (evidence.length > 0) {
+            tiers.push({
+                key: TIER_GUIDELINE,
+                heading: labels.tierGuidelines,
+                short: labels.tierGuidelinesShort,
+                count: evidence.length,
+                open: false,
+                build: function () { return renderGuidelineTier(evidence); }
+            });
+        }
+        if (recordClaims.length > 0) {
+            tiers.push({
+                key: TIER_RECORD,
+                heading: labels.tierRecord,
+                short: labels.tierRecordShort,
+                count: recordClaims.length,
+                open: false,
+                build: function () { return renderRecordTier(recordClaims); }
+            });
+        }
+        if (documentClaims.length > 0) {
+            tiers.push({
+                key: TIER_DOCUMENT,
+                heading: labels.tierDocuments,
+                short: labels.tierDocumentsShort,
+                count: documentClaims.length,
+                open: true,
+                build: function () { return renderDocumentTier(documentClaims); }
+            });
+        }
+        if (tiers.length === 0) {
+            return null;
+        }
+
+        // Provenance is collapsed by default: the clinician reads the narrative; the evidence trail
+        // is one click away for anyone who wants to verify or audit it.
+        var details = document.createElement('details');
+        details.className = 'ai-copilot__evidence';
+
+        var toggle = document.createElement('summary');
+        toggle.className = 'ai-copilot__evidence-toggle';
+        toggle.textContent = labels.evidence + ' · ' + tiers.map(function (tier) {
+            return tier.count + ' ' + tier.short;
+        }).join(' · ');
+        details.appendChild(toggle);
+
+        var body = document.createElement('div');
+        body.className = 'ai-copilot__evidence-body';
+        tiers.forEach(function (tier) {
+            body.appendChild(renderTier(tier));
+        });
+        details.appendChild(body);
+        return details;
+    }
+
+    /**
+     * Wrap one tier's content in its own collapsible block, headed by a name + count that stay
+     * visible whether or not the body is open.
+     *
+     * @param {{key: string, heading: string, count: number, open: boolean, build: function}} tier
+     * @returns {HTMLElement} The tier block.
+     */
+    function renderTier(tier) {
+        var block = document.createElement('details');
+        block.className = 'ai-copilot__tier ai-copilot__tier--' + tier.key;
+        block.open = tier.open;
+
+        var head = document.createElement('summary');
+        head.className = 'ai-copilot__tier-head';
+
+        var dot = document.createElement('span');
+        dot.className = 'ai-copilot__tier-dot';
+        head.appendChild(dot);
+
+        var name = document.createElement('span');
+        name.className = 'ai-copilot__tier-name';
+        name.textContent = tier.heading;
+        head.appendChild(name);
+
+        var count = document.createElement('span');
+        count.className = 'ai-copilot__tier-count';
+        count.textContent = String(tier.count);
+        head.appendChild(count);
+
+        block.appendChild(head);
+
+        var body = document.createElement('div');
+        body.className = 'ai-copilot__tier-body';
+        body.appendChild(tier.build());
+        block.appendChild(body);
+        return block;
+    }
+
+    // Guidelines: deduped, relevance-ranked source cards, one per distinct source (spec §3.4).
+    function renderGuidelineTier(evidence) {
+        var sources = document.createElement('ol');
+        sources.className = 'ai-copilot__sources';
+        evidence.forEach(function (entry, index) {
+            sources.appendChild(renderEvidenceCard(entry, index));
+        });
+        return sources;
+    }
+
+    /**
+     * Bucket items by a derived key, preserving first-seen order.
+     *
+     * @param {Array<object>} items The items to bucket.
+     * @param {function(object): string} keyOf Derives each item's bucket key.
+     * @returns {Array<{key: string, items: Array<object>}>} Buckets in first-seen order.
+     */
+    function bucketBy(items, keyOf) {
+        var order = [];
+        var buckets = Object.create(null);
+        items.forEach(function (item) {
+            var key = keyOf(item);
+            if (!buckets[key]) {
+                buckets[key] = { key: key, items: [] };
+                order.push(buckets[key]);
+            }
+            buckets[key].items.push(item);
+        });
+        return order;
+    }
+
+    /**
+     * The record tier: coded EMR values.
+     *
+     * Claims sharing a resource type *and* date are one panel from one draw, not N independent
+     * findings — so they share a single source chip instead of repeating an identical
+     * "Observation · Collected Jul 8, 2026" once per row. The claim prose is kept verbatim because
+     * it carries the units, reference range, and interpretation that the wire's `SourceRef` does
+     * not (it has `label`, `value`, and `date`, and nothing else).
+     *
+     * A lone claim, or one missing either grouping key, keeps its own chip — there is nothing to
+     * share with.
+     *
+     * @param {Array<object>} claims Claims whose primary citation is `fhir`.
+     * @returns {HTMLElement} The tier's list.
+     */
+    function renderRecordTier(claims) {
+        var list = document.createElement('ol');
+        list.className = 'ai-copilot__claims';
+        var loners = 0;
+        bucketBy(claims, function (claim) {
+            var source = claim.source || {};
+            // Only a claim with BOTH keys can join a panel; anything else gets a key unique to
+            // itself so it renders on its own.
+            if (!source.resource_type || !source.date) {
+                loners += 1;
+                return 'ungrouped:' + loners;
+            }
+            return source.resource_type + '|' + source.date;
+        }).forEach(function (bucket) {
+            if (bucket.items.length < 2) {
+                list.appendChild(renderClaim(bucket.items[0]));
+                return;
+            }
+            list.appendChild(renderPanel(bucket.items));
+        });
+        return list;
+    }
+
+    /**
+     * Render a group of same-type, same-date record claims as one panel: their prose stacked under a
+     * single shared source chip.
+     *
+     * @param {Array<object>} claims Two or more claims sharing a resource type and date.
+     * @returns {HTMLElement} An <li> panel.
+     */
+    function renderPanel(claims) {
+        var item = document.createElement('li');
+        item.className = 'ai-copilot__claim ai-copilot__panel';
+
+        claims.forEach(function (claim) {
+            var text = document.createElement('span');
+            text.className = 'ai-copilot__claim-text';
+            text.textContent = claim.text;
+            item.appendChild(text);
+        });
+
+        // One chip for the whole panel: same record type, same draw, so N copies would say the same
+        // thing N times.
+        item.appendChild(renderCitation(claims[0].source, TIER_RECORD));
+        return item;
+    }
+
+    /**
+     * The document tier: facts a vision model read off an uploaded scan.
+     *
+     * Grouped by `document_id` and page — three facts read off one intake form page are *one document
+     * read three times*, not three documents. Each card heads with the document's kind and page, then
+     * lists its facts. Each fact still opens its own single-box preview; consolidating them into one
+     * preview that draws every box (spec §3.5) needs the viewer's URL contract to carry more than one
+     * rectangle, so it lands separately.
+     *
+     * @param {Array<object>} claims Claims whose primary citation is `lab_pdf` or `intake_form`.
+     * @returns {HTMLElement} The tier's list of document cards.
+     */
+    function renderDocumentTier(claims) {
+        var wrap = document.createElement('div');
+        wrap.className = 'ai-copilot__docs';
+        bucketBy(claims, function (claim) {
+            var source = claim.source || {};
+            return String(source.document_id || 'unknown') + '|' + String(normalizePage(source));
+        }).forEach(function (bucket) {
+            wrap.appendChild(renderDocumentCard(bucket.items));
+        });
+        return wrap;
+    }
+
+    /**
+     * Render one document's facts as a single card.
+     *
+     * @param {Array<object>} claims The facts read off this document page, in answer order.
+     * @returns {HTMLElement} The document card.
+     */
+    function renderDocumentCard(claims) {
+        var card = document.createElement('section');
+        card.className = 'ai-copilot__doc';
+
+        var source = claims[0].source || {};
+        var head = document.createElement('p');
+        head.className = 'ai-copilot__doc-head';
+        var page = normalizePage(source);
+        head.textContent = docKindLabel(source) + ' · ' + labels.page + ' ' + page;
+        card.appendChild(head);
+
+        var list = document.createElement('ol');
+        list.className = 'ai-copilot__doc-facts';
+        claims.forEach(function (claim) {
+            var item = document.createElement('li');
+            item.className = 'ai-copilot__doc-fact';
+
+            var text = document.createElement('span');
+            text.className = 'ai-copilot__claim-text';
+            text.textContent = claim.text;
+            item.appendChild(text);
+
+            // Per-fact affordance: the overlay draws one box per request today. A fact whose value
+            // could not be boxed gets no button rather than a promise the overlay cannot keep.
+            if (hasBoundingBox(claim.source)) {
+                item.appendChild(buildViewSourceButton(claim.source, TIER_DOCUMENT));
+            }
+            list.appendChild(item);
+        });
+        card.appendChild(list);
+        return card;
+    }
+
+    /**
+     * Name the kind of document a fact was read from. The wire carries `doc_type` and `document_id`
+     * but no document *title*, so the kind is the most specific name available.
+     *
+     * @param {object} source The citation's SourceRef.
+     * @returns {string} A human-readable document kind.
+     */
+    function docKindLabel(source) {
+        switch (source && source.doc_type) {
+            case 'lab_pdf':
+                return labels.docLabReport;
+            case 'intake_form':
+                return labels.docIntakeForm;
+            default:
+                return labels.docGeneric;
+        }
     }
 
     // Derive a short issuing-body label from a corpus source id: the first hyphen segment,
@@ -826,11 +1134,19 @@
 
         // Primary citation, then any supporting citations. A statement that draws on more than one
         // record (a visit and a diagnosis) shows a chip for each, so the physician can see every
-        // record it rests on — and spot when two are unrelated (e.g. different dates).
-        item.appendChild(renderCitation(claim.source));
+        // record it rests on — and spot when two are unrelated (e.g. different dates). Each chip is
+        // tiered by its OWN citation, not the claim's: a claim sourced to a coded record may still
+        // lean on a scan-read fact, and that chip must carry the weaker provenance honestly.
+        var citations = Array.isArray(claim.citations) ? claim.citations : [];
+        item.appendChild(renderCitation(claim.source, tierForSourceType(
+            citations[0] ? citations[0].source_type : undefined
+        )));
         var supporting = claim.supporting || [];
         for (var i = 0; i < supporting.length; i++) {
-            item.appendChild(renderCitation(supporting[i]));
+            var tag = citations[i + 1];
+            item.appendChild(renderCitation(
+                supporting[i], tierForSourceType(tag ? tag.source_type : undefined)
+            ));
         }
 
         return item;
@@ -881,17 +1197,29 @@
     }
 
     /**
-     * Build the "View source" button appended to a bbox-bearing citation. The document id, page, and
-     * serialized box ride on the button's dataset so the click handler is self-contained.
+     * Build the click-to-source button appended to a bbox-bearing citation. The document id, page,
+     * and serialized box ride on the button's dataset so the click handler is self-contained.
+     *
+     * The document tier's wording is deliberately different. "View source" reads as a *receipt* —
+     * it implies the checking is already done, which is exactly how a machine-read fact launders
+     * itself past a physician who clicks, sees a box on a scan, and takes that as confirmation. For
+     * a fact a model read off a scan the affordance must instead read as an open task, so the label
+     * flips to the imperative. The laundering lives in the affordance, not the label (spec §3.5).
      *
      * @param {object} source The citation's SourceRef (already passed hasBoundingBox).
+     * @param {string} [tier] The citation's provenance tier; document-tier facts get the imperative.
      * @returns {HTMLButtonElement} The keyboard-accessible affordance.
      */
-    function buildViewSourceButton(source) {
+    function buildViewSourceButton(source, tier) {
         var button = document.createElement('button');
         button.type = 'button';
         button.className = 'ai-copilot__view-source';
-        button.textContent = labels.viewSource;
+        if (tier === TIER_DOCUMENT) {
+            button.className += ' ai-copilot__view-source--check';
+            button.textContent = labels.checkSource;
+        } else {
+            button.textContent = labels.viewSource;
+        }
         button.dataset.documentId = String(source.document_id);
         button.dataset.page = String(normalizePage(source));
         button.dataset.bbox = JSON.stringify(source.bounding_box);
@@ -1220,7 +1548,21 @@
             followUps: els.sidebar.dataset.labelFollowUps,
             // Click-to-source (JOS-57). Defaulted here so the feature works before the PHP config
             // island grows these data-label-* attributes; add them there for localization.
-            viewSource: els.sidebar.dataset.labelViewSource || 'View source'
+            viewSource: els.sidebar.dataset.labelViewSource || 'View source',
+            // Provenance tiering (JOS-88, spec §3.5). `checkSource` is deliberately imperative: it
+            // is the document tier's whole safety mechanism, not a synonym for viewSource.
+            checkSource: els.sidebar.dataset.labelCheckSource || 'Check against the scan',
+            evidence: els.sidebar.dataset.labelEvidence || 'Evidence',
+            page: els.sidebar.dataset.labelPage || 'p.',
+            tierGuidelines: els.sidebar.dataset.labelTierGuidelines || 'Guidelines',
+            tierGuidelinesShort: els.sidebar.dataset.labelTierGuidelinesShort || 'guideline',
+            tierRecord: els.sidebar.dataset.labelTierRecord || 'From the record',
+            tierRecordShort: els.sidebar.dataset.labelTierRecordShort || 'record',
+            tierDocuments: els.sidebar.dataset.labelTierDocuments || 'Read from documents',
+            tierDocumentsShort: els.sidebar.dataset.labelTierDocumentsShort || 'read from scan',
+            docLabReport: els.sidebar.dataset.labelDocLabReport || 'Lab report',
+            docIntakeForm: els.sidebar.dataset.labelDocIntakeForm || 'Intake form',
+            docGeneric: els.sidebar.dataset.labelDocGeneric || 'Uploaded document'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

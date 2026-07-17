@@ -64,6 +64,18 @@ body.ai-copilot-resizing {
     --copilot-font-sm: 0.8125rem;
     --copilot-font-base: 0.9375rem;
 
+    /*
+     * Provenance tiers (JOS-88, spec §3.5). These encode a TRUST GRADIENT, so they are deliberately
+     * separate from --copilot-accent: the accent is brand, these are semantics. Guideline reuses the
+     * accent-light blue (external knowledge — a different axis of trust, not a higher one); record is
+     * a calm green (coded, exact); document is amber (a model read this off a scan).
+     */
+    --copilot-tier-guideline: #4b71e0;
+    --copilot-tier-record: #1f7a5c;
+    --copilot-tier-document: #a35f00;
+    --copilot-tier-document-wash: #fdf6ea;
+    --copilot-tier-document-border: #d9b877;
+
     position: fixed;
     top: 0;
     right: 0;
@@ -533,6 +545,121 @@ body.ai-copilot-resizing {
     margin-top: var(--copilot-space-2);
 }
 
+/*
+ * ---- Provenance tiers (JOS-88, spec §3.5) ----
+ * A coded record value and a value a vision model read off a scan are not the same kind of fact.
+ * Rendering them alike is what lets click-to-source *launder* the weaker one — the physician clicks,
+ * sees a box on a scan, and reads it as confirmation. So the tiers must be told apart AT A GLANCE,
+ * without reading the label (spec §6.7); if they only differ by a word, this has bought nothing.
+ *
+ * The tier head is a <summary>, so each tier collapses independently. Heads stay visible whatever
+ * the body's state: the composition line is the safety signal and it must cost zero clicks.
+ */
+.ai-copilot__tier-head {
+    cursor: pointer;
+    list-style: none;                 /* hide default <summary> marker (standards + Firefox) */
+    display: flex;
+    align-items: center;
+    gap: var(--copilot-space-2);
+    padding: var(--copilot-space-1) 0;
+    border-bottom: 1px solid var(--copilot-border);
+    font-size: var(--copilot-font-sm);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--copilot-muted);
+    user-select: none;
+}
+
+.ai-copilot__tier-head::-webkit-details-marker {
+    display: none;                    /* hide default disclosure triangle in WebKit/Blink */
+}
+
+/* The dot carries the tier's semantic colour; the name carries the words. Neither alone is the
+   signal — the body treatments below are. */
+.ai-copilot__tier-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    flex: none;
+    background: var(--copilot-muted);
+}
+
+.ai-copilot__tier--guideline .ai-copilot__tier-dot { background: var(--copilot-tier-guideline); }
+.ai-copilot__tier--record .ai-copilot__tier-dot { background: var(--copilot-tier-record); }
+.ai-copilot__tier--document .ai-copilot__tier-dot { background: var(--copilot-tier-document); }
+
+.ai-copilot__tier-name {
+    flex: 1;
+}
+
+.ai-copilot__tier-count {
+    font-variant-numeric: tabular-nums;
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__tier[open] .ai-copilot__tier-body {
+    margin-top: var(--copilot-space-2);
+}
+
+/*
+ * A panel: two or more claims from one record type on one date (four Observations from one blood
+ * draw). They share ONE citation chip — repeating an identical chip per row says the same thing N
+ * times. The prose stays verbatim because it carries the units and reference range that the wire's
+ * SourceRef does not.
+ */
+.ai-copilot__panel {
+    gap: var(--copilot-space-1);
+}
+
+/*
+ * ---- The document tier ----
+ * The weakest tier, and it must LOOK it. A dashed rail (not solid) plus a warm wash reads as
+ * provisional pre-attentively, and dashed-vs-solid still reads for a colourblind user where hue
+ * alone would not.
+ */
+.ai-copilot__docs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+}
+
+.ai-copilot__doc {
+    border: 1px solid var(--copilot-tier-document-border);
+    border-left-width: 2px;
+    border-left-style: dashed;
+    border-radius: var(--copilot-radius);
+    background: var(--copilot-tier-document-wash);
+    padding: var(--copilot-space-2);
+}
+
+/* Names the document a fact was read off. The wire carries doc_type + document_id but no document
+   title, so this is the most specific name available. */
+.ai-copilot__doc-head {
+    margin: 0 0 var(--copilot-space-2) 0;
+    font-size: var(--copilot-font-sm);
+    font-weight: 700;
+    color: var(--copilot-tier-document);
+}
+
+.ai-copilot__doc-facts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+    margin: 0;
+    padding-left: var(--copilot-space-4);
+}
+
+.ai-copilot__doc-fact {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--copilot-space-1);
+}
+
+/* The document tier's call to action is styled with the rest of the view-source button, below —
+   it must come after the base rule to win the cascade at equal specificity. */
+
 .ai-copilot__sources {
     list-style: none;
     margin: 0;
@@ -785,5 +912,38 @@ body.ai-copilot-resizing {
     color: var(--copilot-accent-strong);
     text-decoration: underline;
     outline: none;
+}
+
+/*
+ * The document tier's call to action (JOS-88, spec §3.5). "View source" is passive — it reads as a
+ * receipt, implying the checking is already done, which is precisely how a machine-read fact
+ * launders itself past a physician who clicks, sees a box on a scan, and takes that as
+ * confirmation. For a fact a model read off a scan the affordance must read as an open TASK: worded
+ * imperatively, and lifted out of the accent-blue link family the rest of the panel uses for
+ * confirmed provenance. This is the highest-leverage rule in the tiering — the laundering lives in
+ * the affordance, not the label.
+ *
+ * Declared after the base rule deliberately: same specificity, so source order is what makes it win.
+ */
+.ai-copilot__view-source--check {
+    align-self: flex-start;
+    flex-basis: auto;                 /* a button, not a full-width link row */
+    border: 1px solid var(--copilot-tier-document);
+    border-radius: var(--copilot-radius);
+    background: var(--copilot-surface);
+    padding: 0 var(--copilot-space-1);
+    font-weight: 700;
+    color: var(--copilot-tier-document);
+}
+
+.ai-copilot__view-source--check::after {
+    content: "\00a0\2192";            /* nbsp + U+2192 rightwards arrow: an action, not a disclosure */
+}
+
+.ai-copilot__view-source--check:hover,
+.ai-copilot__view-source--check:focus-visible {
+    color: var(--copilot-surface);
+    background: var(--copilot-tier-document);
+    text-decoration: none;
 }
 

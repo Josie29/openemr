@@ -39,14 +39,12 @@ require_once __DIR__ . '/../../../../globals.php';
 
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
-use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Common\Session\SessionWrapperFactory;
 use OpenEMR\Core\ModulesClassLoader;
 use OpenEMR\Core\OEGlobalsBag;
+use OpenEMR\Modules\AiCopilot\Fact\DerivedFactPersister;
 use OpenEMR\Modules\AiCopilot\Fact\ExtractionSidecar;
 use OpenEMR\Modules\AiCopilot\Fact\FactPayloadParser;
-use OpenEMR\Modules\AiCopilot\Fact\IntakeFactWriter;
-use OpenEMR\Modules\AiCopilot\Fact\LabResultWriter;
 
 $classLoader = new ModulesClassLoader(OEGlobalsBag::getInstance()->getProjectDir());
 $classLoader->registerNamespaceIfNotExists(
@@ -142,50 +140,33 @@ $contentHash = hash('sha256', $bytes);
 
 $documentId = (int) $document->get_id();
 $username = (string) ($session->get('authUser') ?? '');
-$sidecar = new ExtractionSidecar();
 
-$written = [];
-$skipped = [];
-$orderId = null;
-
-try {
-    // Each family takes its own path and its own transaction: a lab means four rows down the
-    // procedure chain, an intake fact means a `lists` row. Keeping them separate means a failure
-    // persisting medications cannot roll back labs that already wrote cleanly.
-    if ($parsed->hasLabs()) {
-        $labOutcome = (new LabResultWriter($sidecar))
-            ->write($pid, $documentId, $contentHash, $parsed->labs, $username);
-        $written = [...$written, ...$labOutcome->written];
-        $skipped = [...$skipped, ...$labOutcome->skipped];
-        $orderId = $labOutcome->procedureOrderId;
-    }
-
-    if ($parsed->hasIntakeFacts()) {
-        $intakeOutcome = (new IntakeFactWriter($sidecar))
-            ->write($pid, $documentId, $contentHash, $parsed->allergies, $parsed->medications, $username);
-        $written = [...$written, ...$intakeOutcome->written];
-        $skipped = [...$skipped, ...$intakeOutcome->skipped];
-    }
-} catch (\Throwable $e) {
-    // Log with context, return a generic message — the exception may carry SQL or paths.
-    (new SystemLogger())->error('Co-Pilot fact write-back failed', [
-        'pid' => $pid,
-        'document_id' => $documentId,
-        'lab_count' => count($parsed->labs),
-        'allergy_count' => count($parsed->allergies),
-        'medication_count' => count($parsed->medications),
-        'exception' => $e,
-    ]);
-    respond(500, ['error' => 'Could not persist the derived facts.']);
-}
+// Each fact family writes in its own transaction and is caught on its own, so a failure in one
+// does not discard another that already committed. The outcome reports exactly what landed.
+$outcome = (new DerivedFactPersister(new ExtractionSidecar()))
+    ->persist($pid, $documentId, $contentHash, $parsed, $username);
 
 $response = [
-    'written' => $written,
-    'skipped' => $skipped,
+    'written' => $outcome->written,
+    'skipped' => $outcome->skipped,
     'content_hash' => $contentHash,
 ];
-if ($orderId !== null) {
-    $response['order_id'] = $orderId;
+if ($outcome->procedureOrderId !== null) {
+    $response['order_id'] = $outcome->procedureOrderId;
+}
+if ($outcome->hasFailures()) {
+    $response['failed'] = $outcome->failed;
 }
 
-respond(200, $response);
+if (!$outcome->hasFailures()) {
+    // Everything requested reached the chart.
+    respond(200, $response);
+}
+if ($outcome->anythingLanded()) {
+    // Partial success: some facts persisted, some family failed. Report what landed rather than a
+    // blanket 500 that would hide the facts that did — the client's confirmation count stays honest.
+    respond(207, $response);
+}
+// Nothing landed and something failed — a genuine server error.
+$response['error'] = 'Could not persist the derived facts.';
+respond(500, $response);

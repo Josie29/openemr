@@ -21,11 +21,13 @@ use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\Modules\AiCopilot\Fact\AbnormalFlag;
 use OpenEMR\Modules\AiCopilot\Fact\BoundingBox;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedAllergy;
+use OpenEMR\Modules\AiCopilot\Fact\DerivedFactPersister;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedLabResult;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedMedication;
 use OpenEMR\Modules\AiCopilot\Fact\ExtractionSidecar;
 use OpenEMR\Modules\AiCopilot\Fact\IntakeFactWriter;
 use OpenEMR\Modules\AiCopilot\Fact\LabResultWriter;
+use OpenEMR\Modules\AiCopilot\Fact\ParsedFacts;
 use OpenEMR\Services\FHIR\FhirAllergyIntoleranceService;
 use OpenEMR\Services\FHIR\FhirMedicationRequestService;
 use OpenEMR\Services\FHIR\Observation\FhirObservationLaboratoryService;
@@ -390,6 +392,43 @@ class DerivedFactWriteBackTest extends TestCase
         $this->assertArrayHasKey('allergy:penicillin', $citations);
         $this->assertSame('lists', $citations['allergy:penicillin']['fact_table']);
         $this->assertSame(40.0, $citations['allergy:penicillin']['box']->x);
+    }
+
+    /**
+     * When one fact family fails, the family that already committed must survive, and the outcome
+     * must report exactly what landed. If this regressed, a failed medication would either roll back
+     * labs the physician can see were extracted, or the endpoint would 500 and the sidebar would
+     * report zero saved while the labs sit in the chart — a confirmation that lies about the write.
+     */
+    #[Test]
+    public function aPartialFailurePersistsTheFamilyThatSucceededAndReportsIt(): void
+    {
+        // A pid with no patient_data row: the lab chain keys on pid (no FK) and writes fine, but the
+        // intake writer resolves the patient uuid to build an AllergyIntolerance and throws when
+        // there is no patient — a deterministic partial failure with no mocks. (Nulling an existing
+        // patient's uuid does not work: the FHIR services backfill patient_data uuids on construction.)
+        $absentPid = 1 + (int) QueryUtils::fetchSingleValue(
+            'SELECT COALESCE(MAX(pid), 0) AS m FROM patient_data',
+            'm',
+            []
+        );
+
+        $parsed = new ParsedFacts($this->results(), [$this->allergy()], []);
+        $outcome = (new DerivedFactPersister($this->sidecar))
+            ->persist($absentPid, self::DOCUMENT_ID, self::CONTENT_HASH, $parsed, 'admin');
+
+        $this->assertSame(['intake'], $outcome->failed, 'Only the intake family should have failed.');
+        $this->assertTrue($outcome->hasFailures());
+        $this->assertTrue($outcome->anythingLanded(), 'The labs landed, so the endpoint returns 207, not 500.');
+        $this->assertSame([self::HBA1C, self::GLUCOSE], $outcome->written, 'Both labs persisted.');
+
+        $this->assertSame(2, $this->countResultRows(), 'The labs are in the chart despite intake failing.');
+        $orphanAllergies = (int) QueryUtils::fetchSingleValue(
+            'SELECT COUNT(*) AS c FROM lists WHERE pid = ? AND type = ?',
+            'c',
+            [$absentPid, 'allergy']
+        );
+        $this->assertSame(0, $orphanAllergies, 'The failed intake write rolled back — no orphan allergy row.');
     }
 
     private function allergy(): DerivedAllergy

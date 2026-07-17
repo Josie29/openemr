@@ -137,6 +137,6 @@ def test_item_ids_do_not_collide_across_datasets() -> None:
     # The SDK requires item ids to be globally unique and never reused across datasets, and the CI
     # subset shares case_ids with the full set. A bare case_id would make seeding one dataset
     # clobber the other's item.
-    ci = seed_dataset._item_id("copilot-golden-ci", "angulo-lab-ckd-nsaid")
-    full = seed_dataset._item_id("copilot-golden-v1", "angulo-lab-ckd-nsaid")
+    ci = seed_dataset._item_id("copilot-week2-golden-ci", "angulo-lab-ckd-nsaid")
+    full = seed_dataset._item_id("copilot-week2-golden-v1", "angulo-lab-ckd-nsaid")
     assert ci != full

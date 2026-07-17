@@ -4,12 +4,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from copilot.evals.rubrics import ExpectedBehavior, RubricName
 
-# Hosted datasets. The full 52 seed into copilot-golden-v1 (on-demand, approval-gated runs); the 3
-# CI-gate cases also seed into copilot-golden-ci — the cheap subset the BLOCKING gate scores on
-# each qa/integration -> main promotion PR (evals.yml). Bumped from the single-agent
+# Hosted datasets. The full 52 seed into copilot-week2-golden-v1 (on-demand, approval-gated runs);
+# the 3 CI-gate cases also seed into copilot-week2-golden-ci — the cheap subset the BLOCKING gate
+# scores on each qa/integration -> main promotion PR (evals.yml). Bumped from the single-agent
 # "copilot-grounding-v1": the case shape and rubrics changed with the Week-2 graph.
-DATASET_NAME = "copilot-golden-v1"
-CI_DATASET_NAME = "copilot-golden-ci"
+DATASET_NAME = "copilot-week2-golden-v1"
+CI_DATASET_NAME = "copilot-week2-golden-ci"
 
 
 class RouteBucket(StrEnum):

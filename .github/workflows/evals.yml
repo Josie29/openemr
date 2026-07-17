@@ -11,8 +11,8 @@ name: Agent evals (blocking gate)
 # deterministic agent tests (pytest/ruff/mypy, incl. the golden-set ground-truth guard) run on every
 # PR via agent-tests.yml.
 #
-# COST: runs the 3-case CI subset (copilot-golden-ci, ~$0.10/run), not the full set
-# (copilot-golden-v1, ~$2, on-demand). The three are chosen for ROUTE diversity, not convenience —
+# COST: runs the 3-case CI subset (copilot-week2-golden-ci, ~$0.10/run), not the full set
+# (copilot-week2-golden-v1, ~$2, on-demand). The three are chosen for ROUTE diversity, not convenience —
 # one refusal, one both-workers document+guideline synthesis, one corpus-only retrieval — so a
 # regression in any of the graph's three legs trips it. Authoring/verifying all 52 is free; only
 # running the graph to score rubrics costs money.
@@ -63,8 +63,8 @@ jobs:
           langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
           langfuse_base_url: ${{ secrets.LANGFUSE_BASE_URL }}
           experiment_path: agent/src/copilot/evals/experiment.py
-          # The cheap route-diverse 3-case subset (copilot-golden-v1 is the on-demand full set).
-          dataset_name: copilot-golden-ci
+          # The cheap route-diverse 3-case subset (copilot-week2-golden-v1 is the on-demand full set).
+          dataset_name: copilot-week2-golden-ci
           should_skip_sdk_installation: "true"
           # ENFORCING. A rubric below its threshold raises RegressionError and fails the PR.
           should_fail_on_regression: "true"

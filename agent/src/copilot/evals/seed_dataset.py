@@ -126,8 +126,8 @@ def _seed_one(dataset_name: str, cases: list[EvalCase], description: str) -> See
 def seed_dataset() -> None:
     """Reconcile both hosted datasets so they mirror the repo's golden set exactly.
 
-    Seeds the full 52 into ``copilot-golden-v1`` (the on-demand, approval-gated full run) and the
-    3-case CI subset into ``copilot-golden-ci`` — the cheap subset the blocking gate scores on
+    Seeds the full 52 into ``copilot-week2-golden-v1`` (the on-demand, approval-gated full run) and
+    the 3-case CI subset into ``copilot-week2-golden-ci`` — the cheap subset the blocking gate scores on
     promotion PRs. Reconciling makes no model calls — it is free; only *running* an experiment
     against a dataset costs money. Run it whenever the cases change.
 

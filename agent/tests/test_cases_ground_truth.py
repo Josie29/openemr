@@ -13,7 +13,8 @@ async def test_golden_set_ground_truth_is_honest() -> None:
 
 
 def test_golden_set_size() -> None:
-    # The suite is sized by the coverage matrix (50 cases, + the both-tools extract+guideline
-    # synthesis case = 51). A large accidental change to the count means the matrix allocation
-    # drifted and coverage should be re-reviewed.
+    # The suite is sized by the coverage matrix: the PRD's 50, plus the both-tools
+    # extract+guideline synthesis case. A change to the count means the matrix allocation drifted
+    # and coverage should be re-reviewed — swapping a case in and out keeps this green, which is
+    # intended; the ground-truth and falsifiability checks above are what police the swap.
     assert len(CASES) == 52

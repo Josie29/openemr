@@ -44,7 +44,7 @@ def test_grounded_answer_reaches_the_physician(settings: Settings) -> None:
         app.state.graph,
         router=route_model([Route.EXTRACT_INTAKE, Route.ANSWER]),
         extractor=worker_model(
-            [("get_patient", {})], ExtractorOutput(summary="68F", claims=[_BIRTH_CLAIM])
+            [("get_patient_summary", {})], ExtractorOutput(summary="68F", claims=[_BIRTH_CLAIM])
         ),
         answerer=worker_model(
             [], ChatResponse(summary="Marisol Reyes, 68F.", claims=[_BIRTH_CLAIM])
@@ -95,7 +95,7 @@ def test_runaway_tool_loop_is_capped_and_refused(settings: Settings) -> None:
     with override_graph(
         app.state.graph,
         router=route_model([Route.EXTRACT_INTAKE]),
-        extractor=looping_tool_model("get_encounters"),
+        extractor=looping_tool_model("get_patient_summary"),
     ):
         response = _post(app)
 
@@ -164,7 +164,7 @@ def test_grounding_and_tool_ceiling_refusals_log_distinct_reasons(
         with override_graph(
             capped_app.state.graph,
             router=route_model([Route.EXTRACT_INTAKE]),
-            extractor=looping_tool_model("get_encounters"),
+            extractor=looping_tool_model("get_patient_summary"),
         ):
             ceiling_response = _post(capped_app)
         ceiling_reason = _failure_reason(caplog)

@@ -514,9 +514,13 @@ exactly why a full `StateGraph` (LangGraph) is machinery we would pay for now an
 later ([`agent-framework-week2.md`](context/decisions/agent-framework-week2.md)). The workers
 are:
 
-- **intake-extractor** — owns the **full patient-scoped FHIR read toolset** (demographics,
-  problems, medications, allergies, encounters, and free-text encounter notes) **plus**
-  `attach_and_extract` (§3). It therefore **fully subsumes the Week-1 single agent**, which has
+- **intake-extractor** — owns the **full patient-scoped FHIR read toolset**: the structured record
+  (demographics, problems, medications, allergies, recent encounters) in one `get_patient_summary`
+  read, `get_lab_observations` for the chart's structured labs (LOINC-filtered, for trends), and
+  `get_encounter_note` for a visit's free-text note — **plus** `attach_and_extract` (§3).
+  (`get_patient_summary` fans its five reads out concurrently and records each sub-resource into the
+  fetch-log individually, so grounding is unchanged; the per-resource reads are no longer exposed as
+  separate tools.) It therefore **fully subsumes the Week-1 single agent**, which has
   been **removed from the request path** — the supervisor graph is now the **only** `/chat`
   behavior. Turns an uploaded document, or the patient's own record, into schema-valid, cited facts.
 - **evidence-retriever** — owns the hybrid RAG tool (§5). Turns a clinical question into ranked,

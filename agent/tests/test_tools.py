@@ -51,45 +51,6 @@ async def test_encounters_expose_date_and_reason(seed_client: FixtureFhirClient)
     assert all(e.start_date is not None for e in encounters)
 
 
-def test_uc1_orientation_grounds_across_problem_and_medication(settings: Settings) -> None:
-    # Guards UC-1 end-to-end across multiple resource types: an orientation that fetches problems
-    # and meds and cites one of each must pass the gate with the REAL record values stamped in.
-    # If cross-resource grounding regresses, multi-tool answers would be wrongly refused.
-    claims = [
-        Claim(
-            text="Active problem: type 2 diabetes mellitus.",
-            source=SourceRef(resource_type="Condition", resource_id="cond-dm2", field="display"),
-        ),
-        Claim(
-            text="Currently on metformin 500 mg.",
-            source=SourceRef(
-                resource_type="MedicationRequest", resource_id="med-metformin", field="name"
-            ),
-        ),
-    ]
-    app = create_app(settings)
-    with override_graph(
-        app.state.graph,
-        router=route_model([Route.EXTRACT_INTAKE, Route.ANSWER]),
-        extractor=worker_model(
-            [("get_problems", {}), ("get_medications", {})],
-            ExtractorOutput(summary="DM on metformin.", claims=claims),
-        ),
-        answerer=worker_model(
-            [], ChatResponse(summary="68F with type 2 diabetes; on metformin.", claims=claims)
-        ),
-    ):
-        response = TestClient(app).post(
-            "/chat", json={"patient_id": "1", "message": "Give me the picture."}
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    values = {c["source"]["value"] for c in body["claims"]}
-    assert "Type 2 diabetes mellitus" in values
-    assert "metformin 500 mg tablet" in values
-
-
 def test_patient_summary_grounds_a_cross_resource_answer_in_one_call(settings: Settings) -> None:
     # Guards the JOS-89 Mode A relief: get_patient_summary must populate the FetchLog with each
     # individual sub-resource so a broad orientation grounds a Condition AND a MedicationRequest

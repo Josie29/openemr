@@ -6,14 +6,9 @@ from pydantic_ai import Agent, RunContext
 
 from copilot.fhir.client import FhirClient
 from copilot.fhir.models import (
-    Allergy,
-    Encounter,
     LabObservation,
-    Medication,
     NoteContent,
-    PatientDemographics,
     PatientSummary,
-    Problem,
 )
 from copilot.verification import FetchLog, FhirRecordable
 
@@ -54,12 +49,15 @@ def _track[D: FhirReadDeps, T: FhirRecordable | Sequence[FhirRecordable]](
 def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
     """Register the patient-scoped FHIR read tools on ``agent``.
 
-    Includes ``get_patient_summary`` (one call for a broad orientation) alongside the individual
-    per-resource reads (for focused questions); both record what they read into the ``FetchLog``.
+    Two tools: ``get_patient_summary`` reads the whole structured record (demographics, problems,
+    medications, allergies, recent encounters) in one call, and ``get_encounter_note`` reads the
+    free-text note for a specific encounter. Both record what they read into the ``FetchLog`` — the
+    summary records each sub-resource individually, so a claim citing any Condition or
+    MedicationRequest grounds just as if that resource had been read on its own.
 
     Every tool is scoped to the one open patient (the deps carry a patient-scoped client and id),
-    and every fetch is recorded via :func:`_track` so the grounding gate can resolve any field a
-    claim cites. Shared by any agent that reads the record — today the intake-extractor worker.
+    and every fetch is recorded so the grounding gate can resolve any field a claim cites. Shared by
+    any agent that reads the record — today the intake-extractor worker.
 
     Args:
         agent: The agent to attach the read tools to (its deps must satisfy :class:`FhirReadDeps`).
@@ -70,12 +68,12 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
         """Read the open patient's whole structured picture in ONE call.
 
         Returns demographics, the problem list, current medications, allergies, and recent
-        encounters together — use this for a broad "who is this / give me the picture" orientation
-        instead of calling the five individual reads. For a focused question, call only the
-        specific ``get_*`` tool it needs.
+        encounters together — this is the single read for the structured record, whether the
+        question is broad ("who is this / give me the picture") or focused ("what is her DOB?").
+        Lab results are separate: use ``get_lab_observations`` for those.
 
         The five reads run concurrently, and each sub-resource is recorded individually so a claim
-        citing any Condition/MedicationRequest/etc. grounds exactly as with the per-list tools.
+        citing any Condition/MedicationRequest/etc. grounds exactly as with a per-resource read.
         """
         pid = ctx.deps.patient_id
         patient, problems, medications, allergies, encounters = await asyncio.gather(
@@ -106,31 +104,6 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
         return summary
 
     @agent.tool
-    async def get_patient(ctx: RunContext[D]) -> PatientDemographics:
-        """Read the open patient's demographics (name, birth date, sex) from FHIR."""
-        return _track(ctx, await ctx.deps.fhir.get_patient(ctx.deps.patient_id))
-
-    @agent.tool
-    async def get_problems(ctx: RunContext[D]) -> list[Problem]:
-        """Read the open patient's problem list (active and inactive Conditions)."""
-        return _track(ctx, await ctx.deps.fhir.get_problems(ctx.deps.patient_id))
-
-    @agent.tool
-    async def get_medications(ctx: RunContext[D]) -> list[Medication]:
-        """Read the open patient's current medications (deduplicated MedicationRequests)."""
-        return _track(ctx, await ctx.deps.fhir.get_medications(ctx.deps.patient_id))
-
-    @agent.tool
-    async def get_allergies(ctx: RunContext[D]) -> list[Allergy]:
-        """Read the open patient's allergies (AllergyIntolerance resources)."""
-        return _track(ctx, await ctx.deps.fhir.get_allergies(ctx.deps.patient_id))
-
-    @agent.tool
-    async def get_encounters(ctx: RunContext[D]) -> list[Encounter]:
-        """Read the open patient's recent encounters (metadata only — no note bodies)."""
-        return _track(ctx, await ctx.deps.fhir.get_encounters(ctx.deps.patient_id))
-
-    @agent.tool
     async def get_lab_observations(
         ctx: RunContext[D], code: str | None = None
     ) -> list[LabObservation]:
@@ -154,11 +127,11 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
         """Read the free-text clinical note(s) for one encounter — the narrative behind a visit.
 
         Use for "why"/"what did the note say" questions the structured lists can't answer. Find the
-        relevant visit with get_encounters first, then pass its id here.
+        relevant visit in get_patient_summary's recent_encounters first, then pass its id here.
 
         Args:
             ctx: The run context.
-            encounter_id: The Encounter id whose note to read (from get_encounters).
+            encounter_id: The Encounter id whose note to read (from get_patient_summary).
         """
         return _track(
             ctx, await ctx.deps.fhir.get_encounter_note(ctx.deps.patient_id, encounter_id)

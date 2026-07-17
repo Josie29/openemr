@@ -237,6 +237,9 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         # Record the extracted facts so the grounding gate can resolve any the worker cites.
         handles = ctx.deps.documents.record(extracted)
         ctx.deps.extracted_documents[document_id] = handles
+        # Retain the full typed extraction for the write-back payload: record() keeps only what
+        # grounding needs and drops the LOINC code, units, and range the persist endpoint requires.
+        ctx.deps.extractions[document_id] = extracted
         return handles
 
     @agent.output_validator

@@ -196,6 +196,7 @@
     "autoload-dev": {
         "psr-4": {
             "OpenEMR\\": "tests",
+            "OpenEMR\\Modules\\AiCopilot\\": "interface/modules/custom_modules/oe-module-ai-copilot/src",
             "OpenEMR\\Release\\": "tools/release/src"
         }
     },

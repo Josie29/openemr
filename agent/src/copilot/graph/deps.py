@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 from copilot.fhir.client import FhirClient
 from copilot.fhir.models import UploadedDocumentSummary
-from copilot.ingestion.extractor import DocumentExtractor
+from copilot.ingestion.extractor import DocumentExtractor, ExtractedDocument
 from copilot.ingestion.registry import DocumentFactHandle, DocumentFactRegistry
 from copilot.rag.retriever import EvidenceRetriever
 from copilot.retrieval import ChunkRegistry
@@ -47,3 +47,8 @@ class GraphDeps:
     # The handles are the union: which kind a document yields is decided by its type, not the
     # caller.
     extracted_documents: dict[str, list[DocumentFactHandle]] = field(default_factory=dict)
+    # Per-turn store of the full typed extraction, keyed by document id. The registry normalizes a
+    # fact down to value + citation and drops the rest (units, range, abnormal flag, and — retained
+    # nowhere else — the LOINC code), so the write-back payload (JOS-81) needs the source object.
+    # Per-turn like extracted_documents: we persist what THIS turn read off the document.
+    extractions: dict[str, ExtractedDocument] = field(default_factory=dict)

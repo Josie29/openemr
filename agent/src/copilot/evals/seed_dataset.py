@@ -59,9 +59,10 @@ def _seed_one(dataset_name: str, cases: list[EvalCase], description: str) -> int
 def seed_dataset() -> None:
     """Upsert the golden set into both hosted datasets, idempotently by ``case_id``.
 
-    Seeds the full 50 into ``copilot-golden-v1`` (the on-demand, approval-gated full run) and the
-    3-case CI subset into ``copilot-golden-ci`` (the cheap report-only auto-gate). Seeding makes no
-    model calls — it is free; only *running* an experiment against a dataset costs money.
+    Seeds the full 52 into ``copilot-golden-v1`` (the on-demand, approval-gated full run) and the
+    3-case CI subset into ``copilot-golden-ci`` — the cheap subset the blocking gate scores on
+    promotion PRs. Seeding makes no model calls — it is free; only *running* an experiment against
+    a dataset costs money.
 
     Raises:
         RuntimeError: If Langfuse credentials are not configured (nothing can be seeded).

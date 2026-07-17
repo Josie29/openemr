@@ -1,7 +1,23 @@
-from copilot.main import _build_evidence
+from typing import cast
+
+from copilot.fhir.client import FhirClient
+from copilot.graph.deps import GraphDeps
+from copilot.ingestion.extractor import DocumentExtractor, ExtractedDocument
+from copilot.ingestion.registry import DocumentFactRegistry
+from copilot.ingestion.schemas import (
+    AbnormalFlag,
+    BoundingBox,
+    Citation,
+    DocType,
+    LabReport,
+    LabResult,
+)
+from copilot.main import _answer_payload, _build_evidence
 from copilot.rag.models import EvidenceSnippet
+from copilot.rag.retriever import EvidenceRetriever
 from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
 from copilot.schemas import ChatResponse, CitationSourceType, Claim, GuidelineCitation, SourceRef
+from copilot.verification import FetchLog
 
 
 def _snippet(
@@ -109,6 +125,64 @@ def test_build_evidence_dedupes_by_chunk_and_orders_by_relevance() -> None:
     assert evidence[0]["year"] == "2022"
     assert evidence[0]["source_url"] == "https://ginasthma.org/2022"
     assert evidence[0]["quote"] == "symptom control has two domains"
+
+
+def _deps_with_extractions(extractions: dict[str, ExtractedDocument]) -> GraphDeps:
+    """A GraphDeps carrying the given extractions; deps _answer_payload never reads are stubbed."""
+    return GraphDeps(
+        fhir=cast(FhirClient, None),
+        patient_id="1",
+        correlation_id="cid",
+        retriever=cast(EvidenceRetriever, None),
+        fetched=FetchLog(),
+        chunks=ChunkRegistry(),
+        documents=DocumentFactRegistry(),
+        extractor=cast(DocumentExtractor, None),
+        extractions=extractions,
+    )
+
+
+def _lab_extraction() -> ExtractedDocument:
+    return ExtractedDocument(
+        document_id="doc-lab",
+        doc_type=DocType.LAB_PDF,
+        report=LabReport(
+            results=[
+                LabResult(
+                    test_name="Hemoglobin A1c",
+                    loinc="4548-4",
+                    value="8.2",
+                    unit="%",
+                    abnormal_flag=AbnormalFlag.HIGH,
+                    citation=Citation(
+                        quote_or_value="8.2",
+                        bounding_box=BoundingBox(page=1, x=72.0, y=144.0, width=96.0, height=12.0),
+                    ),
+                )
+            ]
+        ),
+    )
+
+
+def test_answer_payload_carries_derived_facts_from_this_turns_extractions() -> None:
+    # The sidebar posts these to the write-back endpoint (JOS-81). If they don't reach the response
+    # body, a physician's uploaded labs are read but never offered for the chart.
+    answer = ChatResponse(summary="…", claims=[])
+    deps = _deps_with_extractions({"doc-lab": _lab_extraction()})
+
+    payload = _answer_payload(answer, ChunkRegistry(), deps)
+
+    assert len(payload["derived_facts"]) == 1
+    assert payload["derived_facts"][0]["document_id"] == "doc-lab"
+    assert payload["derived_facts"][0]["facts"][0]["loinc"] == "4548-4"
+
+
+def test_answer_payload_derived_facts_is_empty_when_nothing_was_extracted() -> None:
+    # A turn that read no document must not carry a derived_facts group — the sidebar fires no POST.
+    answer = ChatResponse(summary="…", claims=[])
+    payload = _answer_payload(answer, ChunkRegistry(), _deps_with_extractions({}))
+
+    assert payload["derived_facts"] == []
 
 
 def test_build_evidence_excludes_non_guideline_citations() -> None:

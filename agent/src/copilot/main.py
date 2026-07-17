@@ -23,6 +23,7 @@ from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
 from copilot.health import check_readiness
 from copilot.ingestion.extractor import build_extractor
 from copilot.ingestion.schemas import paths_by_doc_type
+from copilot.ingestion.wire import derived_facts_for
 from copilot.observability import (
     configure_observability,
     observe_turn,
@@ -57,25 +58,29 @@ _UNAVAILABLE_ANSWER = ChatResponse(
 )
 
 
-def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, Any]:
-    """Serialize the final answer: per-claim wire citations plus the deduped evidence panel.
+def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry, deps: GraphDeps) -> dict[str, Any]:
+    """Serialize the final answer: per-claim wire citations, evidence panel, and derived facts.
 
     The response keeps the answer's own ``claims`` (with their gate-stamped ``source``) and adds,
     per claim, the project-wide :data:`~copilot.schemas.Citation` list the sidebar's click-to-source
     (JOS-57) consumes — each a pure projection of a grounded ``SourceRef`` via
     :meth:`~copilot.schemas.SourceRef.to_citation`. It also adds a top-level ``evidence`` array: the
     distinct guideline sources that grounded the answer, deduped by chunk and ranked by relevance
-    (§3.2). Both are additive — nothing the current sidebar reads is removed — and stay off the
+    (§3.2), and a ``derived_facts`` array: the persistable facts extracted from documents this turn,
+    grouped by document, which the sidebar posts to the session-authed write-back endpoint (JOS-81).
+    All three are additive — nothing the current sidebar reads is removed — and stay off the
     LLM-facing ``Claim``/``ChatResponse`` models.
 
     Args:
         answer: The grounded final answer from the graph.
         chunks: The conversation's chunk registry — the source of the retrieved snippets' rerank
             scores and presentation metadata for the evidence panel.
+        deps: The turn's graph deps — the source of the typed extractions the write-back payload
+            projects (``deps.extractions``).
 
     Returns:
         The JSON-serializable response body, each claim carrying a ``citations`` list and the body
-        carrying an ``evidence`` list.
+        carrying ``evidence`` and ``derived_facts`` lists.
     """
     content: dict[str, Any] = answer.model_dump()
     for claim_dict, claim in zip(content["claims"], answer.claims, strict=True):
@@ -83,6 +88,7 @@ def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, An
             ref.to_citation().model_dump(mode="json") for ref in [claim.source, *claim.supporting]
         ]
     content["evidence"] = _build_evidence(answer, chunks)
+    content["derived_facts"] = derived_facts_for(deps.extractions)
     return content
 
 
@@ -415,7 +421,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
-                    content = _answer_payload(result.answer, session.chunks)
+                    content = _answer_payload(result.answer, session.chunks, deps)
                     turn.output(content)
                 except (UnexpectedModelBehavior, UsageLimitExceeded):
                     # Either the gate exhausted its retries without an attributable answer, or the

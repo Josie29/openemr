@@ -146,8 +146,17 @@ $viewData = json_encode(
         .doc-bbox { position: absolute; border: 2px solid var(--accent); background: rgba(30, 78, 216, 0.16); box-shadow: 0 0 0 1px rgba(255,255,255,0.6); pointer-events: none; }
         /* The badge numbers each box to the sidebar's fact list. It is what makes every box being
            equally visible workable: coverage stays legible (you can see how much of the page was
-           NOT boxed) without losing which fact points where. */
-        .doc-bbox-num { position: absolute; top: -0.6rem; left: -0.6rem; min-width: 1.1rem; height: 1.1rem; padding: 0 0.2rem; border-radius: 2px; background: var(--accent); color: #fff; font: 700 0.7rem/1.1rem -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; box-shadow: 0 0 0 1px rgba(255,255,255,0.8); pointer-events: none; }
+           NOT boxed) without losing which fact points where.
+
+           It sits OUTSIDE the box, never over it. Inside — or straddling a corner — it covers the
+           very characters the box exists to prove, which is the one thing this overlay must not do:
+           the reader clicked to read the value with their own eyes. Left is the safe side; a cited
+           value is right-aligned in its column or follows a label, so the space before it is blank
+           (measured: 132-178pt clear on the lab report, >=43pt on the intake form). */
+        .doc-bbox-num { position: absolute; top: 50%; right: 100%; transform: translateY(-50%); margin-right: 0.25rem; min-width: 1.1rem; height: 1.1rem; padding: 0 0.2rem; border-radius: 2px; background: var(--accent); color: #fff; font: 700 0.7rem/1.1rem -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; box-shadow: 0 0 0 1px rgba(255,255,255,0.8); pointer-events: none; }
+        /* No room on the left: a box hard against the page margin would push its badge off-page,
+           and an unreadable number is a broken link back to the fact. */
+        .doc-bbox--flip .doc-bbox-num { right: auto; left: 100%; margin-right: 0; margin-left: 0.25rem; }
         .doc-status { padding: 2rem 1rem; text-align: center; color: var(--muted); }
         .doc-status.err { color: #b02a2a; }
     </style>
@@ -222,6 +231,11 @@ $viewData = json_encode(
                                 var num = document.createElement('span');
                                 num.className = 'doc-bbox-num';
                                 num.textContent = String(index + 1);
+                                // The badge hangs off the box's left edge; a box hard against the
+                                // page margin has nowhere to put it, so flip it to the right.
+                                if (rect.x / base.width < 0.035) {
+                                    box.className += ' doc-bbox--flip';
+                                }
                                 box.appendChild(num);
                             }
                             wrap.appendChild(box);

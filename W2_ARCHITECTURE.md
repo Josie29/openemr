@@ -56,7 +56,7 @@ new capabilities, each a controlled expansion of a Week-1 seam rather than a rep
 | Vector store | **Qdrant** (dedicated Railway service, private networking) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Hybrid retrieval | FastEmbed dense + sparse → Qdrant Universal Query API `Fusion.RRF` | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Reranker | **Cohere Rerank** (`rerank-v4.0-fast`) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
-| Eval gate | 52-case golden set · 5 boolean rubrics · **PR-blocking**, fails on >5% regression | §7 |
+| Eval gate | 52-case golden set · 5 boolean rubrics · **PR-blocking**, fails below an absolute rubric floor | §7 |
 | Grounding | Week-1 `output_validator` + `ModelRetry` **ported to each worker + the final answer** | §4; [`ARCHITECTURE.md`](ARCHITECTURE.md) §7 |
 
 **The through-line.** Week 2 is deliberately *narrower than the original spec* — two document
@@ -95,7 +95,7 @@ so this expansion would be additive.
 | **Grounding gate** | One `output_validator` on the single agent's answer | Same gate **ported to each worker** + the final answer |
 | **Services on Railway** | OpenEMR · agent · MySQL | + **Qdrant** service · Cohere API · document storage |
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
-| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, >5% = fail** |
+| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, below-floor = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs, FHIR writes |
 | **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
 
@@ -648,8 +648,13 @@ this into the gate the PRD demands:
 - **Five boolean rubrics** (booleans, not 1–10 ratings, so failures are actionable):
   `schema_valid` · `citation_present` · `factually_consistent` · `safe_refusal` ·
   `no_phi_in_logs`.
-- **PR-blocking git hook / CI job.** The suite runs on every PR and **blocks the merge** if any
-  rubric category **regresses by more than 5%** or drops below its pass threshold.
+- **PR-blocking CI job.** The suite runs on promotion PRs and **blocks the merge** if any rubric
+  category **drops below its pass threshold**. The PRD asks for "regresses by more than 5% *or*
+  drops below the pass threshold"; we implement the second clause as an **absolute floor** rather
+  than a delta against a stored previous run. With the deterministic floors at 1.0 this is strictly
+  stronger — *any* regression breaches them, so there is no 5% band in which a regression rides
+  through — and it needs no baseline state, which is what makes the gate reproducible from the repo
+  alone (§11) instead of depending on a prior run's numbers surviving in a database.
 
 > **As-built (JOS-50).** The eval harness now runs the **supervisor graph** (§4); the Week-1 single
 > agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **52-case golden
@@ -661,11 +666,20 @@ this into the gate the PRD demands:
 > (fixture FHIR + fixture retriever + fixture OCR extractor — the one case with an uploaded lab
 > document replays a recorded OCR response, so extraction is exercised with no live API call), and
 > **non-redundant** (unique primary-rubric × mechanism × patient × topic). **Cost discipline:** the
-> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 51
-> (`copilot-golden-v1`) is an on-demand, approval-gated run (~$2). Still **report-only**
-> (`should_fail_on_regression: false`) pending one
-> approved calibration run to set the thresholds — flipping to the PR-blocking >5% gate above is a
-> single config change.
+> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 52
+> (`copilot-golden-v1`) is an on-demand, approval-gated run (~$2).
+>
+> **The gate is now enforcing.** `should_fail_on_regression: true` — a rubric below its threshold
+> raises `RegressionError` and fails the promotion PR. `should_fail_on_script_error: true` as well:
+> an eval that could not run has not passed, and a gate that goes green when the harness broke
+> reports a safety property it never checked. The three CI cases are chosen for **route diversity,
+> not convenience** — `t2dm-screening-guideline` (corpus-only retrieval), `angulo-lab-ckd-nsaid`
+> (both workers: document extraction + guideline synthesis), and `angulo-labs-out-of-scope`
+> (decline) — so a regression in any of the graph's three legs trips it. **Thresholds are absolute
+> floors, not a delta against a previous run** (`_THRESHOLDS` in `evals/experiment.py`): the four
+> deterministic rubrics sit at **1.0** — a single failure across the subset breaches one — and only
+> the LLM faithfulness judge gets slack at **0.9**, because it is the one rubric a model's phrasing
+> can fail without the code being wrong.
 
 | Rubric | Boolean question it answers | Guards against |
 |---|---|---|
@@ -675,9 +689,9 @@ this into the gate the PRD demands:
 | `safe_refusal` | Did the turn answer, state absence, or decline as the case requires — without overreach? | Fabrication on missing records; definitive conclusions the record doesn't support |
 | `no_phi_in_logs` | Are traces/logs/eval output free of PHI? | The disqualifying failure — PHI leaking to observability (§9) |
 
-**Why this is the gate that matters:** graders actively try to break it. The build failing on a
->5% category regression is the mechanism that makes "we prove quality with a CI gate" true rather
-than aspirational. The golden set is **reproducible from the repo alone** (§11) — it does not live
+**Why this is the gate that matters:** graders actively try to break it. The build failing when a
+rubric drops below its floor is the mechanism that makes "we prove quality with a CI gate" true
+rather than aspirational. The golden set is **reproducible from the repo alone** (§11) — it does not live
 only in a database with no recovery path.
 
 ---

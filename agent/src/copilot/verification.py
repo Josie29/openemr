@@ -302,7 +302,8 @@ def _stamp(resolver: CitationResolver, ref: SourceRef) -> SourceRef | None:
     # reference_range/abnormal_flag as system-stamped fact, so a model-authored range would make a
     # normal value read as abnormal — or hide an abnormal one — under a UI that says the cells came
     # off the page. Written for EVERY fact (None for a non-lab one), so anything the model authored
-    # here is stripped, never trusted. Do NOT guard this with `if resolution.lab_detail is not None`:
+    # here is stripped, never trusted. Do NOT guard this with
+    # `if resolution.lab_detail is not None`:
     # that reopens exactly this hole for any fact the resolver doesn't supply a detail for.
     update["lab_detail"] = resolution.lab_detail
     return ref.model_copy(update=update)

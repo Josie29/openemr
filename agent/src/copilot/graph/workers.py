@@ -224,9 +224,10 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
             # LOG IT. An empty list is indistinguishable from "the agent read this document and it
             # had nothing in it", so swallowing this silently turns every misconfiguration into a
             # plausible-looking answer. FixtureOcrBackend deliberately raises a LOUD error for a
-            # doc_type it has no recording for (its docstring: "a turn that looks like 'this document
-            # has nothing in it' rather than a misconfiguration") — catching it without a word here
-            # is what defeated that intent, and cost a full trace investigation to rediscover.
+            # doc_type it has no recording for (its docstring: "a turn that looks like 'this
+            # document has nothing in it' rather than a misconfiguration") — catching it without a
+            # word here is what defeated that intent, and cost a full trace investigation to
+            # rediscover.
             logger.warning(
                 "document extraction failed; reporting no facts for this document",
                 extra={"document_id": document_id, "doc_type": summary.doc_type.value},

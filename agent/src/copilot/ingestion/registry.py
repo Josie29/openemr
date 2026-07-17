@@ -176,7 +176,8 @@ class _RecordedFact:
     ``lab_detail`` does not breach that rule: it is ONE field, uniformly present, ``None`` for every
     non-lab fact — the shape stays singular. The recording arm still decides everything arm-specific
     and collapses it, into one slot rather than leaking four lab-only scalars that would be dead for
-    the other four :class:`FactKind` arms. (Spreading them flat is the version that breaks the rule.)
+    the other four :class:`FactKind` arms. (Spreading them flat is the version that breaks the
+    rule.)
     """
 
     resource_type: str

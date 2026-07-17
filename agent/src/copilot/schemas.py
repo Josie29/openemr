@@ -357,9 +357,9 @@ class LabPdfCitation(DocumentCitationBase):
     a date of birth and that nothing can ever populate: a permanently-null key on the wire and a
     frontend type advertising a column that cannot fill (JOS-88).
 
-    It stays optional: :meth:`SourceRef.to_citation` is a *pure* projection and must not raise at the
-    response boundary for a lab-typed ref without a detail (a hand-built ref, or a future lab fact
-    from a non-``LabResult`` source). The sidebar falls back to prose when it is absent.
+    It stays optional: :meth:`SourceRef.to_citation` is a *pure* projection and must not raise at
+    the response boundary for a lab-typed ref without a detail (a hand-built ref, or a future lab
+    fact from a non-``LabResult`` source). The sidebar falls back to prose when it is absent.
     """
 
     source_type: Literal[CitationSourceType.LAB_PDF] = CitationSourceType.LAB_PDF

@@ -98,7 +98,8 @@ def _record_lab_fixture() -> DocumentFactRegistry:
 
 
 def _creatinine_handle(registry: DocumentFactRegistry) -> LabFactHandle:
-    """The recorded Creatinine fact — high at 1.44 mg/dL against a 0.70-1.30 range on the fixture."""
+    """The recorded Creatinine fact — high at 1.44 mg/dL against a 0.70-1.30 range on the
+    fixture."""
     ocr = json.loads(_LAB_OCR.read_text())
     words = extract_word_boxes(_LAB_PDF.read_bytes())
     report = map_lab_report(ocr, DocumentGeometry.from_parts(ocr, words))
@@ -113,9 +114,9 @@ def _creatinine_handle(registry: DocumentFactRegistry) -> LabFactHandle:
 def test_stamp_strips_model_authored_lab_detail_on_fhir_claim() -> None:
     """Guards the lab table: a plain FHIR fact must never carry analyte metadata the model invented.
 
-    The sidebar renders lab_detail as system-stamped fact — cells it claims came off the page. If the
-    gate did not strip this, a model could attach a reference range to any record fact and the table
-    would present the invention as extracted truth.
+    The sidebar renders lab_detail as system-stamped fact — cells it claims came off the page. If
+    the gate did not strip this, a model could attach a reference range to any record fact and the
+    table would present the invention as extracted truth.
 
     This fails the moment anyone re-guards the stamp with `if resolution.lab_detail is not None`.
     """

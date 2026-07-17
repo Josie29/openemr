@@ -1,4 +1,4 @@
-<title>Co-Pilot ↔ OpenEMR — System Diagram (Topology + Agent Graph)</title>
+<title>Co-Pilot ↔ OpenEMR — Service Topology</title>
 <style>
   :root {
     --ground:#eef2f4; --surface:#ffffff; --surface-2:#f5f8f9;
@@ -153,6 +153,22 @@
   .phase.p3 { border-top-color: var(--write); } .phase.p3 .pn, .phase.p3 .tag { color: var(--write); }
   td .rw { font-family: var(--mono); font-size: 0.82rem; }
   td .rw.w { color: var(--write); }
+
+  /* ---- section three: grounding ---- */
+  .n-title.llm { fill: var(--support); }
+  .n-title.stop { fill: var(--write); }
+  .edge.llm { stroke: var(--support); }
+  .edge.llm.dash { stroke-dasharray: 6 5; }
+  .ah-llm { fill: var(--support); }
+  .ah-stop { fill: var(--write); }
+  .chip-tx.stop { fill: var(--write); }
+  td .det { font-family: var(--mono); font-size: 0.8rem; color: var(--brand); }
+  td .det.ai { color: var(--support); }
+  .callout { background: var(--surface-2); border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 10px; padding: 1rem 1.2rem; margin-top: 1.4rem; font-size: 0.9rem; color: var(--muted); }
+  .callout.llm { border-left-color: var(--support); }
+  .callout b { color: var(--ink); font-weight: 600; }
+  .callout code { font-family: var(--mono); font-size: 0.85em; background: var(--surface); padding: 0.05em 0.34em; border-radius: 4px; color: var(--ink); }
+  .callout .lead { display: block; font-size: 0.95rem; color: var(--ink); font-weight: 600; margin-bottom: 0.3rem; letter-spacing: -0.01em; }
 
   @media (prefers-reduced-motion: no-preference) {
     .figure, .legend, .paths, .tbl-scroll { animation: rise 0.5s cubic-bezier(0.2,0.7,0.2,1) both; }
@@ -503,4 +519,153 @@
     </div>
   </div>
   <p class="foot">Every worker output and the final answer pass the same grounding gate (<code>@agent.output_validator</code>): a claim whose citation can't be resolved against what was actually read triggers a <code>ModelRetry</code> — re-ground, drop it, or say it's unavailable. Exhaust the retries and the turn degrades to a refusal, never an unsourced answer. That gate is why <code>derived_facts</code> is safe to write: it only carries what OCR actually extracted, and it leaves the agent only after the answer built from it was verified.</p>
+
+  <hr class="divider-major">
+  <p class="eyebrow" style="margin-top:2.5rem">The grounding gate · why Pydantic AI</p>
+  <h2 class="big">How grounding works — verification, not an LLM judge</h2>
+  <p class="dek">The model writes a claim and a citation <b>pointer</b>. A gate then resolves that pointer against the data actually fetched this turn — with <b>plain Python</b>, no second model. A claim that doesn't resolve is sent back for one <code style="font-family:var(--mono);font-size:0.85em">ModelRetry</code>; run out of retries and the turn refuses rather than ship an unsourced answer.</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 1040 448" role="img" aria-labelledby="gr-t gr-d" preserveAspectRatio="xMidYMid meet">
+      <title id="gr-t">The grounding gate</title>
+      <desc id="gr-d">A worker LLM generates claims, each carrying a citation pointer with the value left empty. The grounding gate — an @agent.output_validator running pure Python — resolves each pointer against data fetched this turn: a structured field via a dict lookup and getattr, or a quote via a whitespace-normalized substring match. No model, embeddings, or fuzzy matching are involved. A claim that resolves is stamped with the value read from the record and passes; a claim that fails triggers a ModelRetry that sends the model back to regenerate, bounded to two retries, after which the turn degrades to a refusal.</desc>
+
+      <defs>
+        <marker id="gT" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-launch"/></marker>
+        <marker id="gRd" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-read"/></marker>
+        <marker id="gV" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-llm"/></marker>
+        <marker id="gA" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-stop"/></marker>
+      </defs>
+
+      <!-- edges -->
+      <path class="edge read" d="M314,204 L396,204" marker-end="url(#gRd)"/>
+      <path class="edge launch" d="M760,162 L808,162" marker-end="url(#gT)"/>
+      <path class="edge llm dash" d="M520,100 C440,44 262,52 194,126" marker-end="url(#gV)"/>
+      <path class="edge stop" d="M560,314 L560,356" marker-end="url(#gA)"/>
+
+      <!-- chips -->
+      <g transform="translate(360,80)"><rect class="chip-bg" x="-118" y="-13" width="236" height="24" rx="6"/><text class="chip-tx llm" x="0" y="4" text-anchor="middle" style="fill:var(--support)">✗ fails → ModelRetry · regenerate (≤ 2)</text></g>
+      <g transform="translate(636,338)"><rect class="chip-bg" x="-70" y="-12" width="140" height="22" rx="6"/><text class="chip-tx stop" x="0" y="4" text-anchor="middle">2 retries exhausted</text></g>
+      <g transform="translate(786,146)"><rect class="chip-bg" x="-34" y="-12" width="68" height="22" rx="6"/><text class="chip-tx launch" x="0" y="4" text-anchor="middle">✓ pass</text></g>
+
+      <!-- worker (LLM) -->
+      <g>
+        <rect class="node" x="70" y="130" width="244" height="150" rx="11"/>
+        <text class="n-title llm" x="92" y="160">Worker (LLM)</text>
+        <text class="n-tag" x="92" y="179">generates Claims · probabilistic</text>
+        <line class="divider" x1="92" y1="192" x2="294" y2="192"/>
+        <text class="n-item" x="92" y="216">each Claim carries a <tspan class="dim">citation pointer:</tspan></text>
+        <text class="n-item" x="92" y="240"><tspan class="dim">{resource_type, resource_id, field | quote}</tspan></text>
+        <text class="n-item" x="92" y="264">value · label · date left <tspan class="em-w" style="fill:var(--support)">EMPTY</tspan></text>
+      </g>
+
+      <!-- grounding gate -->
+      <g>
+        <rect class="node" x="400" y="100" width="360" height="214" rx="11"/>
+        <text class="n-title emr" x="422" y="130">Grounding gate</text>
+        <text class="n-tag" x="422" y="149">@agent.output_validator · pure Python</text>
+        <text class="n-tag" x="422" y="166" style="fill:var(--brand)">no model · no embeddings · no fuzzy match</text>
+        <line class="divider" x1="422" y1="179" x2="740" y2="179"/>
+        <text class="n-item" x="422" y="203">resolve each pointer vs data fetched <tspan class="dim">THIS turn:</tspan></text>
+        <text class="n-item" x="422" y="229"><tspan class="dim">field →</tspan> get((type,id)) · getattr(field) ≠ None</text>
+        <text class="n-item" x="422" y="253"><tspan class="dim">quote →</tspan> norm_ws(q) in norm_ws(text)</text>
+        <text class="n-item" x="422" y="277"><tspan class="dim">whitespace-normalized · case-sensitive</tspan></text>
+        <text class="n-item" x="422" y="299"><tspan class="dim">paraphrase or invented value → fails</tspan></text>
+      </g>
+
+      <!-- grounded -->
+      <g>
+        <rect class="node-alt" x="810" y="118" width="200" height="88" rx="11"/>
+        <text class="n-title emr" x="832" y="146" style="font-size:14px">Grounded ✓</text>
+        <text class="n-tag" x="832" y="165">value filled FROM the record</text>
+        <text class="n-item" x="832" y="188"><tspan class="dim">the model never wrote it</tspan></text>
+      </g>
+
+      <!-- refusal -->
+      <g>
+        <rect class="node-alt" x="400" y="360" width="360" height="66" rx="11"/>
+        <text class="n-title stop" x="422" y="388" style="font-size:14px">Refusal</text>
+        <text class="n-tag" x="422" y="407">“…could not attribute to this record” · claims = []</text>
+      </g>
+    </svg>
+  </div>
+
+  <h3 class="sub-h">The three situations it runs in</h3>
+  <p class="cap">Same gate, bound to a different resolver on each agent — a worker can only ground against what it was allowed to read.</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>Situation (@agent.output_validator)</th><th>Resolver</th><th>Grounds against</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="svc" style="font-weight:400">intake-extractor</span></td>
+          <td class="m"><code style="font-family:var(--mono)">CompositeResolver(fetched, documents)</code></td>
+          <td class="m">FHIR records it read + facts it OCR'd</td>
+        </tr>
+        <tr>
+          <td><span class="svc" style="font-weight:400">evidence-retriever</span></td>
+          <td class="m"><code style="font-family:var(--mono)">chunks</code> <span class="m">(ChunkRegistry)</span></td>
+          <td class="m">guideline snippets it retrieved</td>
+        </tr>
+        <tr>
+          <td><span class="svc" style="font-weight:400">final answerer</span></td>
+          <td class="m"><code style="font-family:var(--mono)">CompositeResolver(fetched, chunks, documents)</code></td>
+          <td class="m">all three — can only restate what the workers grounded</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="cap" style="margin-top:0.7rem">The composite tries each source in order, first hit wins — and can't collide, because document-fact ids are <code style="font-family:var(--mono)">docid#ordinal</code>, never a FHIR uuid.</p>
+
+  <h3 class="sub-h">What's compared — and whether a model decides it</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>Citation kind</th><th>What the model writes</th><th>How it's checked</th><th>Determined by</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="m">Structured field <span class="m">(FHIR record)</span></td>
+          <td class="m"><code style="font-family:var(--mono)">type · id · field</code></td>
+          <td class="m"><code style="font-family:var(--mono)">objects.get((type,id))</code> then <code style="font-family:var(--mono)">getattr(field)</code> is non-None</td>
+          <td><span class="det">deterministic — dict + getattr</span></td>
+        </tr>
+        <tr>
+          <td class="m">Free-text quote <span class="m">(note / guideline)</span></td>
+          <td class="m"><code style="font-family:var(--mono)">type · id · quote</code></td>
+          <td class="m">whitespace-normalized substring: <code style="font-family:var(--mono)">norm(quote) in norm(text)</code></td>
+          <td><span class="det">deterministic — string match<br><span class="m" style="font-size:0.92em">paraphrase / wrong case fails</span></span></td>
+        </tr>
+        <tr>
+          <td class="m">Document fact <span class="m">(OCR'd)</span></td>
+          <td class="m"><code style="font-family:var(--mono)">type · docid#ordinal</code></td>
+          <td class="m">id lookup + <code style="font-family:var(--mono)">resource_type</code> must match the recorded fact</td>
+          <td><span class="det">deterministic — dict lookup</span></td>
+        </tr>
+        <tr>
+          <td class="m">The value shown to the physician</td>
+          <td class="m"><span class="m">— left empty —</span></td>
+          <td class="m">copied from the resolved record / chunk / fact and stamped on</td>
+          <td><span class="det">deterministic — stamped, never model-authored</span></td>
+        </tr>
+        <tr>
+          <td class="m">A claim that fails to resolve</td>
+          <td class="m">—</td>
+          <td class="m"><code style="font-family:var(--mono)">ModelRetry</code>: re-ground, drop it, or say unavailable</td>
+          <td><span class="det ai">the model — the only model step; ≤ 2, then refusal</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lead">The model writes the pointer; the system fills the value.</span>
+    A claim's <code>value</code>, <code>label</code>, <code>date</code> — and every click-to-source field (<code>document_id</code>, <code>page</code>, <code>bounding_box</code>) — are stamped from the resolved source, <b>unconditionally overwriting anything the model put there</b>. So a model can cite a real record but cannot fabricate what it says, and cannot forge a source box. Grounding checks that the pointer resolves; it never trusts a model-authored value.
+  </div>
+
+  <div class="callout llm">
+    <span class="lead">Why this shaped the framework choice.</span>
+    The gate is a per-agent <b>pre-return validate-then-retry hook</b> — Pydantic AI's <code>@agent.output_validator</code> raising <code>ModelRetry</code>. The decision doc calls it “the crown jewel … the deterministic half of the verification strategy.” LangGraph has <b>no first-class pre-return validate-then-retry primitive</b> (you rebuild the gate); the OpenAI Agents SDK's output guardrails <b>halt on a tripwire and don't feed the correction back</b> to the model. Keeping this mechanism byte-for-byte is why <b>Pydantic AI</b> won — routing was the tie-breaker it could already satisfy, not the deciding factor.
+  </div>
 </div>

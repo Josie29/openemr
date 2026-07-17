@@ -193,6 +193,23 @@ flowchart TB
      patient ownership (`can_patient_access`) rather than the clinician category ACL (`can_access`),
      which also unblocks `DocumentReference` discovery of Documents-tab uploads. Fixture/offline mode
      serves a committed PDF through the same path.
+   - **LOINC codes are read off the page, never recalled.** A lab result needs a LOINC code to be
+     written back: OpenEMR publishes `procedure_result.result_code` as a LOINC **unconditionally**
+     (`FhirObservationLaboratoryService:255`), so a result whose code is unknown is refused rather
+     than published under a fabricated one. The code is extracted like any other printed field and
+     then **grounded** — accepted only if it actually appears in the document's own text evidence
+     (the PDF text layer, or the OCR's parsed table cells for a scan). This is enforced in code,
+     not asked for in the prompt: a model asked for a LOINC will happily supply a *real* one from
+     training, which passes a checksum and is still a fabrication. The **Mod 10 check digit** is a
+     second, independent gate — it catches an OCR misread on a scan, where the mangled code lands
+     in the OCR text and would otherwise pass grounding. A code failing either gate is dropped to
+     null while the result keeps its value and box: losing the code costs write-back, losing the
+     result would cost the answer.
+   - **Residual limitation — the fixture is kinder than production.** Real lab PDFs do **not**
+     reliably print LOINC; many print the performing lab's internal order code instead. The fixture
+     prints them because a real lab's source system genuinely holds the code, but a production
+     deployment needs a terminology-mapping layer — with its own confidence handling and a
+     refuse-on-miss path — for the reports that carry none.
 3. **Parse, don't validate.** Raw extractor output is parsed into a strict Pydantic model
    (`LabReport` for `lab_pdf`, `IntakeForm` for `intake_form`). Per the PRD Engineering
    Requirements, **the schema is the source of truth, not what the extractor happens to return** —

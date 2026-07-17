@@ -124,6 +124,17 @@ class LabResult(BaseModel):
 
     Values are captured **verbatim as printed** — never rounded, converted, or inferred. Numeric
     parsing for the trend widget happens downstream at the persistence boundary, not here.
+
+    ``loinc`` is **optional, deliberately.** OpenEMR publishes ``procedure_result.result_code`` as a
+    LOINC code unconditionally, so write-back needs one and refuses a result without it (JOS-81).
+    But a report that prints no codes must still yield usable facts — the value, the name and the
+    box are what answer the physician's question — so requiring it here would turn "cannot persist
+    this" into "cannot read this at all", which is a much worse failure. The two concerns are
+    separate: extraction takes what the page offers; persistence sets its own bar.
+
+    A code that fails validation (:func:`copilot.ingestion.loinc.parse`) arrives here as None rather
+    than as a guess. A misread code silently mislabels *which test was run*, which is worse than no
+    code, because nothing downstream can tell it from a correct one.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -131,6 +142,13 @@ class LabResult(BaseModel):
     test_name: str = Field(
         min_length=1,
         description="Analyte/test name exactly as printed, e.g. 'Hemoglobin A1c'.",
+    )
+    loinc: str | None = Field(
+        default=None,
+        description=(
+            "The LOINC code printed beside the analyte, e.g. '2823-3'. Null when the report prints "
+            "none. Read it off the page — never supply a code from memory."
+        ),
     )
     value: str = Field(
         min_length=1,

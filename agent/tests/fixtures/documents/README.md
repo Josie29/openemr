@@ -25,7 +25,7 @@ allergic asthma, and a family history of CKD + hypertension + type-2 diabetes.
 
 | PDF | What it is |
 |-----|------------|
-| `sergio-angulo-lab-report.pdf` | Clean digital CMP + CBC report. Extracts near-perfectly (happy path). |
+| `sergio-angulo-lab-report.pdf` | Clean digital CMP + CBC report. Extracts near-perfectly (happy path). Prints a **LOINC** column (JOS-87): every code is real, sourced from loinc.org's panel pages and checksum-verified — never write one from memory, and never invent one for a new analyte. The write-back needs a code (JOS-81) and the extractor refuses any that the page does not print. |
 | `sergio-angulo-lab-report-scanned.pdf` | Lightly degraded scan — legible but imperfect. Tests graceful degradation. |
 | `sergio-angulo-lab-report-scanned-heavy.pdf` | Heavily degraded scan with localized damage (coffee ring over the renal values, dropout streak + dark edge over the Prior column, fold crease). **Failure-path fixture** — specific fields go low-confidence / missing so the confidence gate / `safe_refusal` cases have something to catch. |
 | `sergio-angulo-intake-form.pdf` | Patient-completed intake (handwriting-styled, tabular). |
@@ -33,13 +33,14 @@ allergic asthma, and a family history of CKD + hypertension + type-2 diabetes.
 
 ## Regenerating
 
-**Clean PDFs** — rendered from HTML with headless Chrome:
+**Clean PDFs** — `src/make-clean-pdf.py` renders the HTML through headless Chrome. It wraps the
+invocation that produced the committed PDFs (verified: re-rendering an unchanged source reproduces
+its PDF byte-for-byte), so use it rather than retyping the flags — the page's own
+`@page { margin: 0 }` owns the geometry, and adding Chrome's default margin back shifts every box
+on the page, silently invalidating the recorded boxes.
 
 ```sh
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu \
-  --no-pdf-header-footer \
-  --print-to-pdf="pdfs/sergio-angulo-lab-report.pdf" \
-  "file://$PWD/src/sergio-angulo-lab-report.html"
+python src/make-clean-pdf.py src/sergio-angulo-lab-report.html pdfs/sergio-angulo-lab-report.pdf
 ```
 
 **Scanned variants** — `src/make-scanned-variant.py` renders the clean HTML, bakes in scan

@@ -176,16 +176,22 @@ $viewData = json_encode(
                 .then(function (buf) { return pdfjsLib.getDocument({ data: buf }).promise; })
                 .then(function (pdf) { return pdf.getPage(Math.min(data.page, pdf.numPages)); })
                 .then(function (page) {
-                    // Scale to fit the available width; bbox values are PDF points (scale-1 space).
+                    // The page in its own units (PDF points) — the space the boxes are given in.
+                    var base = page.getViewport({ scale: 1 });
+                    // Scale to fit the available width. This is a REQUEST, not a guarantee: the
+                    // canvas can still end up narrower (see the box positioning below).
                     var maxW = Math.min(wrap.parentElement.clientWidth - 8, 1100);
-                    var scale = maxW / page.getViewport({ scale: 1 }).width;
+                    var scale = maxW / base.width;
                     var vp = page.getViewport({ scale: scale });
                     var canvas = document.createElement('canvas');
                     var ratio = window.devicePixelRatio || 1;
                     canvas.width = Math.floor(vp.width * ratio);
                     canvas.height = Math.floor(vp.height * ratio);
                     canvas.style.width = vp.width + 'px';
-                    canvas.style.height = vp.height + 'px';
+                    // Height follows the width from the canvas's intrinsic ratio. Pinning it in px
+                    // instead lets `max-width: 100%` squash the page horizontally while the height
+                    // holds — a silently distorted document, and a scan is evidence.
+                    canvas.style.height = 'auto';
                     wrap.innerHTML = '';
                     wrap.appendChild(canvas);
                     var ctx = canvas.getContext('2d');
@@ -199,10 +205,18 @@ $viewData = json_encode(
                         boxes.forEach(function (rect, index) {
                             var box = document.createElement('div');
                             box.className = 'doc-bbox';
-                            box.style.left = (rect.x * scale) + 'px';
-                            box.style.top = (rect.y * scale) + 'px';
-                            box.style.width = (rect.w * scale) + 'px';
-                            box.style.height = (rect.h * scale) + 'px';
+                            // Positioned as a PERCENTAGE of the page, never in scaled pixels. The
+                            // canvas frequently renders narrower than `scale` asked for — the stage's
+                            // padding is not in the measurement, and the tall canvas summons a
+                            // scrollbar that narrows the stage AFTER it was measured — and
+                            // `max-width: 100%` then absorbs the difference silently. A px-positioned
+                            // box does not follow that and lands a few percent to the right, over the
+                            // wrong cell. Percentages resolve against the wrapper, which tracks the
+                            // canvas at whatever width it settles at, including a later window resize.
+                            box.style.left = (rect.x / base.width * 100) + '%';
+                            box.style.top = (rect.y / base.height * 100) + '%';
+                            box.style.width = (rect.w / base.width * 100) + '%';
+                            box.style.height = (rect.h / base.height * 100) + '%';
                             if (boxes.length > 1) {
                                 // A lone box needs no badge — there is nothing to disambiguate.
                                 var num = document.createElement('span');

@@ -90,6 +90,8 @@ final readonly class CopilotSidebarController
             'conversationUrl' => $this->moduleWebPath . '/public/conversation.php',
             // JOS-57 click-to-source: the session-authed viewer opened as a chart-pane tab.
             'sourceViewUrl' => $this->moduleWebPath . '/public/source-view.php',
+            // JOS-81 write-back: the session-authed endpoint the sidebar posts derived facts to.
+            'persistFactsUrl' => $this->moduleWebPath . '/public/persist-facts.php',
             'csrfToken' => CsrfUtils::collectCsrfToken(session: $session),
             'expectedOrigin' => $urls->origin,
             'messageSource' => TokenRelayView::MESSAGE_SOURCE,

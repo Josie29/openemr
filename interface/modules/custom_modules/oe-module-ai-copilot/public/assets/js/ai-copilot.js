@@ -1601,6 +1601,7 @@
                 removePending(pending);
                 appendAnswer(answer);
                 persistTurn(pidForTurn, message, answer); // Phase 3 stub
+                persistDerivedFacts(answer); // JOS-81: write extracted facts back to the chart
             })
             .catch(function (err) {
                 removePending(pending);
@@ -1618,6 +1619,68 @@
             .finally(function () {
                 setBusy(false);
                 els.input.focus();
+            });
+    }
+
+    // ---- derived-fact write-back (JOS-81) --------------------------------
+    // The agent returns the facts it extracted this turn on answer.derived_facts, grouped by source
+    // document. We post each group to the session-authenticated persist endpoint (persist-facts.php),
+    // which writes them to the chart under the logged-in clinician's own ACL — the agent holds only a
+    // read token and cannot write. One POST per document, since the endpoint takes one document each.
+    function persistDerivedFacts(answer) {
+        var groups = answer && Array.isArray(answer.derived_facts) ? answer.derived_facts : [];
+        if (!groups.length || !config.persistFactsUrl) {
+            return;
+        }
+
+        Promise.all(groups.map(postFactGroup)).then(function (outcomes) {
+            // Sum only the groups that actually persisted. A failed group contributes nothing rather
+            // than a wrong count, so the confirmation never overstates what reached the chart.
+            var saved = outcomes.reduce(function (total, outcome) {
+                return total + (outcome ? outcome.written : 0);
+            }, 0);
+            if (saved > 0) {
+                setStatus(labels.factsSaved.replace('{n}', String(saved)), false);
+            }
+            // On zero saved we stay silent: a persist failure must not alarm mid-conversation, and
+            // the absence of the confirmation line is itself the signal. Phase 2's accept gate makes
+            // the write explicit and will own failure UX.
+        });
+    }
+
+    // POST one document's facts. Resolves to {written, skipped} on success, or null on any failure —
+    // fire-and-forget: a rejected persist never propagates into the chat turn's promise chain.
+    function postFactGroup(group) {
+        return fetch(config.persistFactsUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin', // session cookie authorizes the write; NEVER the SMART token
+            body: JSON.stringify({
+                csrf_token: config.csrfToken,
+                document: group.document_id,
+                facts: group.facts // already in the endpoint's shape (see agent wire.py)
+            })
+        })
+            .then(function (response) {
+                // Same defensive read as the chat path: an expired session returns HTTP 200 with an
+                // HTML login-redirect script, so anything non-JSON or non-ok counts as "not saved".
+                return response.text().then(function (text) {
+                    if (!response.ok) {
+                        return null;
+                    }
+                    try {
+                        var body = JSON.parse(text);
+                        return {
+                            written: Array.isArray(body.written) ? body.written.length : 0,
+                            skipped: Array.isArray(body.skipped) ? body.skipped.length : 0
+                        };
+                    } catch (parseErr) {
+                        return null;
+                    }
+                });
+            })
+            .catch(function () {
+                return null; // network/timeout — swallow; the chat answer already rendered
             });
     }
 
@@ -1745,7 +1808,9 @@
             tierDocumentsShort: els.sidebar.dataset.labelTierDocumentsShort || 'read from scan',
             docLabReport: els.sidebar.dataset.labelDocLabReport || 'Lab report',
             docIntakeForm: els.sidebar.dataset.labelDocIntakeForm || 'Intake form',
-            docGeneric: els.sidebar.dataset.labelDocGeneric || 'Uploaded document'
+            docGeneric: els.sidebar.dataset.labelDocGeneric || 'Uploaded document',
+            // Write-back (JOS-81). {n} is the fact count. Defaulted here for the same reason.
+            factsSaved: els.sidebar.dataset.labelFactsSaved || '{n} extracted facts saved to chart (unconfirmed)'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

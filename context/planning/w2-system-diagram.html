@@ -170,6 +170,24 @@
   .callout code { font-family: var(--mono); font-size: 0.85em; background: var(--surface); padding: 0.05em 0.34em; border-radius: 4px; color: var(--ink); }
   .callout .lead { display: block; font-size: 0.95rem; color: var(--ink); font-weight: 600; margin-bottom: 0.3rem; letter-spacing: -0.01em; }
 
+  /* ---- section four: where writes land ---- */
+  .badgekey { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--muted); }
+  .badge { display: inline-block; font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.14em 0.5em; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+  .badge.vis { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
+  .badge.part { color: var(--write); border-color: color-mix(in srgb, var(--write) 45%, var(--line)); }
+  .badge.no { color: var(--muted); }
+  .dest-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.3rem; align-items: start; }
+  @media (max-width: 840px) { .dest-cards { grid-template-columns: 1fr; } }
+  .dest { background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--write); border-radius: 12px; padding: 1.05rem 1.2rem; }
+  .dest h4 { margin: 0 0 0.15rem; font-size: 1rem; letter-spacing: -0.01em; }
+  .dest .tgt { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+  .dest .marker { font-family: var(--mono); font-size: 0.72rem; color: var(--write); margin: 0.15rem 0 0.85rem; }
+  .dest ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.7rem; }
+  .dest li { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; }
+  .dest li .scr { color: var(--ink); font-weight: 600; }
+  .dest li .path { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+  .dest li .note { color: var(--muted); font-size: 0.8rem; }
+
   @media (prefers-reduced-motion: no-preference) {
     .figure, .legend, .paths, .tbl-scroll { animation: rise 0.5s cubic-bezier(0.2,0.7,0.2,1) both; }
     .legend { animation-delay: 0.05s; } .paths { animation-delay: 0.1s; } .tbl-scroll { animation-delay: 0.15s; }
@@ -667,5 +685,91 @@
   <div class="callout llm">
     <span class="lead">Why this shaped the framework choice.</span>
     The gate is a per-agent <b>pre-return validate-then-retry hook</b> — Pydantic AI's <code>@agent.output_validator</code> raising <code>ModelRetry</code>. The decision doc calls it “the crown jewel … the deterministic half of the verification strategy.” LangGraph has <b>no first-class pre-return validate-then-retry primitive</b> (you rebuild the gate); the OpenAI Agents SDK's output guardrails <b>halt on a tripwire and don't feed the correction back</b> to the model. Keeping this mechanism byte-for-byte is why <b>Pydantic AI</b> won — routing was the tie-breaker it could already satisfy, not the deciding factor.
+  </div>
+
+  <hr class="divider-major">
+  <p class="eyebrow" style="margin-top:2.5rem">Write-back · the clinician's screens</p>
+  <h2 class="big">Where a written fact shows up in OpenEMR</h2>
+  <p class="dek">Each fact type lands in a native table and surfaces on specific screens a physician already opens. The agent-derived marker — <code style="font-family:var(--mono);font-size:0.85em">preliminary</code> / <code style="font-family:var(--mono);font-size:0.85em">unconfirmed</code> / <code style="font-family:var(--mono);font-size:0.85em">proposal</code> — is only visible to a clinician on <b>two</b> of them.</p>
+  <div class="badgekey">
+    <span><span class="badge vis">marker shown</span> the derived flag is visible here</span>
+    <span><span class="badge part">partial</span> flag partly shown</span>
+    <span><span class="badge no">not shown</span> lands here, but the flag isn't rendered</span>
+  </div>
+
+  <div class="dest-cards">
+    <div class="dest">
+      <h4>Labs</h4>
+      <div class="tgt">procedure_order → … → procedure_result</div>
+      <div class="marker">result_status = preliminary</div>
+      <ul>
+        <li>
+          <span class="scr"><span class="badge part">partial</span> Patient Results</span>
+          <span class="path">Procedures ▸ Patient Results · single_order_results.inc.php</span>
+          <span class="note">Report <b>Status</b> shows “preliminary”; the result-level status and the “reviewed” check are absent.</span>
+        </li>
+        <li>
+          <span class="scr"><span class="badge no">not shown</span> Lab Overview</span>
+          <span class="path">Procedures ▸ Lab Overview · summary/labdata.php</span>
+          <span class="note">Plots values by code; no status column.</span>
+        </li>
+        <li>
+          <span class="scr"><span class="badge part">partial</span> Report tab</span>
+          <span class="path">patient_file/report/custom_report.php</span>
+          <span class="note">Same as Patient Results — report status only.</span>
+        </li>
+        <li>
+          <span class="scr"><span class="badge vis">marker shown</span> Patient Portal</span>
+          <span class="path">portal/get_lab_results.php</span>
+          <span class="note">Renders both result &amp; report status as “preliminary”.</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="dest">
+      <h4>Allergies</h4>
+      <div class="tgt">lists · type = allergy</div>
+      <div class="marker">verification = unconfirmed</div>
+      <ul>
+        <li>
+          <span class="scr"><span class="badge no">not shown</span> Dashboard “Allergies” card</span>
+          <span class="path">templates/patient/card/allergies.html.twig</span>
+          <span class="note">Shows title, severity, reaction — never <code style="font-family:var(--mono)">verification</code>.</span>
+        </li>
+        <li>
+          <span class="scr"><span class="badge vis">marker shown</span> Edit Issue</span>
+          <span class="path">Issues ▸ Edit Issue · summary/add_edit_issue.php</span>
+          <span class="note">A <b>Verification Status</b> field reads “Unconfirmed”. The one native screen where the flag is unmistakable.</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="dest">
+      <h4>Medications</h4>
+      <div class="tgt">lists + lists_medication</div>
+      <div class="marker">request_intent = proposal</div>
+      <ul>
+        <li>
+          <span class="scr"><span class="badge no">not shown</span> Dashboard “Medications” card</span>
+          <span class="path">templates/patient/card/medication.html.twig</span>
+          <span class="note">Shows the drug title only.</span>
+        </li>
+        <li>
+          <span class="scr"><span class="badge no">FHIR only</span> Edit Issue</span>
+          <span class="path">summary/add_edit_issue.php · no intent field</span>
+          <span class="note"><code style="font-family:var(--mono)">proposal</code> surfaces only via <code style="font-family:var(--mono)">MedicationRequest.intent</code>; a free-text disclosure rides in <code style="font-family:var(--mono)">comments</code>.</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="lead">Landing a fact and flagging it are two different things.</span>
+    All three write correctly, but the “not clinician-confirmed” marker is visible to a clinician in only <b>two native screens</b> — the report <b>Status</b> on <b>Patient Results</b> (labs) and the <b>Verification Status</b> field in <b>Edit Issue</b> (allergies). The <b>Dashboard cards show none of the markers</b>, and a medication's <code>proposal</code> intent never appears in the legacy UI at all. So a derived fact can sit on the summary looking like any other. That gap is the case for <b>phase 2</b>: an explicit accept step in the Co-Pilot's own sidebar, where “derived, unconfirmed” is unambiguous — and where accepting flips <code>preliminary → final</code> and <code>unconfirmed → confirmed</code> on the same rows.
+  </div>
+
+  <div class="callout">
+    <span class="lead">The Co-Pilot's own provenance surface is separate.</span>
+    Clicking a citation opens <code>source-view.php</code> as its own chart tab (“Source: …”), rendering the source PDF with the extracted value boxed. That's the Co-Pilot's surface, distinct from the native Dashboard, Issues, and Procedures screens above — none of which link to it. It's how a physician walks a written fact back to the page it came from.
   </div>
 </div>

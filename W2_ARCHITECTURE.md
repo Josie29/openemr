@@ -15,6 +15,12 @@ Detailed decision evidence — the roads not taken — lives in `/context/`:
 [architecture-defense deck](context/planning/w2-arch-defense-deck.md). This document is the
 source of truth; those back it.
 
+A rendered, theme-aware companion diagram —
+[`w2-system-diagram.html`](context/planning/w2-system-diagram.html) — visualizes both the deployed
+Railway topology (verified against production) and the runtime agent graph (supervisor routing, the
+two workers and their tools, the grounding gate, and where write-back leaves the read-only agent).
+Open it in a browser; it does not render inline on GitHub.
+
 > **Notation.** Acronyms are expanded on first use: **VLM** (Vision-Language Model), **RAG**
 > (Retrieval-Augmented Generation), **RRF** (Reciprocal Rank Fusion), **BM25** (a sparse
 > lexical ranking function), **PHI** (Protected Health Information), **IDOR** (Insecure Direct

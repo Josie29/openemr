@@ -1,0 +1,506 @@
+<title>Co-Pilot ↔ OpenEMR — System Diagram (Topology + Agent Graph)</title>
+<style>
+  :root {
+    --ground:#eef2f4; --surface:#ffffff; --surface-2:#f5f8f9;
+    --ink:#17242e; --muted:#586a75; --line:#d2dce2;
+    --brand:#0d7d8c; --read:#2264ab; --write:#a9670a; --support:#5f639a;
+    --chip:#ffffff;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0c151d; --surface:#15212c; --surface-2:#101b24;
+      --ink:#e7eef3; --muted:#96a6b1; --line:#26343f;
+      --brand:#37b7c7; --read:#69a6e2; --write:#e0a648; --support:#a4a7db;
+      --chip:#15212c;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground:#eef2f4; --surface:#ffffff; --surface-2:#f5f8f9;
+    --ink:#17242e; --muted:#586a75; --line:#d2dce2;
+    --brand:#0d7d8c; --read:#2264ab; --write:#a9670a; --support:#5f639a; --chip:#ffffff;
+  }
+  :root[data-theme="dark"] {
+    --ground:#0c151d; --surface:#15212c; --surface-2:#101b24;
+    --ink:#e7eef3; --muted:#96a6b1; --line:#26343f;
+    --brand:#37b7c7; --read:#69a6e2; --write:#e0a648; --support:#a4a7db; --chip:#15212c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 3.5rem 1.5rem 4rem; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--brand); margin: 0 0 0.75rem;
+  }
+  h1 {
+    font-size: clamp(1.7rem, 3.4vw, 2.5rem); line-height: 1.1; font-weight: 700;
+    letter-spacing: -0.02em; text-wrap: balance; margin: 0 0 0.6rem;
+  }
+  .dek { color: var(--muted); font-size: 1.02rem; max-width: 60ch; margin: 0 0 2.25rem; }
+  .dek b { color: var(--ink); font-weight: 600; }
+
+  .figure {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 0.5rem; overflow-x: auto;
+    box-shadow: 0 1px 2px rgba(20,33,44,0.04), 0 12px 32px -20px rgba(20,33,44,0.28);
+  }
+  .figure svg { display: block; width: 100%; height: auto; min-width: 720px; }
+
+  /* SVG node + edge styling, driven entirely by tokens so both themes track. */
+  .node { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+  .node-alt { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
+  .divider { stroke: var(--line); stroke-width: 1; }
+  .n-title { font: 700 15px var(--sans); }
+  .n-title.emr { fill: var(--brand); }
+  .n-title.agent { fill: var(--read); }
+  .n-title.plain { fill: var(--ink); }
+  .n-tag { fill: var(--muted); font: 500 10.5px var(--mono); letter-spacing: 0.02em; }
+  .n-item { fill: var(--ink); font: 400 12px var(--mono); }
+  .n-item .dim { fill: var(--muted); }
+
+  .edge { fill: none; stroke-width: 2; }
+  .edge.launch { stroke: var(--brand); }
+  .edge.read   { stroke: var(--read); }
+  .edge.read.dash { stroke-dasharray: 6 5; }
+  .edge.write  { stroke: var(--write); stroke-width: 2.5; }
+  .edge.support { stroke: var(--read); stroke-width: 1.5; opacity: 0.75; }
+
+  .ah-launch { fill: var(--brand); }
+  .ah-read { fill: var(--read); }
+  .ah-write { fill: var(--write); }
+
+  .chip-bg { fill: var(--chip); stroke: var(--line); stroke-width: 1; }
+  .chip-tx { font: 600 11px var(--mono); }
+  .chip-tx.launch { fill: var(--brand); }
+  .chip-tx.read { fill: var(--read); }
+  .chip-tx.write { fill: var(--write); }
+
+  .n-vol { fill: var(--muted); font: 600 10.5px var(--mono); letter-spacing: 0.02em; }
+  .vol-dot { fill: var(--support); }
+
+  /* Legend */
+  .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.75rem; margin: 1.5rem 0 0; }
+  .leg {
+    display: grid; grid-template-columns: auto 1fr; gap: 0.6rem 0.75rem; align-items: start;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.85rem 1rem;
+  }
+  .leg .key { font-family: var(--mono); font-weight: 700; font-size: 0.9rem; grid-row: span 2; padding-top: 0.1rem; }
+  .leg.a .key { color: var(--brand); } .leg.b .key { color: var(--read); } .leg.c .key { color: var(--write); }
+  .leg .lt { font-weight: 600; font-size: 0.9rem; }
+  .leg .ld { color: var(--muted); font-size: 0.82rem; grid-column: 2; }
+  .leg code { font-family: var(--mono); font-size: 0.82em; background: var(--surface-2); padding: 0.05em 0.35em; border-radius: 4px; }
+
+  /* Two-path explainer */
+  .paths { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.5rem; }
+  @media (max-width: 680px) { .paths { grid-template-columns: 1fr; } }
+  .path {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.15rem 1.25rem;
+    border-top: 3px solid var(--edge-c, var(--line));
+  }
+  .path.read { border-top-color: var(--read); }
+  .path.write { border-top-color: var(--write); }
+  .path h3 { margin: 0 0 0.15rem; font-size: 1rem; letter-spacing: -0.01em; }
+  .path .sub { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.7rem; }
+  .path p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+  .path p b { color: var(--ink); font-weight: 600; }
+  .path code { font-family: var(--mono); font-size: 0.82em; color: var(--ink); background: var(--surface-2); padding: 0.05em 0.35em; border-radius: 4px; }
+
+  /* Deployment table */
+  h2 { font-size: 1.1rem; letter-spacing: -0.01em; margin: 2.5rem 0 0.9rem; }
+  .tbl-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 560px; }
+  th, td { text-align: left; padding: 0.7rem 1rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  tbody tr:last-child td { border-bottom: none; }
+  td .svc { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+  td .m { color: var(--muted); }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 0.72rem; padding: 0.12em 0.5em; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+
+  .foot { margin-top: 2rem; color: var(--muted); font-size: 0.82rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  .foot code { font-family: var(--mono); }
+
+  /* ---- section two: the agent graph ---- */
+  .divider-major { border: 0; height: 1px; background: var(--line); margin: 3.5rem 0 0; }
+  h2.big { font-size: clamp(1.5rem, 3vw, 2.15rem); line-height: 1.12; letter-spacing: -0.02em; font-weight: 700; text-wrap: balance; margin: 0.7rem 0 0.6rem; }
+  h3.sub-h { font-size: 0.95rem; margin: 2rem 0 0.55rem; letter-spacing: -0.01em; }
+  .cap { color: var(--muted); font-size: 0.86rem; margin: 0 0 0.2rem; }
+
+  .loopbox { fill: var(--surface-2); fill-opacity: 0.55; stroke: var(--brand); stroke-width: 1.5; stroke-dasharray: 7 5; }
+  .loop-tx { fill: var(--brand); font: 600 11px var(--mono); }
+  .gate-tx { fill: var(--brand); font: 600 10px var(--mono); }
+  .chip-tx.ext { fill: var(--support); }
+  .em-w { fill: var(--write); font-weight: 600; }
+
+  .timeline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.85rem; margin-top: 1.3rem; }
+  @media (max-width: 760px) { .timeline { grid-template-columns: 1fr; } }
+  .phase { background: var(--surface); border: 1px solid var(--line); border-top-width: 3px; border-radius: 12px; padding: 1rem 1.15rem; }
+  .phase .pn { font-family: var(--mono); font-weight: 700; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .phase h4 { margin: 0.3rem 0 0.35rem; font-size: 0.94rem; letter-spacing: -0.01em; }
+  .phase p { margin: 0; color: var(--muted); font-size: 0.84rem; }
+  .phase p b { color: var(--ink); font-weight: 600; }
+  .phase code { font-family: var(--mono); font-size: 0.82em; background: var(--surface-2); padding: 0.05em 0.32em; border-radius: 4px; color: var(--ink); }
+  .phase .tag { display: inline-block; margin-top: 0.6rem; font-family: var(--mono); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em; }
+  .phase.p1 { border-top-color: var(--read); } .phase.p1 .pn, .phase.p1 .tag { color: var(--read); }
+  .phase.p2 { border-top-color: var(--brand); } .phase.p2 .pn, .phase.p2 .tag { color: var(--brand); }
+  .phase.p3 { border-top-color: var(--write); } .phase.p3 .pn, .phase.p3 .tag { color: var(--write); }
+  td .rw { font-family: var(--mono); font-size: 0.82rem; }
+  td .rw.w { color: var(--write); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .figure, .legend, .paths, .tbl-scroll { animation: rise 0.5s cubic-bezier(0.2,0.7,0.2,1) both; }
+    .legend { animation-delay: 0.05s; } .paths { animation-delay: 0.1s; } .tbl-scroll { animation-delay: 0.15s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">AgentForge Clinical Co-Pilot · System Topology</p>
+  <h1>How OpenEMR and the agent service connect</h1>
+  <p class="dek">Independently deployed services talk over HTTP. The agent <b>reads</b> the chart through a patient-scoped SMART token; it holds no write path and no database. <b>Writes</b> go back to OpenEMR from the browser under the clinician's own session — through the PHP app, into a <b>separate managed database</b>.</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 1040 600" role="img" aria-labelledby="svg-t svg-d" preserveAspectRatio="xMidYMid meet">
+      <title id="svg-t">Service topology diagram</title>
+      <desc id="svg-d">The physician's browser runs the Co-Pilot sidebar. It launches SMART against OpenEMR to get a patient-scoped token, posts chat questions to the agent service with that token, and posts extracted facts back to an OpenEMR module endpoint under the session cookie. The agent reads OpenEMR FHIR read-only and calls Qdrant and external AI APIs. The OpenEMR PHP app, the agent, and the MySQL database are three separate Railway services; the app connects to MySQL over private networking, and the agent has no database access.</desc>
+
+      <defs>
+        <marker id="mLaunch" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-launch"/></marker>
+        <marker id="mRead" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-read"/></marker>
+        <marker id="mWrite" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-write"/></marker>
+      </defs>
+
+      <!-- ============ EDGES (drawn first, sit under nodes) ============ -->
+      <!-- A: SMART launch  browser -> OpenEMR -->
+      <path class="edge launch" d="M470,132 L410,248" marker-end="url(#mLaunch)"/>
+      <!-- C: write-back  browser -> OpenEMR (persist-facts.php) -->
+      <path class="edge write" d="M360,132 L300,248" marker-end="url(#mWrite)"/>
+      <!-- B: chat  browser -> agent -->
+      <path class="edge read" d="M600,132 L710,248" marker-end="url(#mRead)"/>
+      <!-- B: FHIR read  agent -> OpenEMR (horizontal, read-only) -->
+      <path class="edge read dash" d="M608,344 L464,344" marker-end="url(#mRead)"/>
+      <!-- data tier: OpenEMR PHP app -> managed MySQL (private networking) -->
+      <path class="edge launch" d="M240,450 L240,466" marker-end="url(#mLaunch)"/>
+      <!-- B: support  agent -> Qdrant / External -->
+      <path class="edge support" d="M690,424 L688,466" marker-end="url(#mRead)"/>
+      <path class="edge support" d="M858,424 L890,466" marker-end="url(#mRead)"/>
+
+      <!-- edge chips -->
+      <g transform="translate(300,178)">
+        <rect class="chip-bg" x="-58" y="-13" width="116" height="24" rx="6"/>
+        <text class="chip-tx write" x="0" y="4" text-anchor="middle">C · write-back</text>
+      </g>
+      <g transform="translate(455,182)">
+        <rect class="chip-bg" x="-52" y="-13" width="104" height="24" rx="6"/>
+        <text class="chip-tx launch" x="0" y="4" text-anchor="middle">A · launch</text>
+      </g>
+      <g transform="translate(648,176)">
+        <rect class="chip-bg" x="-62" y="-13" width="124" height="24" rx="6"/>
+        <text class="chip-tx read" x="0" y="4" text-anchor="middle">B · POST /chat</text>
+      </g>
+      <g transform="translate(536,328)">
+        <rect class="chip-bg" x="-96" y="-13" width="192" height="24" rx="6"/>
+        <text class="chip-tx read" x="0" y="4" text-anchor="middle">GET /fhir/* · read-only</text>
+      </g>
+      <g transform="translate(360,458)">
+        <rect class="chip-bg" x="-92" y="-13" width="184" height="24" rx="6"/>
+        <text class="chip-tx launch" x="0" y="4" text-anchor="middle">private net · $MYSQL_HOST</text>
+      </g>
+
+      <!-- ============ NODES ============ -->
+      <!-- Browser -->
+      <g>
+        <rect class="node" x="300" y="44" width="440" height="88" rx="11"/>
+        <text class="n-title plain" x="322" y="76">Physician’s browser</text>
+        <text class="n-tag" x="322" y="98">Co-Pilot sidebar — OpenEMR module</text>
+        <text class="n-item" x="322" y="118"><tspan class="dim">holds a patient-scoped SMART token</tspan></text>
+      </g>
+
+      <!-- OpenEMR PHP app service (compute + a document-blob volume) -->
+      <g>
+        <rect class="node" x="52" y="248" width="410" height="202" rx="11"/>
+        <text class="n-title emr" x="74" y="278">OpenEMR service</text>
+        <text class="n-tag" x="74" y="297">Railway: openemr · PHP app · re-clones main on deploy</text>
+        <line class="divider" x1="74" y1="310" x2="440" y2="310"/>
+        <text class="n-item" x="74" y="334">OAuth2 / SMART <tspan class="dim">— authorize + token</tspan></text>
+        <text class="n-item" x="74" y="360">FHIR API <tspan class="dim">GET /fhir/* (read-only)</tspan></text>
+        <text class="n-item" x="74" y="386">persist-facts.php <tspan class="dim">→ writes via service layer</tspan></text>
+        <text class="n-item" x="74" y="412">source-view.php <tspan class="dim">click-to-source</tspan></text>
+        <circle class="vol-dot" cx="79" cy="435" r="3.5"/>
+        <text class="n-vol" x="90" y="439">openemr-volume <tspan style="fill:var(--muted);font-weight:400">— document blobs + sqlconf.php</tspan></text>
+      </g>
+
+      <!-- MySQL — separate managed data service -->
+      <g>
+        <rect class="node-alt" x="52" y="470" width="410" height="92" rx="11"/>
+        <text class="n-title emr" x="74" y="498" style="font-size:14px">MySQL</text>
+        <text class="n-tag" x="74" y="516">Railway: managed database <tspan class="dim">·</tspan> <tspan style="fill:var(--support)">mysql-volume</tspan></text>
+        <text class="n-item" x="74" y="537">procedure_order chain <tspan class="dim">·</tspan> lists <tspan class="dim">·</tspan> documents (rows)</text>
+        <text class="n-tag" x="74" y="554" style="fill:var(--write)">relational system of record — the blob bytes live on the app volume</text>
+      </g>
+
+      <!-- Agent service -->
+      <g>
+        <rect class="node" x="610" y="248" width="378" height="176" rx="11"/>
+        <text class="n-title agent" x="632" y="280">Agent service</text>
+        <text class="n-tag" x="632" y="299">Railway: copilot-agent · FastAPI / Python</text>
+        <line class="divider" x1="632" y1="312" x2="966" y2="312"/>
+        <text class="n-item" x="632" y="339">/chat <tspan class="dim">read-only FHIR client, per request</tspan></text>
+        <text class="n-item" x="632" y="366">/ready <tspan class="dim">dependency health</tspan></text>
+        <text class="n-item" x="632" y="393">returns <tspan class="dim">summary · claims · evidence</tspan></text>
+        <text class="n-item" x="632" y="414"><tspan class="dim">        · </tspan>derived_facts <tspan class="dim">(→ path C)</tspan></text>
+      </g>
+
+      <!-- Qdrant -->
+      <g>
+        <rect class="node-alt" x="610" y="468" width="178" height="94" rx="10"/>
+        <text class="n-title plain" x="628" y="497" style="font-size:13px">Qdrant</text>
+        <text class="n-tag" x="628" y="516">guideline RAG · non-PHI</text>
+        <circle class="vol-dot" cx="633" cy="534" r="3.5"/>
+        <text class="n-vol" x="644" y="538">qdrant-volume</text>
+      </g>
+
+      <!-- External APIs -->
+      <g>
+        <rect class="node-alt" x="806" y="468" width="182" height="94" rx="10"/>
+        <text class="n-title plain" x="824" y="498" style="font-size:13px">External AI APIs</text>
+        <text class="n-tag" x="824" y="518">Mistral OCR (VLM)</text>
+        <text class="n-tag" x="824" y="536">LLM (Anthropic)</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="legend">
+    <div class="leg a">
+      <div class="key">A</div>
+      <div class="lt">SMART launch</div>
+      <div class="ld">Hidden-iframe EHR launch (OAuth2 / PKCE) against OpenEMR. The sidebar receives a <b>patient-scoped read token</b>; the token's own <code>patient</code> claim is the only scope.</div>
+    </div>
+    <div class="leg b">
+      <div class="key">B</div>
+      <div class="lt">Chat &amp; read</div>
+      <div class="ld">Sidebar → agent <code>/chat</code> with <code>Authorization: Bearer</code>. The agent reads <code>/fhir/*</code> with that token, calls Qdrant + Mistral + the LLM, and answers with <code>derived_facts</code>.</div>
+    </div>
+    <div class="leg c">
+      <div class="key">C</div>
+      <div class="lt">Write-back</div>
+      <div class="ld">The <b>browser</b> posts <code>derived_facts</code> to <code>persist-facts.php</code> — same-origin, session cookie + CSRF, <b>not</b> the agent. It writes under the clinician's own ACL.</div>
+    </div>
+  </div>
+
+  <div class="paths">
+    <div class="path read">
+      <h3>The read path goes through the agent</h3>
+      <div class="sub">Browser → Agent → OpenEMR FHIR</div>
+      <p>The agent builds a <b>per-request, read-only</b> FHIR client bound to the inbound SMART token. Its FHIR client has <b>no POST or PUT</b> — it can only read the chart. It never holds a database credential.</p>
+    </div>
+    <div class="path write">
+      <h3>The write path bypasses the agent</h3>
+      <div class="sub">Browser → OpenEMR PHP → MySQL</div>
+      <p>No patient- or system-scoped <b>write</b> surface the agent could reach exists in this fork. So the browser posts the extracted facts to a session-authed OpenEMR endpoint, which writes via the service layer into the <b>separate MySQL service</b> — the physician is the write principal, and the app it re-clones is disposable while the data survives.</p>
+    </div>
+  </div>
+
+  <h2>Deployment — separate Railway services</h2>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>Service</th><th>What it is</th><th>State &amp; deploy</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="svc">openemr</span></td>
+          <td class="m">PHP EHR + the Co-Pilot module (sidebar, <span class="svc" style="font-weight:400">persist-facts.php</span>, <span class="svc" style="font-weight:400">source-view.php</span>)</td>
+          <td class="m"><b style="color:var(--ink)">Compute re-cloned from <code style="font-family:var(--mono)">main</code></b> · but keeps <span class="pill">openemr-volume</span> for document bytes + <code style="font-family:var(--mono)">sqlconf.php</code></td>
+        </tr>
+        <tr>
+          <td><span class="svc">MySQL</span></td>
+          <td class="m">Managed database — relational system of record. Reached by the PHP app over private networking (<code style="font-family:var(--mono)">$MYSQL_HOST</code>); the agent has no access.</td>
+          <td class="m"><b style="color:var(--ink)">Stateful</b> · <span class="pill">mysql-volume</span> · persists across every app redeploy</td>
+        </tr>
+        <tr>
+          <td><span class="svc">copilot-agent</span></td>
+          <td class="m">The FastAPI agent — <span class="svc" style="font-weight:400">/chat</span>, <span class="svc" style="font-weight:400">/ready</span>. Read-only by construction; holds no DB credential.</td>
+          <td class="m">Auto-deploys from <code style="font-family:var(--mono)">main</code> · watch path <span class="pill">agent/**</span></td>
+        </tr>
+        <tr>
+          <td><span class="svc">qdrant</span></td>
+          <td class="m">Guideline vector store (RAG). Non-PHI; rebuildable from the repo corpus.</td>
+          <td class="m">Own Railway service · <span class="pill">qdrant-volume</span></td>
+        </tr>
+        <tr>
+          <td><span class="svc">External</span></td>
+          <td class="m">Mistral OCR (document extraction) and the LLM provider</td>
+          <td class="m">Third-party APIs over HTTPS</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="foot">Verified against Railway production (<code>agentforge-openemr</code>): four resources online — <code>openemr</code>, <code>MySQL</code>, <code>copilot-agent</code>, <code>qdrant</code>. A push touching <code>agent/**</code> redeploys only the agent; the services share no process. The durable data lives in two places — <b>MySQL</b> holds the relational rows (and a document's pointer), while the <b>bytes</b> sit on <code>openemr-volume</code>; only <code>copilot-agent</code> is truly stateless. The <b>agent is read-only</b>, so write-back is mediated by the physician's browser session into the database, never by a credential the agent holds.</p>
+
+  <hr class="divider-major">
+  <p class="eyebrow" style="margin-top:2.5rem">Runtime · one /chat turn</p>
+  <h2 class="big">How a turn runs — the supervisor graph</h2>
+  <p class="dek">Inside <code style="font-family:var(--mono);font-size:0.85em">copilot-agent</code>, a supervisor routes each turn to workers, loops until it has enough, then composes a grounded answer. Every worker output passes a grounding gate. <b>The agent only reads</b> — the chart write happens two steps later, in the browser.</p>
+
+  <div class="figure">
+    <svg viewBox="0 0 1040 560" role="img" aria-labelledby="wf-t wf-d" preserveAspectRatio="xMidYMid meet">
+      <title id="wf-t">Agent workflow graph</title>
+      <desc id="wf-d">A /chat turn builds deps and runs the graph. A supervisor (router) emits one of three routes each hop — extract_intake, retrieve_evidence, or answer — inside a loop capped at 4 hops and 12 tool calls per turn. The intake-extractor worker has eight tools: six FHIR reads, list_documents, and attach_and_extract (which runs Mistral OCR). The evidence-retriever worker has one tool, search_guidelines, hitting Qdrant. Each worker report returns to the supervisor. When the supervisor chooses answer, the answerer composes a ChatResponse. Every worker and the answerer pass a grounding gate that retries on ungrounded claims. The derived_facts array is attached to the response after the gate; the write itself is a separate browser POST outside the agent.</desc>
+
+      <defs>
+        <marker id="wL" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-launch"/></marker>
+        <marker id="wR" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ah-read"/></marker>
+      </defs>
+
+      <!-- loop container -->
+      <rect class="loopbox" x="40" y="108" width="960" height="308" rx="14"/>
+      <g transform="translate(52,101)">
+        <rect class="chip-bg" x="0" y="-13" width="384" height="24" rx="6"/>
+        <text class="loop-tx" x="12" y="4">supervisor loop · ≤ 4 hops · ≤ 12 tool calls / turn</text>
+      </g>
+
+      <!-- edges -->
+      <path class="edge read" d="M470,80 L214,148" marker-end="url(#wR)"/>
+      <path class="edge read" d="M322,182 L394,182" marker-end="url(#wR)"/>
+      <path class="edge read" d="M322,298 L394,312" marker-end="url(#wR)"/>
+      <path class="edge read dash" d="M470,250 C452,268 360,270 326,214" marker-end="url(#wR)"/>
+      <path class="edge launch" d="M196,332 L196,432" marker-end="url(#wL)"/>
+      <path class="edge read" d="M322,478 L394,474" marker-end="url(#wR)"/>
+
+      <!-- route chips -->
+      <g transform="translate(358,170)"><rect class="chip-bg" x="-54" y="-12" width="108" height="22" rx="6"/><text class="chip-tx read" x="0" y="4" text-anchor="middle">extract_intake</text></g>
+      <g transform="translate(360,292)"><rect class="chip-bg" x="-62" y="-12" width="124" height="22" rx="6"/><text class="chip-tx read" x="0" y="4" text-anchor="middle">retrieve_evidence</text></g>
+      <g transform="translate(150,388)"><rect class="chip-bg" x="-34" y="-12" width="68" height="22" rx="6"/><text class="chip-tx launch" x="0" y="4" text-anchor="middle">answer</text></g>
+      <g transform="translate(392,244)"><rect class="chip-bg" x="-66" y="-12" width="132" height="22" rx="6"/><text class="chip-tx read" x="0" y="4" text-anchor="middle" style="fill:var(--muted)">report → next hop</text></g>
+
+      <!-- entry -->
+      <g>
+        <rect class="node" x="300" y="28" width="440" height="52" rx="11"/>
+        <text class="n-item" x="322" y="50">POST /chat <tspan class="dim">· Authorization: Bearer patient token</tspan></text>
+        <text class="n-tag" x="322" y="69">build GraphDeps → run_graph(…)</text>
+      </g>
+
+      <!-- supervisor -->
+      <g>
+        <rect class="node" x="70" y="150" width="252" height="180" rx="11"/>
+        <text class="n-title emr" x="92" y="181">Supervisor</text>
+        <text class="n-tag" x="92" y="200">the router · procedural</text>
+        <line class="divider" x1="92" y1="213" x2="300" y2="213"/>
+        <text class="n-item" x="92" y="239">→ RouteDecision <tspan class="dim">{route, reason}</tspan></text>
+        <text class="n-item" x="92" y="265">one of 3 routes per hop</text>
+        <text class="n-item" x="92" y="291"><tspan class="dim">reads nothing · never answers</tspan></text>
+        <text class="n-item" x="92" y="315"><tspan class="dim">retries: 2</tspan></text>
+      </g>
+
+      <!-- intake-extractor -->
+      <g>
+        <rect class="node" x="394" y="140" width="578" height="120" rx="11"/>
+        <text class="n-title agent" x="416" y="168">intake-extractor</text>
+        <text class="n-tag" x="416" y="186">worker · reads THIS patient's record</text>
+        <line class="divider" x1="416" y1="199" x2="950" y2="199"/>
+        <text class="n-item" x="416" y="224">8 tools <tspan class="dim">— 6 FHIR reads · list_documents · attach_and_extract</tspan></text>
+        <g transform="translate(486,242)"><rect class="chip-bg" x="-68" y="-11" width="136" height="21" rx="6"/><text class="chip-tx read" x="0" y="4" text-anchor="middle">OpenEMR FHIR (read)</text></g>
+        <g transform="translate(620,242)"><rect class="chip-bg" x="-56" y="-11" width="112" height="21" rx="6"/><text class="chip-tx ext" x="0" y="4" text-anchor="middle">Mistral OCR</text></g>
+        <g transform="translate(896,242)"><rect class="chip-bg" x="-52" y="-11" width="104" height="21" rx="6"/><text class="gate-tx" x="0" y="4" text-anchor="middle">↻ grounding</text></g>
+      </g>
+
+      <!-- evidence-retriever -->
+      <g>
+        <rect class="node" x="394" y="288" width="578" height="100" rx="11"/>
+        <text class="n-title agent" x="416" y="314">evidence-retriever</text>
+        <text class="n-tag" x="416" y="332">worker · guideline evidence</text>
+        <line class="divider" x1="416" y1="344" x2="950" y2="344"/>
+        <text class="n-item" x="416" y="368">1 tool <tspan class="dim">— search_guidelines → hybrid RAG + rerank</tspan></text>
+        <g transform="translate(775,368)"><rect class="chip-bg" x="-42" y="-11" width="84" height="21" rx="6"/><text class="chip-tx ext" x="0" y="4" text-anchor="middle">Qdrant</text></g>
+        <g transform="translate(896,368)"><rect class="chip-bg" x="-52" y="-11" width="104" height="21" rx="6"/><text class="gate-tx" x="0" y="4" text-anchor="middle">↻ grounding</text></g>
+      </g>
+
+      <!-- answerer -->
+      <g>
+        <rect class="node" x="70" y="432" width="252" height="88" rx="11"/>
+        <text class="n-title agent" x="92" y="460">answerer</text>
+        <text class="n-tag" x="92" y="478">composes the reply</text>
+        <text class="n-item" x="92" y="502"><tspan class="dim">restates grounded claims only</tspan></text>
+        <g transform="translate(258,458)"><rect class="chip-bg" x="-50" y="-11" width="100" height="21" rx="6"/><text class="gate-tx" x="0" y="4" text-anchor="middle">↻ grounding</text></g>
+      </g>
+
+      <!-- ChatResponse -->
+      <g>
+        <rect class="node-alt" x="394" y="430" width="578" height="90" rx="11"/>
+        <text class="n-title plain" x="416" y="457" style="font-size:14px">ChatResponse</text>
+        <text class="n-tag" x="416" y="475">serialized to the /chat JSON</text>
+        <text class="n-item" x="416" y="499">summary <tspan class="dim">·</tspan> claims <tspan class="dim">·</tspan> evidence <tspan class="dim">·</tspan> <tspan class="em-w">derived_facts</tspan></text>
+        <text class="n-tag" x="416" y="515" style="fill:var(--write)">derived_facts attached by _answer_payload — after the graph + gate</text>
+      </g>
+    </svg>
+  </div>
+
+  <h3 class="sub-h">Tools, by worker — and what each reads</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>Tool(s)</th><th>Owner</th><th>Reaches</th><th>R / W</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="svc" style="font-weight:400">get_patient · get_problems · get_medications · get_allergies · get_encounters · get_encounter_note</span></td>
+          <td class="m">intake-extractor</td>
+          <td class="m">OpenEMR FHIR</td>
+          <td><span class="rw">read</span></td>
+        </tr>
+        <tr>
+          <td><span class="svc" style="font-weight:400">list_documents</span></td>
+          <td class="m">intake-extractor</td>
+          <td class="m">OpenEMR FHIR <span class="m">(DocumentReference discovery)</span></td>
+          <td><span class="rw">read</span></td>
+        </tr>
+        <tr>
+          <td><span class="svc" style="font-weight:400">attach_and_extract</span></td>
+          <td class="m">intake-extractor</td>
+          <td class="m">FHIR Binary → <b style="color:var(--support)">Mistral OCR</b> · fills <code style="font-family:var(--mono)">deps.extractions</code></td>
+          <td><span class="rw">read <span class="m">(no chart write)</span></span></td>
+        </tr>
+        <tr>
+          <td><span class="svc" style="font-weight:400">search_guidelines</span></td>
+          <td class="m">evidence-retriever</td>
+          <td class="m"><b style="color:var(--support)">Qdrant</b> hybrid RAG + Cohere rerank</td>
+          <td><span class="rw">read</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="cap" style="margin-top:0.7rem">The <b style="color:var(--ink)">answerer</b> has no data tools — it may only restate claims the workers already grounded. No tool anywhere writes to the chart.</p>
+
+  <h3 class="sub-h">When the write happens — two steps behind the graph</h3>
+  <p class="cap">The graph is read-only and self-contained. The write is a different process, after the answer is already grounded.</p>
+  <div class="timeline">
+    <div class="phase p1">
+      <div class="pn">1 · in the graph</div>
+      <h4>OCR fills the sidecar of facts</h4>
+      <p><code>attach_and_extract</code> runs Mistral OCR and stores the typed result in <code>deps.extractions</code>. <b>Nothing is written to the chart.</b></p>
+      <span class="tag">read-only</span>
+    </div>
+    <div class="phase p2">
+      <div class="pn">2 · after the gate</div>
+      <h4>Facts ride the response</h4>
+      <p>Once the answer passes grounding, <code>_answer_payload</code> projects the extractions into <code>derived_facts</code> on the <code>/chat</code> JSON. Still no write.</p>
+      <span class="tag">agent boundary</span>
+    </div>
+    <div class="phase p3">
+      <div class="pn">3 · outside the agent</div>
+      <h4>The browser writes it</h4>
+      <p>The sidebar POSTs each group to <code>persist-facts.php</code> → OpenEMR write. CSRF + ACL (<code>patients/docs</code> + <code>med</code>), pid from the session.</p>
+      <span class="tag">the write</span>
+    </div>
+  </div>
+  <p class="foot">Every worker output and the final answer pass the same grounding gate (<code>@agent.output_validator</code>): a claim whose citation can't be resolved against what was actually read triggers a <code>ModelRetry</code> — re-ground, drop it, or say it's unavailable. Exhaust the retries and the turn degrades to a refusal, never an unsourced answer. That gate is why <code>derived_facts</code> is safe to write: it only carries what OCR actually extracted, and it leaves the agent only after the answer built from it was verified.</p>
+</div>

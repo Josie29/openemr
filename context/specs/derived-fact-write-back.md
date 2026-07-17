@@ -236,6 +236,25 @@ the claim §3.1 makes today.
 - New FHIR write routes, core scope changes, a service credential, or a Provenance store.
 - Demographics write-back (`Patient` is writable, but only via a `user/`-scoped ACL route).
 
+## End-to-end verification (done)
+
+The endpoint's auth wrapper — session bootstrap, CSRF, the two ACL gates, pid-from-session, and
+document-ownership resolution — is exercised only over real HTTP, so PHPUnit (which calls the writer
+directly) never covered it. Driven through a live logged-in Panther session against the worktree
+stack:
+
+- **Happy path** — logged-in session, valid CSRF, a lab fact against an owned document → `200
+  {"written":["4548-4"], ...}`; round-trips through the live FHIR read path as a LOINC-coded
+  Observation with `status: preliminary`.
+- **Forged CSRF** → `403` — the CSRF gate runs in-session, not just for the anonymous case.
+- **Nonexistent document, valid CSRF** → `404`, *not* 403 and *not* a login redirect — proving
+  session auth, both ACL gates, and pid-from-session all passed and only document resolution failed.
+
+Not automated (needs a live browser + Selenium grid); re-run from `tmp/` if the endpoint changes.
+The full physician flow (upload a PDF → ask a question → live agent extraction → status line) is a
+demo-time check: the JS is fire-and-forget over a payload whose shape is unit-tested, and the agent
+projection has its own tests, so the untested-in-CI remainder is the browser glue only.
+
 ## Acceptance
 
 - Extract from the Sergio lab PDF → `GET /fhir/Observation?patient=<uuid>` returns the results with

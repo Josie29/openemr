@@ -1899,7 +1899,33 @@
                 }
             });
             appendFactWriteback(written, skipped, failed, transportFailed);
+            if (written.length) {
+                // persist-facts.php wrote straight to the DB, but the already-open chart tabs still
+                // show their pre-write server render — so a just-added med/allergy/lab is invisible
+                // until a manual refresh. Reload the Dashboard panel in place so it appears at once.
+                refreshChartDashboard();
+            }
         });
+    }
+
+    // Reload the patient Dashboard tab (frame name "pat" -> summary/demographics.php) in place, so a
+    // fact just persisted by the sidebar shows up without a manual page refresh or re-login. No-op
+    // when the Dashboard tab isn't open, and never switches the active tab (no focus steal) — if the
+    // clinician is on another tab it refreshes silently in the background. restoreSession keeps the
+    // session alive across the reload, matching how the rest of the sidebar drives top's tab frame.
+    function refreshChartDashboard() {
+        var win = window.top;
+        if (!win || !win.document) {
+            return;
+        }
+        var frame = win.document.querySelector('iframe[name="pat"]');
+        if (!frame || !frame.contentWindow) {
+            return; // Dashboard tab not open — nothing on screen to refresh.
+        }
+        if (typeof win.restoreSession === 'function') {
+            win.restoreSession();
+        }
+        frame.contentWindow.location.reload();
     }
 
     // POST one document's facts and normalize the reply. The endpoint answers 200 (all saved), 207

@@ -18,6 +18,7 @@ from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
+from copilot.fhir.models import LabObservation
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
@@ -34,7 +35,15 @@ from copilot.observability import (
 from copilot.pricing import turn_cost_usd
 from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
 from copilot.retrieval import ChunkRegistry
-from copilot.schemas import ChatRequest, ChatResponse, CitationSourceType, Evidence
+from copilot.schemas import (
+    ChatRequest,
+    ChatResponse,
+    CitationSourceType,
+    Evidence,
+    LabPoint,
+    LabSeries,
+)
+from copilot.verification import FetchLog
 
 logger = logging.getLogger("copilot")
 
@@ -89,21 +98,23 @@ def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry, deps: GraphDeps
     (JOS-57) consumes — each a pure projection of a grounded ``SourceRef`` via
     :meth:`~copilot.schemas.SourceRef.to_citation`. It also adds a top-level ``evidence`` array: the
     distinct guideline sources that grounded the answer, deduped by chunk and ranked by relevance
-    (§3.2), and a ``derived_facts`` array: the persistable facts extracted from documents this turn,
-    grouped by document, which the sidebar posts to the session-authed write-back endpoint (JOS-81).
-    All three are additive — nothing the current sidebar reads is removed — and stay off the
-    LLM-facing ``Claim``/``ChatResponse`` models.
+    (§3.2); a ``derived_facts`` array: the persistable facts extracted from documents this turn,
+    grouped by document, which the sidebar posts to the session-authed write-back endpoint (JOS-81);
+    and a ``lab_series`` array: the trend charts projected from the lab Observations the agent read
+    this turn (JOS-83). All are additive — nothing the current sidebar reads is removed — and stay
+    off the LLM-facing ``Claim``/``ChatResponse`` models.
 
     Args:
         answer: The grounded final answer from the graph.
         chunks: The conversation's chunk registry — the source of the retrieved snippets' rerank
             scores and presentation metadata for the evidence panel.
         deps: The turn's graph deps — the source of the typed extractions the write-back payload
-            projects (``deps.extractions``).
+            projects (``deps.extractions``) and the fetch registry the lab charts read
+            (``deps.fetched``).
 
     Returns:
         The JSON-serializable response body, each claim carrying a ``citations`` list and the body
-        carrying ``evidence`` and ``derived_facts`` lists.
+        carrying ``evidence``, ``derived_facts``, and ``lab_series`` lists.
     """
     content: dict[str, Any] = answer.model_dump()
     for claim_dict, claim in zip(content["claims"], answer.claims, strict=True):
@@ -112,6 +123,7 @@ def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry, deps: GraphDeps
         ]
     content["evidence"] = _build_evidence(answer, chunks)
     content["derived_facts"] = derived_facts_for(deps.extractions)
+    content["lab_series"] = _build_lab_series(deps.fetched)
     return content
 
 
@@ -151,6 +163,64 @@ def _build_evidence(answer: ChatResponse, chunks: ChunkRegistry) -> list[dict[st
             )
     ordered = sorted(deduped.values(), key=lambda e: e.relevance_score, reverse=True)
     return [entry.model_dump(mode="json") for entry in ordered]
+
+
+_MAX_LAB_SERIES = 6
+
+
+def _build_lab_series(fetched: FetchLog) -> list[dict[str, Any]]:
+    """Project the turn's fetched lab Observations into trend series, one per LOINC code.
+
+    Present only when the agent read labs this turn (``get_lab_observations`` recorded them).
+    A point needs both a numeric value and a date to be plotted, so valueless questionnaire results
+    and undated draws are dropped — never coerced. A series needs two or more such points; one draw
+    is not a trend. Grouping by ``code`` keeps similar-named analytes apart and one unit per axis.
+    Capped at ``_MAX_LAB_SERIES`` so a broad fetch cannot wall the sidebar.
+
+    Args:
+        fetched: The turn's fetch registry.
+
+    Returns:
+        JSON-serializable series, each with two or more oldest-first points; empty when no analyte
+        has a plottable trend.
+    """
+    points_by_code: dict[str, list[LabPoint]] = {}
+    source_by_code: dict[str, LabObservation] = {}
+    for obs in fetched.records_of_type("Observation"):
+        if not isinstance(obs, LabObservation):
+            continue
+        code, value, date = obs.code, obs.value, obs.effective_date
+        if code is None or value is None or date is None:
+            continue
+        points_by_code.setdefault(code, []).append(
+            LabPoint(
+                date=date,
+                value=value,
+                status=obs.status or "final",
+                observation_id=obs.resource_id,
+            )
+        )
+        source_by_code.setdefault(code, obs)
+
+    series: list[LabSeries] = []
+    for code, points in points_by_code.items():
+        if len(points) < 2:
+            continue
+        points.sort(key=lambda p: p.date)
+        source = source_by_code[code]
+        series.append(
+            LabSeries(
+                code=code, display=source.display or code, unit=source.unit or "", points=points
+            )
+        )
+
+    # Most-recent draw first, so the analyte the physician just asked about tends to lead; a stable
+    # key also keeps the sidebar deterministic across identical turns.
+    series.sort(key=lambda s: s.points[-1].date, reverse=True)
+    if len(series) > _MAX_LAB_SERIES:
+        logger.info("lab_series truncated", extra={"found": len(series), "kept": _MAX_LAB_SERIES})
+        series = series[:_MAX_LAB_SERIES]
+    return [s.model_dump(mode="json") for s in series]
 
 
 def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirClient:

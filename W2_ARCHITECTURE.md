@@ -649,12 +649,25 @@ this into the gate the PRD demands:
   `schema_valid` · `citation_present` · `factually_consistent` · `safe_refusal` ·
   `no_phi_in_logs`.
 - **PR-blocking CI job.** The suite runs on promotion PRs and **blocks the merge** if any rubric
-  category **drops below its pass threshold**. The PRD asks for "regresses by more than 5% *or*
-  drops below the pass threshold"; we implement the second clause as an **absolute floor** rather
-  than a delta against a stored previous run. With the deterministic floors at 1.0 this is strictly
-  stronger — *any* regression breaches them, so there is no 5% band in which a regression rides
-  through — and it needs no baseline state, which is what makes the gate reproducible from the repo
-  alone (§11) instead of depending on a prior run's numbers surviving in a database.
+  category **drops below its pass threshold**.
+
+  > **On the PRD's two clauses.** The PRD requires the build to fail if a category "regresses by
+  > more than 5% **or** drops below the pass threshold." We implement the second clause, as an
+  > **absolute floor** — not a delta against a stored previous run. The first clause adds nothing
+  > *on the gate*, and this is worth showing rather than asserting:
+  >
+  > - The four deterministic rubrics are floored at **1.0**, so *any* regression breaches them.
+  >   There is no 5% band to ride through.
+  > - `factually_consistent` is floored at **0.9**, so in principle a 1.00 → 0.92 drop (8%) would
+  >   satisfy the PRD's 5% clause while clearing our floor. But the gate scores **3 cases**, so the
+  >   only representable means are 1.00, 0.67, 0.33, 0.00. The smallest possible non-zero regression
+  >   is **33%**, and nothing can land in the (0.9, 1.0) gap. On the CI subset the floor and the >5%
+  >   rule trip on **exactly the same runs**.
+  >
+  > The two diverge only on the on-demand full-52 run (granularity 1/52 = 1.9%), which is an
+  > iteration tool, not the gate. Floors also need no baseline state, which is what keeps the gate
+  > reproducible from the repo alone (§11) rather than dependent on a prior run's numbers surviving
+  > in a database — a delta rule fails open the first time that lookup breaks.
 
 > **As-built (JOS-50).** The eval harness now runs the **supervisor graph** (§4); the Week-1 single
 > agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **52-case golden

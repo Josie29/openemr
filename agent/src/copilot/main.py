@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from enum import StrEnum
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -50,6 +51,28 @@ def _configure_logging() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
     )
+
+
+class ChatFailureReason(StrEnum):
+    """Distinct, greppable reason codes for every ``/chat`` failure branch.
+
+    Stamped onto each failure log line as a structured ``reason`` field so operators can tell the
+    branches apart in the Railway logs and alert on a specific one — the combined
+    ``UnexpectedModelBehavior``/``UsageLimitExceeded`` branch used to log all of these
+    indistinguishably. Backed (a :class:`~enum.StrEnum`) because the value is what lands in the log
+    record and what a grep/alert query matches.
+    """
+
+    # Grounding gate exhausted its retries — no attributable answer.
+    GROUNDING_EXHAUSTED = "grounding_exhausted"
+    # Per-turn tool-call ceiling hit — a runaway loop.
+    TOOL_CEILING = "tool_ceiling"
+    # The model provider rejected the call (billing / rate limit / outage).
+    LLM_HTTP_ERROR = "llm_http_error"
+    # A patient-data (FHIR) read failed.
+    FHIR_READ_FAILED = "fhir_read_failed"
+    # Any unforeseen failure caught by the route's catch-all boundary.
+    UNEXPECTED = "unexpected"
 
 
 _UNAVAILABLE_ANSWER = ChatResponse(
@@ -423,14 +446,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
                     content = _answer_payload(result.answer, session.chunks, deps)
                     turn.output(content)
-                except (UnexpectedModelBehavior, UsageLimitExceeded):
-                    # Either the gate exhausted its retries without an attributable answer, or the
-                    # turn hit the tool-call ceiling (a runaway loop). Both mean "no verified answer
-                    # within limits" — degrade to a refusal rather than ship an unverified claim or
-                    # let the exception 500 (which the browser surfaces as "Failed to fetch").
-                    logger.info(
-                        "agent could not answer within limits", extra={"cid": correlation_id}
-                    )  # noqa: E501
+                except UnexpectedModelBehavior:
+                    # The grounding gate exhausted its retries without an attributable answer —
+                    # degrade to a refusal rather than ship an unverified claim (§8). A user got a
+                    # non-answer, so this is a WARNING (not INFO), with its own greppable reason.
+                    logger.warning(
+                        "agent could not ground an answer within retries",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.GROUNDING_EXHAUSTED,
+                        },
+                    )
+                    turn.verified(passed=False)
+                    content = _UNAVAILABLE_ANSWER.model_dump()
+                except UsageLimitExceeded:
+                    # The turn hit the per-turn tool-call ceiling (a runaway loop) — degrade to a
+                    # refusal rather than let the exception 500 (which the browser surfaces as
+                    # "Failed to fetch"). A resource-limit failure, distinct from a grounding miss.
+                    # NOTE (follow-up): the verified(passed=False) below records this as
+                    # verification_grounding=0 — a resource-limit hit logged as a grounding failure.
+                    # Left as-is deliberately so the existing grounding monitor keeps its semantics;
+                    # splitting the score is a separate change.
+                    logger.warning(
+                        "agent hit the tool-call ceiling before answering",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.TOOL_CEILING,
+                        },
+                    )
                     turn.verified(passed=False)
                     content = _UNAVAILABLE_ANSWER.model_dump()
                 except ModelHTTPError as exc:
@@ -438,14 +481,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # the specific reason is surfaced too, which aids debugging in this demo system.
                     # (A production PHI deployment would genericize this — see ARCHITECTURE.md §8.)
                     logger.warning(
-                        "LLM request failed", extra={"cid": correlation_id}, exc_info=True
-                    )  # noqa: E501
+                        "LLM request failed",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.LLM_HTTP_ERROR,
+                        },
+                        exc_info=True,
+                    )
                     turn.errored(tool_failure=False)
                     status_code = 502
                     content = {"error": str(exc), "correlation_id": correlation_id}
                 except FhirError:
                     # A data read failed — report the gap, never fabricate around it (§8).
-                    logger.warning("FHIR read failed", extra={"cid": correlation_id}, exc_info=True)
+                    logger.warning(
+                        "FHIR read failed",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.FHIR_READ_FAILED,
+                        },
+                        exc_info=True,
+                    )
                     turn.errored(tool_failure=True)
                     status_code = 502
                     content = {
@@ -460,7 +515,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # detail (audit, §8).
                     logger.error(
                         "unexpected error answering /chat",
-                        extra={"cid": correlation_id},
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.UNEXPECTED,
+                        },
                         exc_info=True,
                     )
                     turn.errored(tool_failure=False)

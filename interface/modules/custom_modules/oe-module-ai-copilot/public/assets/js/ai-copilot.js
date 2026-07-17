@@ -416,6 +416,13 @@
         summary.textContent = answer.summary || '';
         wrapper.appendChild(summary);
 
+        // Lab trends (JOS-83): one static line chart per analyte the agent read this turn. Sits
+        // between the prose and the evidence so a "how has X changed" answer is seen, not just read.
+        var charts = renderLabCharts(Array.isArray(answer.lab_series) ? answer.lab_series : []);
+        if (charts) {
+            wrapper.appendChild(charts);
+        }
+
         // Evidence is grouped into provenance tiers (spec §3.5). Counting distinct sources — not raw
         // claim sentences — is what makes the counts honest: a source cited by three sentences is one
         // piece of evidence, not three.
@@ -433,6 +440,164 @@
             wrapper.appendChild(followUps);
         }
         appendNode(assistantTurn(wrapper));
+    }
+
+    var SVG_NS = 'http://www.w3.org/2000/svg';
+
+    /**
+     * Create an SVG element with attributes set. Colours are NOT set here — points, line, and axes
+     * carry classes so ai-copilot.css owns them (the same design tokens the rest of the sidebar uses).
+     *
+     * @param {string} name SVG tag name.
+     * @param {object} attrs Attribute name/value pairs.
+     * @returns {SVGElement}
+     */
+    function svgEl(name, attrs) {
+        var node = document.createElementNS(SVG_NS, name);
+        if (attrs) {
+            for (var key in attrs) {
+                if (Object.prototype.hasOwnProperty.call(attrs, key)) {
+                    node.setAttribute(key, attrs[key]);
+                }
+            }
+        }
+        return node;
+    }
+
+    /**
+     * Render every lab trend the answer carried, each as its own chart. The backend only sends a
+     * series with two or more points (a single draw is not a trend), so no guard is needed here.
+     *
+     * @param {Array<object>} series lab_series from the response.
+     * @returns {HTMLElement|null} A container of charts, or null when there are none.
+     */
+    function renderLabCharts(series) {
+        if (!series.length) {
+            return null;
+        }
+        var group = document.createElement('div');
+        group.className = 'ai-copilot__labcharts';
+        for (var i = 0; i < series.length; i++) {
+            var chart = renderLabChart(series[i]);
+            if (chart) {
+                group.appendChild(chart);
+            }
+        }
+        return group.childNodes.length ? group : null;
+    }
+
+    /**
+     * Render one analyte's trend as a static SVG line chart. Points are coloured by status via the
+     * JOS-88 trust gradient — 'final' reads as a coded record (green), 'preliminary' as an
+     * agent-extracted value not yet confirmed (amber). Values are labelled at the first and last
+     * draw; there is no interaction (spec: static).
+     *
+     * @param {object} s One series: {code, display, unit, points:[{date, value, status}]}.
+     * @returns {HTMLElement|null}
+     */
+    function renderLabChart(s) {
+        var points = (s && Array.isArray(s.points)) ? s.points : [];
+        if (points.length < 2) {
+            return null; // defensive; the backend already enforces this
+        }
+
+        var W = 300, H = 178, padL = 42, padR = 14, padT = 16, padB = 24;
+        var x0 = padL, x1 = W - padR, y0 = padT, y1 = H - padB;
+
+        var times = points.map(function (p) { return new Date(p.date).getTime(); });
+        var values = points.map(function (p) { return p.value; });
+        var tMin = Math.min.apply(null, times), tMax = Math.max.apply(null, times);
+        var vMin = Math.min.apply(null, values), vMax = Math.max.apply(null, values);
+        var vPad = (vMax - vMin) || Math.abs(vMax) || 1;
+        var lo = vMin - vPad * 0.15, hi = vMax + vPad * 0.15;
+
+        function sx(t, i) {
+            if (tMax === tMin) { return x0 + (points.length === 1 ? 0 : (i / (points.length - 1)) * (x1 - x0)); }
+            return x0 + ((t - tMin) / (tMax - tMin)) * (x1 - x0);
+        }
+        function sy(v) { return y1 - ((v - lo) / (hi - lo)) * (y1 - y0); }
+        function fmt(v) { return String(Math.round(v * 100) / 100); }
+
+        var svg = svgEl('svg', {
+            'class': 'ai-copilot__labchart-svg', viewBox: '0 0 ' + W + ' ' + H,
+            role: 'img', 'aria-label': s.display + ' trend, ' + fmt(values[0]) + ' to '
+                + fmt(values[values.length - 1]) + ' ' + (s.unit || '')
+        });
+
+        // axes (baseline + left rule)
+        svg.appendChild(svgEl('line', { 'class': 'ai-copilot__labchart-axis', x1: x0, y1: y0, x2: x0, y2: y1 }));
+        svg.appendChild(svgEl('line', { 'class': 'ai-copilot__labchart-axis', x1: x0, y1: y1, x2: x1, y2: y1 }));
+
+        // build the point coords once
+        var coords = points.map(function (p, i) { return { x: sx(times[i], i), y: sy(p.value), p: p }; });
+        var lineD = coords.map(function (c, i) { return (i ? 'L' : 'M') + c.x.toFixed(1) + ',' + c.y.toFixed(1); }).join(' ');
+
+        // area fill under the line
+        var areaD = 'M' + coords[0].x.toFixed(1) + ',' + y1 + ' '
+            + coords.map(function (c) { return 'L' + c.x.toFixed(1) + ',' + c.y.toFixed(1); }).join(' ')
+            + ' L' + coords[coords.length - 1].x.toFixed(1) + ',' + y1 + ' Z';
+        svg.appendChild(svgEl('path', { 'class': 'ai-copilot__labchart-area', d: areaD }));
+        svg.appendChild(svgEl('path', { 'class': 'ai-copilot__labchart-line', d: lineD }));
+
+        // y-axis min/max labels
+        svg.appendChild(labelEl(x0 - 4, y1, fmt(lo), 'end', 'ai-copilot__labchart-tick'));
+        svg.appendChild(labelEl(x0 - 4, y0 + 6, fmt(hi), 'end', 'ai-copilot__labchart-tick'));
+        // x-axis first/last year labels
+        svg.appendChild(labelEl(coords[0].x, H - 8, String(new Date(points[0].date).getUTCFullYear()), 'middle', 'ai-copilot__labchart-tick'));
+        svg.appendChild(labelEl(coords[coords.length - 1].x, H - 8, String(new Date(points[points.length - 1].date).getUTCFullYear()), 'middle', 'ai-copilot__labchart-tick'));
+
+        // points, coloured by status; endpoint emphasized
+        for (var i = 0; i < coords.length; i++) {
+            var c = coords[i];
+            var last = i === coords.length - 1;
+            var cls = 'ai-copilot__labchart-pt ai-copilot__labchart-pt--'
+                + (c.p.status === 'preliminary' ? 'prelim' : 'final');
+            svg.appendChild(svgEl('circle', { 'class': cls, cx: c.x.toFixed(1), cy: c.y.toFixed(1), r: last ? 4.5 : 3.5 }));
+        }
+        // value labels at first and last draw only
+        svg.appendChild(labelEl(coords[0].x + 5, coords[0].y + 12, fmt(values[0]), 'start', 'ai-copilot__labchart-val'));
+        var lastC = coords[coords.length - 1];
+        svg.appendChild(labelEl(lastC.x - 6, lastC.y - 7, fmt(values[values.length - 1]), 'end', 'ai-copilot__labchart-val ai-copilot__labchart-val--end'));
+
+        var figure = document.createElement('figure');
+        figure.className = 'ai-copilot__labchart';
+
+        var head = document.createElement('figcaption');
+        head.className = 'ai-copilot__labchart-head';
+        var name = document.createElement('span');
+        name.className = 'ai-copilot__labchart-name';
+        name.textContent = s.display || s.code;
+        head.appendChild(name);
+        if (s.unit) {
+            var unit = document.createElement('span');
+            unit.className = 'ai-copilot__labchart-unit';
+            unit.textContent = s.unit;
+            head.appendChild(unit);
+        }
+        var loinc = document.createElement('span');
+        loinc.className = 'ai-copilot__labchart-loinc';
+        loinc.textContent = 'LOINC ' + s.code;
+        head.appendChild(loinc);
+
+        figure.appendChild(head);
+        figure.appendChild(svg);
+        return figure;
+    }
+
+    /**
+     * A positioned SVG text label. Kept tiny because every chart tick and value goes through it.
+     *
+     * @param {number} x
+     * @param {number} y
+     * @param {string} text
+     * @param {string} anchor text-anchor value.
+     * @param {string} cls class name.
+     * @returns {SVGTextElement}
+     */
+    function labelEl(x, y, text, anchor, cls) {
+        var node = svgEl('text', { 'class': cls, x: x, y: y, 'text-anchor': anchor });
+        node.textContent = text;
+        return node;
     }
 
     /**

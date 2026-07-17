@@ -76,7 +76,7 @@ redirect_uri="${origin}/interface/modules/custom_modules/${MODULE_DIR}/public/ca
 
 # The exact scopes the Co-Pilot's tools need. `launch` (never `launch/patient`,
 # whose substring match re-triggers the patient picker). See CopilotScopes.php.
-scope="openid fhirUser online_access launch patient/Patient.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Encounter.read patient/DocumentReference.read patient/Binary.read"
+scope="openid fhirUser online_access launch patient/Patient.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Encounter.read patient/Observation.read patient/DocumentReference.read patient/Binary.read"
 
 sql() { docker exec -i "$mysql_ctr" mariadb -uroot -proot openemr "$@"; }
 
@@ -146,7 +146,13 @@ PY
 grep -q 'AI_COPILOT_CLIENT_ID' "$override" || die "env injection did not take (no 'HOST_GID: \"20\"' anchor in override?)"
 
 info "recreating openemr container to load env"
-docker compose --project-directory "$compose_dir" up -d openemr >/dev/null 2>&1 \
+# `-p` is MANDATORY here. --project-directory sets where the compose files are read from but NOT
+# the project name, which still defaults to the directory's basename — and every worktree's compose
+# dir is named development-easy, the same as the primary's. Without -p this recreates the PRIMARY's
+# containers using the WORKTREE's compose files, repointing the primary's mysql at the worktree's
+# db volume; the primary then dies on "Unable to lock ./ibdata1" because two mariadbd processes hold
+# one volume. Recovery is `docker compose up -d` from the primary's own docker/development-easy.
+docker compose -p "openemr-${slug}" --project-directory "$compose_dir" up -d openemr >/dev/null 2>&1 \
     || die "compose up failed; run: openemr-cmd worktree up $branch"
 
 cat <<EOF

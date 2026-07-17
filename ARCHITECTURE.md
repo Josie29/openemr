@@ -155,6 +155,7 @@ objects that guarantee their own validity.
 | `get_medications()` | `MedicationRequest` | `list[Medication]` (dedup + text-fallback inside) | UC-1–UC-4 |
 | `get_allergies()` | `AllergyIntolerance` | `list[Allergy]` | UC-1, UC-4 |
 | `get_encounters()` | `Encounter` | `list[Encounter]` (ordered, date-bounded, "last N") | UC-1, UC-2, UC-3 |
+| `get_lab_observations(code?)` | `Observation` | `list[LabObservation]` (laboratory category, oldest-first, LOINC-filterable) | UC-1, UC-2 |
 | `get_encounter_note(id)` | `DocumentReference` | free-text clinical note (base64-decoded) | UC-3 |
 
 **The medication data-quality reality (verified against code + live seed DB).** The audit

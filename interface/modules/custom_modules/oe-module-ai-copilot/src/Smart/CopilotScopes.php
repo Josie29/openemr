@@ -45,6 +45,11 @@ final readonly class CopilotScopes
         'patient/MedicationRequest.read',
         'patient/AllergyIntolerance.read',
         'patient/Encounter.read',
+        // Observation read backs the lab-history tools: it resolves through
+        // FhirObservationLaboratoryService to `procedure_result`, which is also where
+        // agent-derived lab facts are written — so history and derived facts read back
+        // through this one scope.
+        'patient/Observation.read',
         'patient/DocumentReference.read',
         // Binary read lets the agent fetch an uploaded lab PDF's bytes by document UUID
         // (GET /fhir/Binary/{id}) for OCR — the production doc-bytes fetch, keyed on the same UUID

@@ -12,9 +12,10 @@ agent survives only as the eval-harness target** (migration under JOS-50); it is
 
 The graph has three roles. The **supervisor/router** runs a *procedural* loop, emitting a typed
 `RouteDecision` per hop that dispatches the next worker (each decision logged as a structured
-event / Langfuse child span). The **intake-extractor** owns the six FHIR read tools — `get_patient`
+event / Langfuse child span). The **intake-extractor** owns the seven FHIR read tools — `get_patient`
 (`Patient`), `get_problems` (`Condition`), `get_medications` (`MedicationRequest`, deduplicated),
-`get_allergies` (`AllergyIntolerance`), `get_encounters` (`Encounter`, metadata), and
+`get_allergies` (`AllergyIntolerance`), `get_encounters` (`Encounter`, metadata),
+`get_lab_observations` (`Observation`, laboratory category, LOINC-filterable), and
 `get_encounter_note` (`DocumentReference` — the free-text clinical note for one visit,
 base64-decoded) — covering UC-1 orientation, UC-4 cross-referencing, and UC-3 note drill-down. The
 **evidence-retriever** runs **hybrid RAG** over a 55-chunk in-repo clinical-guideline corpus (see
@@ -84,7 +85,7 @@ src/copilot/
   main.py          FastAPI app, routes, middleware wiring
   config.py        pydantic-settings; all config/secrets from env (COPILOT_ prefix)
   schemas.py       ChatRequest / ChatResponse / Claim / SourceRef contracts (+ follow_ups)
-  agent.py         Pydantic AI agents: supervisor/router + workers (six FHIR tools) + grounding gate
+  agent.py         Pydantic AI agents: supervisor/router + workers (seven FHIR tools) + grounding gate
   retrieval.py     ChunkRegistry: resolves evidence SourceRefs so the gate can ground guideline claims
   verification.py  FetchLog + field-level grounding & value stamping (ARCHITECTURE.md §7)
   conversation.py  in-memory multi-turn ConversationStore (per user+patient; TTL + LRU bounded)

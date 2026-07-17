@@ -30,17 +30,28 @@
 # Requirements:
 #   - railway CLI authed and linked to agentforge-openemr / production
 #     (railway whoami; railway status)
-#   - local dev-easy stack up and healthy (development-easy-mysql-1)
+#   - local dev-easy stack up and healthy (see LOCAL_MYSQL_CONTAINER below)
 #
 # Usage:
 #   interface/modules/custom_modules/oe-module-ai-copilot/scripts/clone-prod-to-local.sh
+#
+#   Against a worktree's stack (find the container via `openemr-cmd worktree list`):
+#     LOCAL_MYSQL_CONTAINER=openemr-<branch-slug>-mysql-1 \
+#       interface/modules/custom_modules/oe-module-ai-copilot/scripts/clone-prod-to-local.sh
 #
 set -euo pipefail
 
 # --- Config ------------------------------------------------------------------
 RAILWAY_SERVICE="openemr"          # prod OpenEMR service (app container has the mariadb client + $MYSQL_*)
 PROD_DB="openemr"                  # prod database name (not exposed as an env var; it is literally "openemr")
-LOCAL_MYSQL_CONTAINER="development-easy-mysql-1"
+
+# Target container. Defaults to the primary clone's stack; override to target a
+# worktree's stack, whose compose project is named for its branch:
+#   LOCAL_MYSQL_CONTAINER=openemr-<branch-slug>-mysql-1 clone-prod-to-local.sh
+# `docker compose` from inside a worktree does NOT resolve to that worktree -- every
+# tree's compose dir is named development-easy, so the project name collides and the
+# command silently hits the primary. Always name the container explicitly.
+LOCAL_MYSQL_CONTAINER="${LOCAL_MYSQL_CONTAINER:-development-easy-mysql-1}"
 LOCAL_MYSQL_USER="root"
 LOCAL_MYSQL_PASS="root"
 LOCAL_DB="openemr"

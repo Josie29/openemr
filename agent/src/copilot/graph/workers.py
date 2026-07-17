@@ -1,3 +1,5 @@
+import logging
+
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 
@@ -11,6 +13,8 @@ from copilot.ingestion.registry import DocumentFactHandle
 from copilot.rag.models import EvidenceSnippet
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
+
+logger = logging.getLogger(__name__)
 
 # Shared citation discipline every agent obeys — the contract the grounding gate enforces
 # mechanically. Kept in one place so the three prompts cannot drift apart on the one rule that must
@@ -216,6 +220,19 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         except ExtractionError:
             # The document could not be read — return no facts so the worker reports the gap
             # rather than fabricating facts around a failed OCR.
+            #
+            # LOG IT. An empty list is indistinguishable from "the agent read this document and it
+            # had nothing in it", so swallowing this silently turns every misconfiguration into a
+            # plausible-looking answer. FixtureOcrBackend deliberately raises a LOUD error for a
+            # doc_type it has no recording for (its docstring: "a turn that looks like 'this
+            # document has nothing in it' rather than a misconfiguration") — catching it without a
+            # word here is what defeated that intent, and cost a full trace investigation to
+            # rediscover.
+            logger.warning(
+                "document extraction failed; reporting no facts for this document",
+                extra={"document_id": document_id, "doc_type": summary.doc_type.value},
+                exc_info=True,
+            )
             return []
         # Record the extracted facts so the grounding gate can resolve any the worker cites.
         handles = ctx.deps.documents.record(extracted)

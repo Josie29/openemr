@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from copilot.fhir.models import ResourceIdentity
-from copilot.ingestion.schemas import BoundingBox, DocType
+from copilot.ingestion.schemas import BoundingBox, DocType, LabDetail
 from copilot.schemas import ChatResponse, Claim, SourceRef
 
 _MISSING = object()
@@ -22,7 +22,8 @@ class Resolution:
     A document-extraction resolver (JOS-54) additionally returns the click-to-source overlay
     provenance — the source ``document_id``, ``doc_type``, ``page``, and ``bounding_box`` (**in PDF
     points**) — which :func:`_stamp` copies onto the ``SourceRef``. FHIR/guideline resolvers leave
-    these None.
+    these None. A *lab* fact additionally returns ``lab_detail`` (JOS-88), the analyte metadata the
+    sidebar's lab table renders; every other fact leaves it None.
     """
 
     value: str
@@ -31,6 +32,7 @@ class Resolution:
     doc_type: DocType | None = None
     page: int | None = None
     bounding_box: BoundingBox | None = None
+    lab_detail: LabDetail | None = None
 
 
 class CitationResolver(Protocol):
@@ -296,4 +298,12 @@ def _stamp(resolver: CitationResolver, ref: SourceRef) -> SourceRef | None:
     update["doc_type"] = resolution.doc_type
     update["page"] = resolution.page
     update["bounding_box"] = resolution.bounding_box
+    # `lab_detail` rides the same unconditional rule and needs it just as badly. The sidebar renders
+    # reference_range/abnormal_flag as system-stamped fact, so a model-authored range would make a
+    # normal value read as abnormal — or hide an abnormal one — under a UI that says the cells came
+    # off the page. Written for EVERY fact (None for a non-lab one), so anything the model authored
+    # here is stripped, never trusted. Do NOT guard this with
+    # `if resolution.lab_detail is not None`:
+    # that reopens exactly this hole for any fact the resolver doesn't supply a detail for.
+    update["lab_detail"] = resolution.lab_detail
     return ref.model_copy(update=update)

@@ -38,10 +38,12 @@ final readonly class CopilotSidebarController
      *
      * The set spans the agent's capabilities without assuming any specific condition, so the empty
      * state doubles as a capability demo for any patient: a record summary, a guideline question
-     * scoped to whatever problems the chart holds, an uploaded-lab-report (vision extraction)
-     * question, and a synthesis question that pairs the lab results with matching guidance. The two
-     * lab-report prompts assume an uploaded lab document is on file (the demo patient has one); for
-     * a patient without one the agent reports that no lab report is on file.
+     * scoped to whatever problems the chart holds, an uploaded-document (vision extraction)
+     * question, and a synthesis question pairing extracted document facts with matching guidance.
+     * One prompt per route, deliberately — a narrower variant of a route already covered would pad
+     * the empty state without demonstrating anything new. The document prompts assume an uploaded
+     * document is on file (the demo patient has a lab report and an intake form); for a patient
+     * without one the agent reports that none is on file.
      *
      * @var list<string>
      */
@@ -52,8 +54,12 @@ final readonly class CopilotSidebarController
         "What do guidelines recommend for this patient's active problems?",
         // Vision route (attach_and_extract -> answer): OCR the uploaded lab report, no retrieval.
         'What does the latest uploaded lab report show?',
-        // Synthesis (both workers -> answer): extract the lab results AND retrieve matching guidance.
-        'How do the latest lab results compare to relevant clinical guidelines?',
+        // Synthesis (both workers -> answer) across EVERY uploaded document: extract their facts AND
+        // retrieve guidance matching what was found. Exercises multi-document extraction (a lab
+        // report and an intake form in one turn), landing them as separate provenance cards.
+        // Deliberately says "the documents", not "the lab report": the agent discovers what is on
+        // file rather than being told what to read.
+        'Synthesize the documents and suggest any relevant clinical guidelines based on findings',
     ];
 
     /**

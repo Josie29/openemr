@@ -1,3 +1,4 @@
+import copy
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -219,6 +220,16 @@ def test_grounded_document_claim_projects_to_lab_pdf_citation() -> None:
     assert citation.source_type is CitationSourceType.LAB_PDF
     assert citation.source_id == "doc-777"  # the document, not the synthetic Observation key
     assert citation.bounding_box == stamped.bounding_box  # the overlay box survives the projection
+
+    # The analyte metadata survives all four hops from a REAL extraction: LabResult -> _RecordedFact
+    # -> Resolution -> SourceRef -> LabPdfCitation. Every hop defaults to None, so a missed one is
+    # invisible — no type error, no other test failing, just an empty column in the sidebar's lab
+    # table. This assertion is what catches that.
+    assert citation.lab_detail is not None
+    assert citation.lab_detail.test_name == "Creatinine"
+    assert citation.lab_detail.unit == "mg/dL"
+    assert citation.lab_detail.reference_range == handle.reference_range  # off the fixture page
+    assert citation.lab_detail.abnormal_flag is AbnormalFlag.HIGH
 
 
 def _final_tool_name(info: AgentInfo) -> str:
@@ -448,3 +459,80 @@ def test_blank_value_or_name_rows_are_skipped_not_crashed() -> None:
     # Empty words = scanned-PDF path (coarse OCR row-estimate). Must not raise a ValidationError.
     report = map_lab_report(ocr, DocumentGeometry.from_parts(ocr, []))
     assert [r.test_name for r in report.results] == ["Glucose", "Sodium"]
+
+
+# --- LOINC grounding (JOS-87) -------------------------------------------------------------------
+
+
+def _ocr_with_loinc(test_name: str, code: str | None) -> dict[str, Any]:
+    """The lab fixture's OCR response with one row's LOINC code replaced.
+
+    Args:
+        test_name: The analyte row to rewrite.
+        code: The code to put on that row, or None to blank it.
+
+    Returns:
+        A deep-copied OCR response, safe to mutate.
+    """
+    ocr = copy.deepcopy(_ocr())
+    annotation = ocr["document_annotation"]
+    parsed = json.loads(annotation) if isinstance(annotation, str) else annotation
+    for row in parsed["results"]:
+        if row.get("test_name") == test_name:
+            row["loinc"] = code
+    ocr["document_annotation"] = json.dumps(parsed)
+    return ocr
+
+
+def test_extracts_the_loinc_code_printed_on_the_report() -> None:
+    """Without a code the write-back cannot persist the result at all: OpenEMR publishes
+    procedure_result.result_code as a LOINC, so an uncoded result is refused (JOS-81)."""
+    report = map_lab_report(_ocr(), _geometry())
+
+    potassium = _find(report, "Potassium")
+    assert potassium is not None
+    assert potassium.loinc == "2823-3"
+    assert all(r.loinc is not None for r in report.results)  # the fixture prints one on every row
+
+
+def test_refuses_a_loinc_code_the_document_does_not_print() -> None:
+    """The fabrication guard, and the reason a checksum alone is not enough.
+
+    4548-4 is a REAL, checksum-valid LOINC (Hemoglobin A1c) — exactly what a model recalling from
+    training would produce. It is not on this page, so it must be refused: persisting it would
+    label a potassium result as an HbA1c.
+    """
+    report = map_lab_report(_ocr_with_loinc("Potassium", "4548-4"), _geometry())
+
+    potassium = _find(report, "Potassium")
+    assert potassium is not None
+    assert potassium.loinc is None
+    assert potassium.value == "5.4"  # the fact survives; only the ungrounded code is dropped
+
+
+def test_refuses_a_misread_loinc_code() -> None:
+    """A scanned report's OCR can transpose a digit, and the mangled code lands in the OCR text —
+    so grounding passes and only the check digit catches it. 2823-3 is potassium; 2832-3 is a
+    different test entirely."""
+    ocr = _ocr_with_loinc("Potassium", "2832-3")
+    # Simulate the scan path: no text layer, so the OCR's own (mis)reading is the only evidence.
+    ocr["pages"][0]["tables"][0]["content"] = ocr["pages"][0]["tables"][0]["content"].replace(
+        "2823-3", "2832-3"
+    )
+    report = map_lab_report(ocr, DocumentGeometry.from_parts(ocr, []))
+
+    potassium = _find(report, "Potassium")
+    assert potassium is not None
+    assert potassium.loinc is None
+
+
+def test_a_report_without_codes_still_yields_usable_facts() -> None:
+    """Most real lab PDFs print no LOINC at all. Requiring one would turn "cannot persist this"
+    into "cannot read this", losing the answer as well as the write-back."""
+    report = map_lab_report(_ocr_with_loinc("Potassium", None), _geometry())
+
+    potassium = _find(report, "Potassium")
+    assert potassium is not None
+    assert potassium.loinc is None
+    assert potassium.value == "5.4"
+    assert potassium.citation.bounding_box is not None

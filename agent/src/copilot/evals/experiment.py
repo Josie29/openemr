@@ -15,9 +15,13 @@ from copilot.schemas import ChatResponse
 logger = logging.getLogger("copilot.evals.experiment")
 
 # Regression thresholds, one per boolean rubric (JOS-50). The deterministic safety rubrics must hold
-# on every case (1.0); the LLM faithfulness judge is allowed rare slack (0.9). The report-only CI
-# gate does not fail on these yet (see the workflow) — the checks run and surface in the PR comment;
-# flip should_fail_on_regression to true to enforce.
+# on every case (1.0); only the LLM faithfulness judge gets rare slack (0.9), because it is the one
+# rubric a model's phrasing can fail without the code being wrong.
+#
+# These are ENFORCED: breaching one raises RegressionError, which fails the promotion PR
+# (evals.yml). The 1.0 floors are deliberate — a single ungrounded claim across the subset drops
+# the mean below threshold and blocks the release. That sensitivity is the point of the Week-2
+# hard gate; if a rubric starts producing false failures, fix the rubric, do not lower the number.
 _THRESHOLDS: dict[str, float] = {
     "mean_schema_valid": 1.0,  # the output must always parse as a ChatResponse
     "mean_citation_present": 1.0,  # every claim must carry a citation — the grounding contract
@@ -190,9 +194,9 @@ def experiment(context: RunnerContext) -> Any:
     """CI entrypoint invoked by ``langfuse/experiment-action``.
 
     Runs every dataset item through the graph and the five boolean rubrics, then raises
-    ``RegressionError`` when a run-level mean is below its threshold. Under the report-only workflow
-    the raised regression does not fail the job — it is surfaced in the PR comment — so flipping to
-    an enforcing gate is a single ``should_fail_on_regression`` change.
+    ``RegressionError`` when a run-level mean is below its threshold. The workflow runs this as an
+    ENFORCING gate on qa/integration -> main promotion PRs, so a raised regression fails the job and
+    blocks the release — the Week-2 PRD's hard gate.
 
     Args:
         context: The action-provided runner context (already bound to the dataset).

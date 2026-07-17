@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from copilot.ingestion.schemas import BoundingBox, DocType
+from copilot.ingestion.schemas import BoundingBox, DocType, LabDetail
 
 
 class SourceRef(BaseModel):
@@ -85,6 +85,14 @@ class SourceRef(BaseModel):
             "overlay. Leave empty — system-set from the extraction sidecar; absent means no box."
         ),
     )
+    lab_detail: LabDetail | None = Field(
+        default=None,
+        description=(
+            "Analyte metadata (test name, unit, reference range, abnormal flag) for a lab fact, "
+            "rendered as the sidebar's lab table. Leave empty — system-set from the extraction; "
+            "a range you write here is stripped, never shown."
+        ),
+    )
 
     def to_citation(self) -> "Citation":
         """Project this grounded citation onto the canonical wire ``Citation`` (§3.3).
@@ -127,6 +135,7 @@ class SourceRef(BaseModel):
                         quote_or_value=quote_or_value,
                         page=self.page,
                         bounding_box=self.bounding_box,
+                        lab_detail=self.lab_detail,
                     )
                 case DocType.INTAKE_FORM:
                     return IntakeFormCitation(
@@ -341,9 +350,23 @@ class LabPdfCitation(DocumentCitationBase):
     """A citation to an extracted lab-PDF field, with the click-to-source overlay geometry.
 
     Produced by :meth:`SourceRef.to_citation` for a fact whose ``doc_type`` is ``LAB_PDF`` (JOS-57).
+
+    ``lab_detail`` sits on THIS arm, not on :class:`DocumentCitationBase`, because the base holds
+    only what both document arms carry — geometry qualifies (both are boxed), analyte metadata does
+    not. On the base, an intake citation would inherit a ``reference_range`` that is meaningless for
+    a date of birth and that nothing can ever populate: a permanently-null key on the wire and a
+    frontend type advertising a column that cannot fill (JOS-88).
+
+    It stays optional: :meth:`SourceRef.to_citation` is a *pure* projection and must not raise at
+    the response boundary for a lab-typed ref without a detail (a hand-built ref, or a future lab
+    fact from a non-``LabResult`` source). The sidebar falls back to prose when it is absent.
     """
 
     source_type: Literal[CitationSourceType.LAB_PDF] = CitationSourceType.LAB_PDF
+    lab_detail: LabDetail | None = Field(
+        default=None,
+        description="Analyte metadata for the lab table: test name, unit, reference range, flag.",
+    )
 
 
 class IntakeFormCitation(DocumentCitationBase):

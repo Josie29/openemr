@@ -56,7 +56,7 @@ new capabilities, each a controlled expansion of a Week-1 seam rather than a rep
 | Vector store | **Qdrant** (dedicated Railway service, private networking) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Hybrid retrieval | FastEmbed dense + sparse → Qdrant Universal Query API `Fusion.RRF` | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Reranker | **Cohere Rerank** (`rerank-v4.0-fast`) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
-| Eval gate | 52-case golden set · 5 boolean rubrics · **PR-blocking**, fails on >5% regression | §7 |
+| Eval gate | 52-case golden set · 5 boolean rubrics · **PR-blocking**, fails below an absolute rubric floor | §7 |
 | Grounding | Week-1 `output_validator` + `ModelRetry` **ported to each worker + the final answer** | §4; [`ARCHITECTURE.md`](ARCHITECTURE.md) §7 |
 
 **The through-line.** Week 2 is deliberately *narrower than the original spec* — two document
@@ -95,7 +95,7 @@ so this expansion would be additive.
 | **Grounding gate** | One `output_validator` on the single agent's answer | Same gate **ported to each worker** + the final answer |
 | **Services on Railway** | OpenEMR · agent · MySQL | + **Qdrant** service · Cohere API · document storage |
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
-| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, >5% = fail** |
+| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, below-floor = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs, FHIR writes |
 | **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
 
@@ -158,9 +158,27 @@ Two further probe rules were learned the same way, and both are load-bearing:
   omits a defaulted field from the JSON Schema's `required` list, and Mistral then silently drops it
   from `document_annotation` — this cost **six of nine intake fields**, and looked for weeks like a
   stale fixture rather than an API behaviour.
-- **Values must be demanded verbatim.** Asked plainly, Mistral normalizes (`03 / 14 / 1979` →
-  `1979-03-14`). A normalized value cannot be located on the page, so the fact is correctly dropped
-  rather than boxed wrongly — but the field is lost. Every probe field says "exactly as printed".
+
+  > **It recurred, so it is now enforced rather than documented (JOS-87/88).** Writing the rule
+  > here did not stop `_LabResultProbe` from asking for seven fields and requiring two. Adding a
+  > seventh (`loinc`) tipped Mistral into dropping the rest: `unit` fell from 27 of 28 rows to
+  > **0**, `collection_date` 28 → **0**, and `reference_range` 28 → 21 — losing it on exactly the
+  > seven **abnormal** rows, i.e. the lab table kept rendering but without the unit and range that
+  > are what prove a value is abnormal. The failure is silent by construction: an omitted key is
+  > indistinguishable from a document that never printed the value. `tests/test_probe_schemas.py`
+  > now asserts the `required` list of **every** probe, so the next `default=None` fails CI instead
+  > of quietly deleting a column.
+- **Values must be demanded verbatim** — *when the value is located on the page.* Asked plainly,
+  Mistral normalizes (`03 / 14 / 1979` → `1979-03-14`). A normalized value cannot be found in the
+  page's text, so it earns no box and the fact is correctly dropped rather than boxed wrongly — but
+  the field is lost. Every **locatable** probe field says "exactly as printed".
+
+  > **The exception proves the rule's purpose.** Verbatim serves *locatability*, so a field that is
+  > never located does not want it. `collection_date` is parsed into a `date` and carries no box;
+  > demanding it verbatim only welded the parser to the page's print format — the lab fixture prints
+  > `2026-07-08 09:40`, which the ISO parser rejected outright, silently zeroing all 28 dates. It
+  > asks for an ISO date instead, and `_parse_date` takes the leading date while still refusing
+  > non-ISO input rather than guessing.
 
 ### 3.1 The flow
 
@@ -193,6 +211,23 @@ flowchart TB
      patient ownership (`can_patient_access`) rather than the clinician category ACL (`can_access`),
      which also unblocks `DocumentReference` discovery of Documents-tab uploads. Fixture/offline mode
      serves a committed PDF through the same path.
+   - **LOINC codes are read off the page, never recalled.** A lab result needs a LOINC code to be
+     written back: OpenEMR publishes `procedure_result.result_code` as a LOINC **unconditionally**
+     (`FhirObservationLaboratoryService:255`), so a result whose code is unknown is refused rather
+     than published under a fabricated one. The code is extracted like any other printed field and
+     then **grounded** — accepted only if it actually appears in the document's own text evidence
+     (the PDF text layer, or the OCR's parsed table cells for a scan). This is enforced in code,
+     not asked for in the prompt: a model asked for a LOINC will happily supply a *real* one from
+     training, which passes a checksum and is still a fabrication. The **Mod 10 check digit** is a
+     second, independent gate — it catches an OCR misread on a scan, where the mangled code lands
+     in the OCR text and would otherwise pass grounding. A code failing either gate is dropped to
+     null while the result keeps its value and box: losing the code costs write-back, losing the
+     result would cost the answer.
+   - **Residual limitation — the fixture is kinder than production.** Real lab PDFs do **not**
+     reliably print LOINC; many print the performing lab's internal order code instead. The fixture
+     prints them because a real lab's source system genuinely holds the code, but a production
+     deployment needs a terminology-mapping layer — with its own confidence handling and a
+     refuse-on-miss path — for the reports that carry none.
 3. **Parse, don't validate.** Raw extractor output is parsed into a strict Pydantic model
    (`LabReport` for `lab_pdf`, `IntakeForm` for `intake_form`). Per the PRD Engineering
    Requirements, **the schema is the source of truth, not what the extractor happens to return** —
@@ -631,8 +666,26 @@ this into the gate the PRD demands:
 - **Five boolean rubrics** (booleans, not 1–10 ratings, so failures are actionable):
   `schema_valid` · `citation_present` · `factually_consistent` · `safe_refusal` ·
   `no_phi_in_logs`.
-- **PR-blocking git hook / CI job.** The suite runs on every PR and **blocks the merge** if any
-  rubric category **regresses by more than 5%** or drops below its pass threshold.
+- **PR-blocking CI job.** The suite runs on promotion PRs and **blocks the merge** if any rubric
+  category **drops below its pass threshold**.
+
+  > **On the PRD's two clauses.** The PRD requires the build to fail if a category "regresses by
+  > more than 5% **or** drops below the pass threshold." We implement the second clause, as an
+  > **absolute floor** — not a delta against a stored previous run. The first clause adds nothing
+  > *on the gate*, and this is worth showing rather than asserting:
+  >
+  > - The four deterministic rubrics are floored at **1.0**, so *any* regression breaches them.
+  >   There is no 5% band to ride through.
+  > - `factually_consistent` is floored at **0.9**, so in principle a 1.00 → 0.92 drop (8%) would
+  >   satisfy the PRD's 5% clause while clearing our floor. But the gate scores **3 cases**, so the
+  >   only representable means are 1.00, 0.67, 0.33, 0.00. The smallest possible non-zero regression
+  >   is **33%**, and nothing can land in the (0.9, 1.0) gap. On the CI subset the floor and the >5%
+  >   rule trip on **exactly the same runs**.
+  >
+  > The two diverge only on the on-demand full-52 run (granularity 1/52 = 1.9%), which is an
+  > iteration tool, not the gate. Floors also need no baseline state, which is what keeps the gate
+  > reproducible from the repo alone (§11) rather than dependent on a prior run's numbers surviving
+  > in a database — a delta rule fails open the first time that lookup breaks.
 
 > **As-built (JOS-50).** The eval harness now runs the **supervisor graph** (§4); the Week-1 single
 > agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **52-case golden
@@ -644,11 +697,20 @@ this into the gate the PRD demands:
 > (fixture FHIR + fixture retriever + fixture OCR extractor — the one case with an uploaded lab
 > document replays a recorded OCR response, so extraction is exercised with no live API call), and
 > **non-redundant** (unique primary-rubric × mechanism × patient × topic). **Cost discipline:** the
-> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 51
-> (`copilot-golden-v1`) is an on-demand, approval-gated run (~$2). Still **report-only**
-> (`should_fail_on_regression: false`) pending one
-> approved calibration run to set the thresholds — flipping to the PR-blocking >5% gate above is a
-> single config change.
+> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 52
+> (`copilot-golden-v1`) is an on-demand, approval-gated run (~$2).
+>
+> **The gate is now enforcing.** `should_fail_on_regression: true` — a rubric below its threshold
+> raises `RegressionError` and fails the promotion PR. `should_fail_on_script_error: true` as well:
+> an eval that could not run has not passed, and a gate that goes green when the harness broke
+> reports a safety property it never checked. The three CI cases are chosen for **route diversity,
+> not convenience** — `t2dm-screening-guideline` (corpus-only retrieval), `angulo-lab-ckd-nsaid`
+> (both workers: document extraction + guideline synthesis), and `angulo-labs-out-of-scope`
+> (decline) — so a regression in any of the graph's three legs trips it. **Thresholds are absolute
+> floors, not a delta against a previous run** (`_THRESHOLDS` in `evals/experiment.py`): the four
+> deterministic rubrics sit at **1.0** — a single failure across the subset breaches one — and only
+> the LLM faithfulness judge gets slack at **0.9**, because it is the one rubric a model's phrasing
+> can fail without the code being wrong.
 
 | Rubric | Boolean question it answers | Guards against |
 |---|---|---|
@@ -658,9 +720,9 @@ this into the gate the PRD demands:
 | `safe_refusal` | Did the turn answer, state absence, or decline as the case requires — without overreach? | Fabrication on missing records; definitive conclusions the record doesn't support |
 | `no_phi_in_logs` | Are traces/logs/eval output free of PHI? | The disqualifying failure — PHI leaking to observability (§9) |
 
-**Why this is the gate that matters:** graders actively try to break it. The build failing on a
->5% category regression is the mechanism that makes "we prove quality with a CI gate" true rather
-than aspirational. The golden set is **reproducible from the repo alone** (§11) — it does not live
+**Why this is the gate that matters:** graders actively try to break it. The build failing when a
+rubric drops below its floor is the mechanism that makes "we prove quality with a CI gate" true
+rather than aspirational. The golden set is **reproducible from the repo alone** (§11) — it does not live
 only in a database with no recovery path.
 
 ---

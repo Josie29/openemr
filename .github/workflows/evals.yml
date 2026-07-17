@@ -1,27 +1,33 @@
-name: Agent evals (report-only)
+name: Agent evals (blocking gate)
 
-# The paid eval: makes real Anthropic API calls (agent + judges) and writes a run to Langfuse, so
-# it costs money per run. It therefore runs ONLY on release-promotion PRs into main
-# (qa/integration -> main; main = prod) and on manual dispatch — NOT on feature -> qa/integration
-# PRs. Free deterministic agent tests (pytest/ruff/mypy, incl. the golden-set ground-truth guard)
-# run on every PR via agent-tests.yml.
-# COST: this gate runs only the 3-case CI subset (copilot-golden-ci, ~$0.10/run) — NOT the full
-# 50-case set (copilot-golden-v1), which is an on-demand, approval-gated run (~$2). Author/verify of
-# all 50 is free; only running the graph to score rubrics costs money.
-# REPORT-ONLY: results are posted as a PR comment but never fail the job (see should_fail_on_*
-# below). To turn this into an enforcing gate once the rubrics are calibrated, flip
-# should_fail_on_regression to "true" — the thresholds already live in evals/experiment.py.
+# THE WEEK-2 HARD GATE (PRD-week-2.md): "we will introduce a small regression and confirm your CI
+# gate fails. If the eval gate does not block the regression, the Week 2 build does not pass." This
+# job is that gate — it MUST run on promotion PRs and it MUST fail on regression. Do not disable it
+# to save cost; a gate that does not run is not a gate.
+#
+# The paid eval: makes real Anthropic API calls (agent + judges) and writes a run to Langfuse, so it
+# costs money per run. It therefore runs ONLY on release-promotion PRs into main (qa/integration ->
+# main; main = prod) and on manual dispatch — NOT on feature -> qa/integration PRs. Free
+# deterministic agent tests (pytest/ruff/mypy, incl. the golden-set ground-truth guard) run on every
+# PR via agent-tests.yml.
+#
+# COST: runs the 3-case CI subset (copilot-golden-ci, ~$0.10/run), not the full set
+# (copilot-golden-v1, ~$2, on-demand). The three are chosen for ROUTE diversity, not convenience —
+# one refusal, one both-workers document+guideline synthesis, one corpus-only retrieval — so a
+# regression in any of the graph's three legs trips it. Authoring/verifying all 52 is free; only
+# running the graph to score rubrics costs money.
+#
+# Thresholds live in evals/experiment.py: the four deterministic rubrics sit at 1.0, so a single
+# failure across the subset breaches one and raises RegressionError.
 
 on:
-  # TEMPORARILY DISABLED (2026-07-15) to save Anthropic API cost during pre-final iteration.
-  # RE-ENABLE BEFORE FINAL SUBMISSION — uncomment the pull_request trigger below.
-  # pull_request:
-  #   # Base-branch filter: only PRs targeting main (i.e. qa/integration -> main promotions).
-  #   branches:
-  #     - main
-  #   paths:
-  #     - "agent/**"
-  #     - ".github/workflows/evals.yml"
+  pull_request:
+    # Base-branch filter: only PRs targeting main (i.e. qa/integration -> main promotions).
+    branches:
+      - main
+    paths:
+      - "agent/**"
+      - ".github/workflows/evals.yml"
   workflow_dispatch:
 
 permissions:
@@ -57,11 +63,14 @@ jobs:
           langfuse_secret_key: ${{ secrets.LANGFUSE_SECRET_KEY }}
           langfuse_base_url: ${{ secrets.LANGFUSE_BASE_URL }}
           experiment_path: agent/src/copilot/evals/experiment.py
-          # The cheap 3-case CI subset, not the full 50 (copilot-golden-v1 is on-demand only).
+          # The cheap route-diverse 3-case subset (copilot-golden-v1 is the on-demand full set).
           dataset_name: copilot-golden-ci
           should_skip_sdk_installation: "true"
-          # Report-only: comment on the PR, but do not fail the job on regression or script error.
-          should_fail_on_regression: "false"
-          should_fail_on_script_error: "false"
+          # ENFORCING. A rubric below its threshold raises RegressionError and fails the PR.
+          should_fail_on_regression: "true"
+          # A script error fails too: an eval that could not run has not passed, and a gate that
+          # goes green when the harness broke is worse than no gate — it reports safety it never
+          # checked.
+          should_fail_on_script_error: "true"
           should_comment_on_pr: "true"
           github_token: ${{ github.token }}

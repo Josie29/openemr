@@ -13,6 +13,7 @@ from copilot.ingestion.schemas import (
     CitedText,
     DocType,
     IntakeForm,
+    LabDetail,
     LabReport,
 )
 from copilot.schemas import SourceRef
@@ -171,6 +172,12 @@ class _RecordedFact:
     result and an intake allergy differ in what a fact *is*, not in how a citation grounds against
     one. Everything arm-specific (which field is the value, what names the record) is decided by the
     recording arm and collapsed into these fields.
+
+    ``lab_detail`` does not breach that rule: it is ONE field, uniformly present, ``None`` for every
+    non-lab fact — the shape stays singular. The recording arm still decides everything arm-specific
+    and collapses it, into one slot rather than leaking four lab-only scalars that would be dead for
+    the other four :class:`FactKind` arms. (Spreading them flat is the version that breaks the
+    rule.)
     """
 
     resource_type: str
@@ -179,6 +186,7 @@ class _RecordedFact:
     citation: Citation
     document_id: str
     doc_type: DocType
+    lab_detail: LabDetail | None = None
 
 
 @dataclass
@@ -244,6 +252,12 @@ class DocumentFactRegistry:
                     date_label="Collected",
                 ),
                 citation=result.citation,
+                lab_detail=LabDetail(
+                    test_name=result.test_name,
+                    unit=result.unit,
+                    reference_range=result.reference_range,
+                    abnormal_flag=result.abnormal_flag,
+                ),
             )
             handles.append(
                 LabFactHandle(
@@ -371,6 +385,7 @@ class DocumentFactRegistry:
         value: str,
         identity: ResourceIdentity,
         citation: Citation,
+        lab_detail: LabDetail | None = None,
     ) -> str:
         """Normalize one fact into the registry and return the resource id a claim cites it by.
 
@@ -381,6 +396,8 @@ class DocumentFactRegistry:
             value: The verbatim value the gate will stamp onto a claim citing this fact.
             identity: What names this fact on the evidence card.
             citation: The extractor's citation, carrying the click-to-source box.
+            lab_detail: The analyte metadata a lab fact carries beyond its value, stamped onto a
+                citing claim for the sidebar's lab table. None for every non-lab fact.
 
         Returns:
             The fact's ``<document_id>#<ordinal>`` resource id.
@@ -393,6 +410,7 @@ class DocumentFactRegistry:
             citation=citation,
             document_id=extracted.document_id,
             doc_type=extracted.doc_type,
+            lab_detail=lab_detail,
         )
         return resource_id
 
@@ -426,4 +444,5 @@ class DocumentFactRegistry:
             page=box.page if box is not None else None,
             bounding_box=box,
             doc_type=fact.doc_type,
+            lab_detail=fact.lab_detail,
         )

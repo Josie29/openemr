@@ -10,7 +10,13 @@
  *
  * Two modes:
  *   ?doc=<uuid>&csrf_token=<t>&format=pdf   -> streams the raw PDF bytes
- *   ?doc=<uuid>&csrf_token=<t>&page=&x=&y=&w=&h=&label=  -> renders the pdf.js viewer
+ *   ?doc=<uuid>&csrf_token=<t>&page=&boxes=&label=  -> renders the pdf.js viewer
+ *
+ * `boxes` packs EVERY rectangle cited on the page (`x,y,w,h;x,y,w,h`, PDF points) and the viewer
+ * draws them all, numbered in order to match the sidebar's fact list (JOS-88). Drawing every box at
+ * once is the point: one box at a time cannot show what the model did NOT read, while the rendered
+ * page around the boxes is itself the denominator. The legacy single-box `&x=&y=&w=&h=` still works
+ * and folds into a one-element list.
  *
  * @package   OpenEMR\Modules\AiCopilot
  * @link      https://www.open-emr.org
@@ -28,6 +34,8 @@ require_once __DIR__ . '/../../../../globals.php';
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
 use OpenEMR\Common\Session\SessionWrapperFactory;
+use OpenEMR\Modules\AiCopilot\Source\SourceBox;
+use OpenEMR\Modules\AiCopilot\Source\SourceBoxCodec;
 
 $session = SessionWrapperFactory::getInstance()->getActiveSession();
 
@@ -83,14 +91,22 @@ if (filter_input(INPUT_GET, 'format') === 'pdf') {
 }
 
 // --- Mode 2: render the annotated viewer ----------------------------------------------------------
+// Geometry is parsed only AFTER every gate above (CSRF, ACL, session pid, document access). These
+// params carry no identity — they say where to draw on a document already proven readable — so they
+// cannot widen access.
 $page = max(1, (int) (filter_input(INPUT_GET, 'page') ?? 1));
-$bbox = [
-    'x' => (float) (filter_input(INPUT_GET, 'x') ?? 0),
-    'y' => (float) (filter_input(INPUT_GET, 'y') ?? 0),
-    'w' => (float) (filter_input(INPUT_GET, 'w') ?? 0),
-    'h' => (float) (filter_input(INPUT_GET, 'h') ?? 0),
-];
-$hasBox = $bbox['w'] > 0 && $bbox['h'] > 0;
+$boxes = SourceBoxCodec::decode(filter_input(INPUT_GET, 'boxes') ?: null);
+if ($boxes === []) {
+    // Legacy single-box contract, folded into the same list so the renderer has one path.
+    $boxes = SourceBoxCodec::decode(sprintf(
+        '%s,%s,%s,%s',
+        filter_input(INPUT_GET, 'x') ?? '',
+        filter_input(INPUT_GET, 'y') ?? '',
+        filter_input(INPUT_GET, 'w') ?? '',
+        filter_input(INPUT_GET, 'h') ?? ''
+    ));
+}
+$boxViews = array_map(static fn(SourceBox $box): array => $box->toViewArray(), $boxes);
 $label = filter_input(INPUT_GET, 'label');
 $label = is_string($label) && $label !== '' ? $label : 'Source document';
 // The chart-tab title (the tabs framework reads .title / <b> / <title>). A "Source:" prefix reads
@@ -102,9 +118,10 @@ $bytesUrl = 'source-view.php?doc=' . attr_url($uuid) . '&csrf_token=' . attr_url
 $pdfJs = 'assets/vendor/pdfjs/pdf.min.js';
 $pdfWorker = 'assets/vendor/pdfjs/pdf.worker.min.js';
 
-// Data the viewer JS needs, JSON-encoded so it is inert (no markup/code injection).
+// Data the viewer JS needs, JSON-encoded so it is inert (no markup/code injection). `boxes` is a
+// list (possibly empty — then the page renders with no overlay), so the renderer has one path.
 $viewData = json_encode(
-    ['bytesUrl' => $bytesUrl, 'workerSrc' => $pdfWorker, 'page' => $page, 'bbox' => $bbox, 'hasBox' => $hasBox],
+    ['bytesUrl' => $bytesUrl, 'workerSrc' => $pdfWorker, 'page' => $page, 'boxes' => $boxViews],
     JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
 );
 ?>
@@ -127,6 +144,19 @@ $viewData = json_encode(
         .doc-wrap { position: relative; box-shadow: 0 2px 10px rgba(31, 42, 51, 0.12); background: #fff; line-height: 0; }
         canvas { display: block; max-width: 100%; }
         .doc-bbox { position: absolute; border: 2px solid var(--accent); background: rgba(30, 78, 216, 0.16); box-shadow: 0 0 0 1px rgba(255,255,255,0.6); pointer-events: none; }
+        /* The badge numbers each box to the sidebar's fact list. It is what makes every box being
+           equally visible workable: coverage stays legible (you can see how much of the page was
+           NOT boxed) without losing which fact points where.
+
+           It sits OUTSIDE the box, never over it. Inside — or straddling a corner — it covers the
+           very characters the box exists to prove, which is the one thing this overlay must not do:
+           the reader clicked to read the value with their own eyes. Left is the safe side; a cited
+           value is right-aligned in its column or follows a label, so the space before it is blank
+           (measured: 132-178pt clear on the lab report, >=43pt on the intake form). */
+        .doc-bbox-num { position: absolute; top: 50%; right: 100%; transform: translateY(-50%); margin-right: 0.25rem; min-width: 1.1rem; height: 1.1rem; padding: 0 0.2rem; border-radius: 2px; background: var(--accent); color: #fff; font: 700 0.7rem/1.1rem -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; box-shadow: 0 0 0 1px rgba(255,255,255,0.8); pointer-events: none; }
+        /* No room on the left: a box hard against the page margin would push its badge off-page,
+           and an unreadable number is a broken link back to the fact. */
+        .doc-bbox--flip .doc-bbox-num { right: auto; left: 100%; margin-right: 0; margin-left: 0.25rem; }
         .doc-status { padding: 2rem 1rem; text-align: center; color: var(--muted); }
         .doc-status.err { color: #b02a2a; }
     </style>
@@ -155,30 +185,65 @@ $viewData = json_encode(
                 .then(function (buf) { return pdfjsLib.getDocument({ data: buf }).promise; })
                 .then(function (pdf) { return pdf.getPage(Math.min(data.page, pdf.numPages)); })
                 .then(function (page) {
-                    // Scale to fit the available width; bbox values are PDF points (scale-1 space).
+                    // The page in its own units (PDF points) — the space the boxes are given in.
+                    var base = page.getViewport({ scale: 1 });
+                    // Scale to fit the available width. This is a REQUEST, not a guarantee: the
+                    // canvas can still end up narrower (see the box positioning below).
                     var maxW = Math.min(wrap.parentElement.clientWidth - 8, 1100);
-                    var scale = maxW / page.getViewport({ scale: 1 }).width;
+                    var scale = maxW / base.width;
                     var vp = page.getViewport({ scale: scale });
                     var canvas = document.createElement('canvas');
                     var ratio = window.devicePixelRatio || 1;
                     canvas.width = Math.floor(vp.width * ratio);
                     canvas.height = Math.floor(vp.height * ratio);
                     canvas.style.width = vp.width + 'px';
-                    canvas.style.height = vp.height + 'px';
+                    // Height follows the width from the canvas's intrinsic ratio. Pinning it in px
+                    // instead lets `max-width: 100%` squash the page horizontally while the height
+                    // holds — a silently distorted document, and a scan is evidence.
+                    canvas.style.height = 'auto';
                     wrap.innerHTML = '';
                     wrap.appendChild(canvas);
                     var ctx = canvas.getContext('2d');
                     ctx.scale(ratio, ratio);
                     return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
-                        if (!data.hasBox) { return; }
-                        var box = document.createElement('div');
-                        box.className = 'doc-bbox';
-                        box.style.left = (data.bbox.x * scale) + 'px';
-                        box.style.top = (data.bbox.y * scale) + 'px';
-                        box.style.width = (data.bbox.w * scale) + 'px';
-                        box.style.height = (data.bbox.h * scale) + 'px';
-                        wrap.appendChild(box);
-                        box.scrollIntoView({ block: 'center' });
+                        // Draw EVERY cited box, numbered in the order the sidebar lists its facts.
+                        // The rectangles are already validated PDF points (SourceBoxCodec), so this
+                        // only scales them into the rendered viewport.
+                        var boxes = Array.isArray(data.boxes) ? data.boxes : [];
+                        var first = null;
+                        boxes.forEach(function (rect, index) {
+                            var box = document.createElement('div');
+                            box.className = 'doc-bbox';
+                            // Positioned as a PERCENTAGE of the page, never in scaled pixels. The
+                            // canvas frequently renders narrower than `scale` asked for — the stage's
+                            // padding is not in the measurement, and the tall canvas summons a
+                            // scrollbar that narrows the stage AFTER it was measured — and
+                            // `max-width: 100%` then absorbs the difference silently. A px-positioned
+                            // box does not follow that and lands a few percent to the right, over the
+                            // wrong cell. Percentages resolve against the wrapper, which tracks the
+                            // canvas at whatever width it settles at, including a later window resize.
+                            box.style.left = (rect.x / base.width * 100) + '%';
+                            box.style.top = (rect.y / base.height * 100) + '%';
+                            box.style.width = (rect.w / base.width * 100) + '%';
+                            box.style.height = (rect.h / base.height * 100) + '%';
+                            if (boxes.length > 1) {
+                                // A lone box needs no badge — there is nothing to disambiguate.
+                                var num = document.createElement('span');
+                                num.className = 'doc-bbox-num';
+                                num.textContent = String(index + 1);
+                                // The badge hangs off the box's left edge; a box hard against the
+                                // page margin has nowhere to put it, so flip it to the right.
+                                if (rect.x / base.width < 0.035) {
+                                    box.className += ' doc-bbox--flip';
+                                }
+                                box.appendChild(num);
+                            }
+                            wrap.appendChild(box);
+                            if (first === null) { first = box; }
+                        });
+                        // Scroll to the first box only: the reader should land on the evidence, but
+                        // the page around it is what shows how much was NOT read.
+                        if (first !== null) { first.scrollIntoView({ block: 'center' }); }
                     });
                 })
                 .catch(function () { fail('Could not load the source document.'); });

@@ -139,24 +139,26 @@ with `bounding_box: null` is valid. So the intake path needs an optional citatio
 `bbox` column already allows `''` for exactly this. `BoundingBox` itself keeps refusing zero-area boxes
 — correct for labs, and the nullability belongs at the fact level, not inside the value object.
 
-### Labs are blocked end-to-end on LOINC extraction (JOS-87)
+### Labs require a grounded LOINC code (JOS-87 — merged)
 
-**The writer works; the pipeline cannot feed it.** `FhirObservationLaboratoryService:255` stamps
-`system: LOINC` on whatever lands in `procedure_result.result_code`, unconditionally and without
-validation. But `LabResult` carries only `test_name` ("Hemoglobin A1c") — lab PDFs print names, not
-codes. Writing the name into `result_code` would publish
-`{"system": "http://loinc.org", "code": "Hemoglobin A1c"}`: **a fabricated coded clinical
-assertion**, the same failure the allergy path refuses. There is no escape hatch — an empty
-`result_code` yields `nullFlavor UNK` and the analyte name is lost entirely, because the service
-emits `code` only when code *and* text are both non-empty.
+`FhirObservationLaboratoryService:255` stamps `system: LOINC` on whatever lands in
+`procedure_result.result_code`, unconditionally and without validation. So `result_code` may only
+ever hold a code we actually **read off the page**. Writing `test_name` there would publish
+`{"system": "http://loinc.org", "code": "Hemoglobin A1c"}` — a fabricated coded clinical assertion,
+the same failure the allergy path refuses. There is no escape hatch: an empty `result_code` yields
+`nullFlavor UNK` and loses the analyte name entirely, because the service emits `code` only when
+code *and* text are both non-empty.
 
-`DerivedFactWriteBackTest` passes because the fixtures hand it real LOINC codes **invented for the
-test**. Nothing upstream produces them. Do not read those green tests as an end-to-end guarantee.
+JOS-87 supplies it — the generated lab report prints a LOINC column (faithful: a real lab's source
+system holds the code), and the extractor reads it with its own bounding box behind two gates,
+grounding + check digit, dropping the code rather than guessing. `loinc` is **optional** on
+`LabResult`; a result without one keeps its value and box but **cannot be persisted** — the writer
+refuses it. That asymmetry is deliberate: extraction takes what the page offers, persistence sets
+its own bar.
 
-JOS-87 closes it: print LOINC on the generated lab report (faithful — a real lab's source system
-holds the code), extract it *with a bounding box* like every other fact, validate the check digit,
-refuse on failure. Residual caveat for production: real lab PDFs don't reliably print LOINC, so a
-deployment needs a terminology-mapping layer with a refuse-on-miss path.
+**Production caveat:** real lab PDFs don't reliably print LOINC — many print the lab's internal
+order code. A deployment needs a terminology-mapping layer with a refuse-on-miss path. The fixture
+is kinder than reality.
 
 ### Labs — the four-row chain
 

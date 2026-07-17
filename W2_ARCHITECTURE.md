@@ -250,15 +250,20 @@ flowchart TB
    collection date, abnormal flag) via `ProcedureService` / `FhirObservationLaboratoryService`.
    Verified round-trip: LOINC-coded Observations with `valueQuantity`, units, and
    `status: preliminary`, idempotently.
-   - **Not yet reachable end-to-end — the extractor produces no LOINC code (JOS-87).**
+   - **The LOINC code is read off the page, never inferred (JOS-87).**
      `FhirObservationLaboratoryService:255` stamps `system: LOINC` on `result_code`
-     **unconditionally**, but `LabResult` carries only a printed `test_name` — lab PDFs print names,
-     not codes. Writing the name into `result_code` would publish a **fabricated LOINC code**, so
-     the writer refuses it, and the round-trip above is verified against codes supplied by the test
-     fixtures. JOS-87 closes this by printing LOINC on the generated report and extracting it *with
-     a bounding box* like any other fact (grounded, not recalled), with check-digit validation and
-     refuse-on-failure. Until then the lab arm is built and tested but cannot persist a real
-     extraction. The intake arm is unaffected — see §6.
+     **unconditionally and without validation**, so a code we did not actually read would be
+     published as a coded clinical assertion. The extractor therefore takes the code from the
+     document's own LOINC column, carrying its own bounding box like any other fact, behind two
+     complementary gates: **grounding** (the code must appear in the document's text evidence — a
+     checksum alone is not grounding, since a model recalling a LOINC supplies a *real* code that
+     passes one) and a **check digit** (catching OCR misreads on scans, where a mangled code does
+     appear in the text). A code failing either gate is dropped; the result survives without one and
+     is simply not persisted. `loinc` is optional on `LabResult` — extraction takes what the page
+     offers, persistence sets its own bar.
+   - **Not yet reachable from the UI.** The write path is built and tested end-to-end, but no
+     sidebar action triggers it: the turn payload does not yet carry the extracted facts, so the
+     browser cannot post what it never receives. Tracked with the sidebar wiring.
    - **The `procedure_order_code` row is mandatory.** `ProcedureService::search` joins
      `preport.procedure_order_seq = order_codes.procedure_order_seq` (`:210-211`) with
      `order_codes` LEFT-joined. Omit that row and the predicate compares against NULL, never

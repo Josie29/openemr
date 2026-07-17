@@ -472,6 +472,32 @@ def _decode_note_text(content: Any) -> str | None:
     return None
 
 
+class PatientSummary(BaseModel):
+    """The open patient's structured picture in one payload: demographics + the four core lists.
+
+    Returned by the ``get_patient_summary`` tool so a broad "who is this / give me the picture" turn
+    reads the whole orientation in ONE tool call — one model generation — instead of five separate
+    reads. This is the structural relief for the per-turn tool-call ceiling (JOS-89 Mode A): a broad
+    turn that used to spend ~5 of its budget here now spends one.
+
+    It is a read-only container the model orients from, **never itself a citable record** — it
+    carries no ``resource_type``/``resource_id``/``citation_identity``. Each claim still cites the
+    individual ``Patient``/``Condition``/``MedicationRequest``/``AllergyIntolerance``/``Encounter``
+    it draws from, and the tool records each of those into the ``FetchLog`` exactly as the per-list
+    tools do, so grounding is unchanged.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    patient: PatientDemographics = Field(description="The patient's demographics.")
+    problems: list[Problem] = Field(description="Active and inactive problem-list Conditions.")
+    medications: list[Medication] = Field(description="Current medications (deduplicated).")
+    allergies: list[Allergy] = Field(description="Allergies (AllergyIntolerance resources).")
+    recent_encounters: list[Encounter] = Field(
+        description="Recent encounters, metadata only (dates, type, reason)."
+    )
+
+
 class NoteContent(BaseModel):
     """Typed projection of a FHIR R4 ``DocumentReference`` clinical note — free text (UC-3).
 

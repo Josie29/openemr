@@ -1630,26 +1630,33 @@
     function persistDerivedFacts(answer) {
         var groups = answer && Array.isArray(answer.derived_facts) ? answer.derived_facts : [];
         if (!groups.length || !config.persistFactsUrl) {
-            return;
+            return; // nothing extracted this turn, or write-back not configured — no card.
         }
 
         Promise.all(groups.map(postFactGroup)).then(function (outcomes) {
-            // Sum only the groups that actually persisted. A failed group contributes nothing rather
-            // than a wrong count, so the confirmation never overstates what reached the chart.
-            var saved = outcomes.reduce(function (total, outcome) {
-                return total + (outcome ? outcome.written : 0);
-            }, 0);
-            if (saved > 0) {
-                setStatus(labels.factsSaved.replace('{n}', String(saved)), false);
-            }
-            // On zero saved we stay silent: a persist failure must not alarm mid-conversation, and
-            // the absence of the confirmation line is itself the signal. Phase 2's accept gate makes
-            // the write explicit and will own failure UX.
+            // Fold every document's outcome into one turn-level summary, so a physician sees a single
+            // honest card: what was added, what was already there, and what failed. `written` and
+            // `skipped` carry the fact identities (a LOINC code, or `allergy:`/`medication:` keys).
+            var written = [];
+            var skipped = [];
+            var failed = [];
+            var transportFailed = false;
+            outcomes.forEach(function (o) {
+                written = written.concat(o.written);
+                skipped = skipped.concat(o.skipped);
+                failed = failed.concat(o.failed);
+                if (o.transportFailed) {
+                    transportFailed = true;
+                }
+            });
+            appendFactWriteback(written, skipped, failed, transportFailed);
         });
     }
 
-    // POST one document's facts. Resolves to {written, skipped} on success, or null on any failure —
-    // fire-and-forget: a rejected persist never propagates into the chat turn's promise chain.
+    // POST one document's facts and normalize the reply. The endpoint answers 200 (all saved), 207
+    // (partial), or 500 (none) — all with a {written, skipped, failed} JSON body. A non-JSON reply
+    // (an expired session returns an HTML login page as 200) is a transport failure: we saved nothing
+    // and cannot say what. Fire-and-forget: this never rejects into the chat turn's promise chain.
     function postFactGroup(group) {
         return fetch(config.persistFactsUrl, {
             method: 'POST',
@@ -1662,26 +1669,108 @@
             })
         })
             .then(function (response) {
-                // Same defensive read as the chat path: an expired session returns HTTP 200 with an
-                // HTML login-redirect script, so anything non-JSON or non-ok counts as "not saved".
                 return response.text().then(function (text) {
-                    if (!response.ok) {
-                        return null;
-                    }
+                    var body;
                     try {
-                        var body = JSON.parse(text);
-                        return {
-                            written: Array.isArray(body.written) ? body.written.length : 0,
-                            skipped: Array.isArray(body.skipped) ? body.skipped.length : 0
-                        };
+                        body = JSON.parse(text);
                     } catch (parseErr) {
-                        return null;
+                        return emptyOutcome(true); // non-JSON (expired session / proxy error page)
                     }
+                    return {
+                        transportFailed: false,
+                        written: Array.isArray(body.written) ? body.written : [],
+                        skipped: Array.isArray(body.skipped) ? body.skipped : [],
+                        // A non-ok reply with no `failed` list still means the whole group failed.
+                        failed: Array.isArray(body.failed) ? body.failed : (response.ok ? [] : ['all'])
+                    };
                 });
             })
             .catch(function () {
-                return null; // network/timeout — swallow; the chat answer already rendered
+                return emptyOutcome(true); // network/timeout
             });
+    }
+
+    function emptyOutcome(transportFailed) {
+        return { transportFailed: transportFailed, written: [], skipped: [], failed: [] };
+    }
+
+    // ---- write-back confirmation card ------------------------------------
+    // A persistent transcript card (not the ephemeral status line) so the physician can always tell
+    // what reached the chart: added, already-present (deduped), or failed. Silence used to mean
+    // "saved nothing" AND "everything was already there" AND "the write failed" — three very
+    // different things. This makes each explicit.
+    function appendFactWriteback(written, skipped, failed, transportFailed) {
+        var card = document.createElement('div');
+        card.className = 'ai-copilot__writeback';
+        card.setAttribute('role', 'status');
+
+        if (written.length) {
+            card.appendChild(writebackLine('saved', labels.wbSaved.replace('{facts}', describeFacts(written))));
+            card.appendChild(writebackLine('note', labels.wbReview));
+        }
+        if (skipped.length) {
+            card.appendChild(writebackLine('skipped', labels.wbSkipped.replace('{facts}', describeFacts(skipped))));
+        }
+        if (failed.length || transportFailed) {
+            var families = failed
+                .filter(function (f) { return f !== 'all'; })
+                .map(friendlyFamily);
+            var who = families.length ? joinList(families) : labels.wbFailedGeneric;
+            card.appendChild(writebackLine('failed', labels.wbFailed.replace('{families}', who)));
+        }
+        // Everything deduped-and-empty is impossible (skipped implies content), but guard anyway:
+        // if the turn had facts yet produced no line, say so rather than render an empty card.
+        if (!card.childNodes.length) {
+            card.appendChild(writebackLine('skipped', labels.wbNone));
+        }
+        appendNode(card);
+    }
+
+    function writebackLine(kind, text) {
+        var line = document.createElement('div');
+        line.className = 'ai-copilot__writeback-line ai-copilot__writeback-line--' + kind;
+        line.textContent = text;
+        return line;
+    }
+
+    // Count fact identities by destination and render "28 lab results, 2 allergies and 1 medication".
+    // Identities are the endpoint's keys: `allergy:`/`medication:` prefixes, else a bare LOINC code.
+    function describeFacts(identities) {
+        var counts = { lab: 0, allergy: 0, medication: 0 };
+        identities.forEach(function (id) {
+            if (id.indexOf('allergy:') === 0) {
+                counts.allergy++;
+            } else if (id.indexOf('medication:') === 0) {
+                counts.medication++;
+            } else {
+                counts.lab++;
+            }
+        });
+        var parts = [];
+        if (counts.lab) {
+            parts.push(counts.lab + ' ' + (counts.lab === 1 ? labels.factLab : labels.factLabs));
+        }
+        if (counts.allergy) {
+            parts.push(counts.allergy + ' ' + (counts.allergy === 1 ? labels.factAllergy : labels.factAllergies));
+        }
+        if (counts.medication) {
+            parts.push(counts.medication + ' ' + (counts.medication === 1 ? labels.factMed : labels.factMeds));
+        }
+        return joinList(parts);
+    }
+
+    function friendlyFamily(family) {
+        return family === 'labs' ? labels.factLabs
+            : family === 'intake' ? (labels.factAllergies + ' / ' + labels.factMeds)
+            : family;
+    }
+
+    // "a", "a and b", "a, b and c".
+    function joinList(parts) {
+        if (parts.length <= 1) {
+            return parts.join('');
+        }
+        return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
     }
 
     // ---- conversation persistence (Phase 3 stubs) ------------------------
@@ -1809,8 +1898,20 @@
             docLabReport: els.sidebar.dataset.labelDocLabReport || 'Lab report',
             docIntakeForm: els.sidebar.dataset.labelDocIntakeForm || 'Intake form',
             docGeneric: els.sidebar.dataset.labelDocGeneric || 'Uploaded document',
-            // Write-back (JOS-81). {n} is the fact count. Defaulted here for the same reason.
-            factsSaved: els.sidebar.dataset.labelFactsSaved || '{n} extracted facts saved to chart (unconfirmed)'
+            // Write-back confirmation card (JOS-81). {facts} and {families} are filled in JS.
+            // Defaulted here so the card works before the PHP island grows these data-label-* attrs.
+            wbSaved: els.sidebar.dataset.labelWbSaved || 'Added to chart: {facts}',
+            wbReview: els.sidebar.dataset.labelWbReview || 'Marked unconfirmed — review before relying on them.',
+            wbSkipped: els.sidebar.dataset.labelWbSkipped || 'Already in the chart: {facts}',
+            wbFailed: els.sidebar.dataset.labelWbFailed || 'Could not save {families} — nothing was added; try again.',
+            wbFailedGeneric: els.sidebar.dataset.labelWbFailedGeneric || 'some facts',
+            wbNone: els.sidebar.dataset.labelWbNone || 'No new chart facts in this answer.',
+            factLab: els.sidebar.dataset.labelFactLab || 'lab result',
+            factLabs: els.sidebar.dataset.labelFactLabs || 'lab results',
+            factAllergy: els.sidebar.dataset.labelFactAllergy || 'allergy',
+            factAllergies: els.sidebar.dataset.labelFactAllergies || 'allergies',
+            factMed: els.sidebar.dataset.labelFactMed || 'medication',
+            factMeds: els.sidebar.dataset.labelFactMeds || 'medications'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

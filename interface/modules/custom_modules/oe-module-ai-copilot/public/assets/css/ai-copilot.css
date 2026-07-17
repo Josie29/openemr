@@ -313,6 +313,46 @@ body.ai-copilot-resizing {
     color: var(--copilot-error);
 }
 
+/* ---- Write-back confirmation card (JOS-81) ----
+ *
+ * A persistent transcript card summarizing what the agent's extracted facts did to the chart:
+ * added, already-present (deduped), or failed. Persistent (not the ephemeral status line) so the
+ * physician can always tell what happened, and left-rail-coded by outcome so it reads at a glance.
+ */
+.ai-copilot__writeback {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-1);
+    margin-left: 1.75rem; /* align under the answer bubble, clear of the avatar rail */
+    padding: var(--copilot-space-2) var(--copilot-space-3);
+    background: var(--copilot-surface-alt);
+    border: 1px solid var(--copilot-border);
+    border-left-width: 3px;
+    border-radius: var(--copilot-radius);
+    font-size: var(--copilot-font-sm);
+}
+
+.ai-copilot__writeback-line {
+    margin: 0;
+    color: var(--copilot-text);
+}
+
+/* Saved -> the "in the record" green already used by the record tier. */
+.ai-copilot__writeback-line--saved {
+    color: var(--copilot-tier-record);
+    font-weight: 600;
+}
+
+.ai-copilot__writeback-line--note,
+.ai-copilot__writeback-line--skipped {
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__writeback-line--failed {
+    color: var(--copilot-error);
+    font-weight: 600;
+}
+
 /* ---- In-flight indicator: shown between question and answer (spec §5.3.1) ----
  *
  * A distinct "assistant is working" bubble so the pause between question and answer (which can run

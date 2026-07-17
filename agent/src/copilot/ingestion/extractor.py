@@ -62,29 +62,58 @@ __all__ = [
 # probe output is mapped and validated into it, never returned directly.
 
 
-class _LabResultProbe(BaseModel):
-    test_name: str = Field(description="Analyte/test name as printed")
-    # Terse on purpose, like its siblings. A longer, emphatic description here ("never use a code
-    # from memory...") sent the model into a repetition loop that consumed the output budget and
-    # returned 1 result instead of 28. Grounding is enforced in code (see `_ground_loinc`), not
-    # asked for in the prompt — which is both more reliable and cheaper.
-    loinc: str | None = Field(default=None, description="LOINC code as printed. Null if absent.")
-    value: str = Field(description="Result value verbatim")
-    unit: str | None = Field(default=None, description="Unit if printed")
-    reference_range: str | None = Field(default=None, description="Reference range if printed")
-    collection_date: str | None = Field(default=None, description="Collection date if printed")
-    abnormal_flag: str | None = Field(default=None, description="Abnormal flag if shown")
-
-
-class _LabReportProbe(BaseModel):
-    results: list[_LabResultProbe] = Field(description="Every lab result on the report")
-
-
 # VERBATIM is not a stylistic preference here — it is what makes a fact citable. Every extracted
 # value must be located on the page to earn a bounding box, so a value the model has tidied up
 # (reformatting "03 / 14 / 1979" to "1979-03-14") cannot be found, and the fact is dropped rather
 # than shown with a box that points at something else. Say "exactly as printed" on every field.
 _VERBATIM = "EXACTLY as printed on the form, character for character. Do NOT reformat or normalize."
+
+
+class _LabResultProbe(BaseModel):
+    """One result row to read off a lab report.
+
+    **Every field is REQUIRED (nullable, but never defaulted)** — the same rule
+    :class:`_IntakeFormProbe` documents, which this probe was missing. A defaulted field is left out
+    of the JSON schema's ``required`` list and Mistral then silently omits it. This probe asked for
+    seven fields and required only two, so ``unit`` (27 of 28 rows), ``collection_date`` (28 of 28)
+    and the abnormal rows' ``reference_range`` all vanished the moment a seventh field (``loinc``)
+    was added — the lab table lost exactly the columns that prove a value is abnormal, and no test
+    of this probe's own noticed. Nullable-but-required keeps them in the schema, so an absent unit
+    comes back as an explicit null instead of a hole.
+    """
+
+    test_name: str = Field(description=f"Analyte/test name {_VERBATIM}")
+    # Terse on purpose, like its siblings. A longer, emphatic description here ("never use a code
+    # from memory...") sent the model into a repetition loop that consumed the output budget and
+    # returned 1 result instead of 28. Grounding is enforced in code (see `_ground_loinc`), not
+    # asked for in the prompt — which is both more reliable and cheaper.
+    loinc: str | None = Field(description="LOINC code as printed. Null if absent.")
+    value: str = Field(description=f"Result value {_VERBATIM}")
+    unit: str | None = Field(description=f"Unit {_VERBATIM} Null if not printed.")
+    reference_range: str | None = Field(
+        description=f"Reference range {_VERBATIM} Just the range, not the flag or any prior "
+        "result. Null if not printed."
+    )
+    # Deliberately NOT _VERBATIM, unlike its siblings. Verbatim exists so a value can be found on
+    # the page and earn a bounding box; this field is never located — it is parsed into a `date`.
+    # Demanding it verbatim only couples the parser to the page's print format: the fixture prints
+    # "2026-07-08 09:40", so a verbatim answer carried the time and _parse_date dropped all 28.
+    collection_date: str | None = Field(
+        description="Specimen collection date as an ISO date (YYYY-MM-DD). Null if not printed."
+    )
+    # "Just the flag token" is load-bearing: asked for an "abnormal flag" with no shape, the model
+    # returned a prose blob — "H (High) > 99 mg/dL (reference range: 70-99) [Prior: 96 on
+    # 2026-01-06]" — that inlined the range it had dropped from its own field AND leaked the prior
+    # column this pipeline deliberately does not ingest. _map_abnormal only survived it by
+    # prefix-matching the leading "H".
+    abnormal_flag: str | None = Field(
+        description="The abnormal flag token as printed (e.g. H, L, N, A) and nothing else. "
+        "Null if no flag is shown."
+    )
+
+
+class _LabReportProbe(BaseModel):
+    results: list[_LabResultProbe] = Field(description="Every lab result on the report")
 
 
 class _IntakeMedicationProbe(BaseModel):
@@ -818,11 +847,23 @@ def _map_abnormal(flag: Any) -> AbnormalFlag:
 
 
 def _parse_date(raw: Any) -> date | None:
-    """Parse an ISO collection date, or None when absent/unparseable (never infer)."""
+    """Parse an ISO collection date, or None when absent/unparseable (never infer).
+
+    Accepts a date-time as well as a bare date: lab reports print "2026-07-08 09:40", and a model
+    that hands back what the page shows should not have the whole field silently dropped over a
+    time component we do not store. Only the leading date is taken — nothing is inferred, and a
+    value that is not an ISO date still returns None rather than a guess.
+
+    Args:
+        raw: The probe's ``collection_date`` value.
+
+    Returns:
+        The parsed date, or None when absent or not an ISO date.
+    """
     if not isinstance(raw, str) or not raw.strip():
         return None
     try:
-        return date.fromisoformat(raw.strip())
+        return date.fromisoformat(raw.strip()[:10])
     except ValueError:
         return None
 

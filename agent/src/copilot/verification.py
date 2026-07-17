@@ -161,9 +161,16 @@ class FetchLog:
         return Resolution(value=value, identity=identity)
 
 
-def _normalize_ws(text: str) -> str:
-    """Collapse runs of whitespace so quote matching tolerates line breaks and reflowing."""
-    return " ".join(text.split())
+def _normalize_for_match(text: str) -> str:
+    """Normalize text for quote matching: collapse whitespace and fold case.
+
+    Collapsing runs of whitespace lets line breaks and reflowing not defeat an otherwise-verbatim
+    quote. Case-folding lets a span the model lifted from mid-sentence — and so capitalized as a
+    standalone quote (``"The diagnosis..."`` for the chunk's ``"...the diagnosis..."``) — still
+    ground. Word order and the words themselves are preserved, so a genuine paraphrase still fails
+    and forces the model to quote exactly.
+    """
+    return " ".join(text.casefold().split())
 
 
 def quote_in_text(quote: str, text: str | None) -> str | None:
@@ -171,7 +178,8 @@ def quote_in_text(quote: str, text: str | None) -> str | None:
 
     The deterministic substring check both the FHIR note gate and the guideline-evidence gate
     share, so quote grounding behaves identically for a clinical note and a retrieved guideline
-    chunk. Matching is whitespace-normalized so line breaks and reflowing don't defeat an
+    chunk. Matching is whitespace-normalized and case-insensitive (see :func:`_normalize_for_match`)
+    so reflowing and the capitalization of a lifted mid-sentence span don't defeat an
     otherwise-verbatim quote; a paraphrase still fails and forces the model to quote exactly.
 
     Args:
@@ -179,12 +187,12 @@ def quote_in_text(quote: str, text: str | None) -> str | None:
         text: The body of text the quote must appear in (a note body, a chunk), or None.
 
     Returns:
-        The stripped quote when it is a whitespace-normalized substring of ``text``; otherwise None
-        (``text`` is absent, or the quote is not found).
+        The stripped quote when it is a whitespace- and case-normalized substring of ``text``;
+        otherwise None (``text`` is absent, or the quote is not found).
     """
     if not isinstance(text, str) or not quote.strip():
         return None
-    if _normalize_ws(quote) in _normalize_ws(text):
+    if _normalize_for_match(quote) in _normalize_for_match(text):
         return quote.strip()
     return None
 

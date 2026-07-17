@@ -154,8 +154,8 @@ one level down. The tag still drives the switch; it just does not map 1:1 to a h
 | Tier | `source_type` | Combining unit | Rendered as | Default |
 |---|---|---|---|---|
 | **Guidelines** | `GUIDELINE` | per chunk (τ-capped at K) | numbered quote cards (§3.4, unchanged) | collapsed |
-| **From the record** | `FHIR` | resource type + collection date | panel table; singletons as rows | collapsed |
-| **Read from documents** | `LAB_PDF`, `INTAKE_FORM` | `document_id` → `page` | one card per document; one preview, all boxes | **open** |
+| **From the record** | `FHIR` | resource type + collection date | shared source chip; singletons as rows | collapsed |
+| **Read from documents** | `LAB_PDF`, `INTAKE_FORM` | `document_id` → `page` | one card per document page; one preview, all boxes numbered | **open** |
 
 **Tier collapse.** Tiers are collapsible, but the section is *already* a collapsed `<details>`
 (§3.4), so uniformly collapsing tiers inside it puts every quote two clicks away — and two-click
@@ -172,16 +172,29 @@ evidence is evidence nobody checks. Therefore:
 honest meaning is "nothing cleared τ" — the gate working (§3.1). This is the §5 **No strong match**
 rule applied one level down.
 
-**Combining within the document tier.** Three facts read off one intake form are *one document read
-three times*. Render one card per `document_id`, and one preview per `page` with **every** box
-drawn — the selected fact's box lit, the rest dimmed, numbered to match the fact list.
+**Combining within the document tier.** Three facts read off one intake form page are *one document
+read three times*. Render one card per (`document_id`, `page`), and one preview drawing **every**
+box, each carrying a number badge that matches the card's fact list. One CTA per card
+(`Check all N against the scan`), not one per fact.
 
 Drawing all boxes is not a convenience. It answers a question the per-fact view *structurally
-cannot*: **what did the model not read?** "3 of 12 fields read" is only visible when the boxes share
-a page. Three boxes on a twelve-field form tells the reader the extraction was partial; three
-separate single-box previews let them assume it was complete. Dimming (rather than lighting all
-boxes equally) preserves the unambiguous fact→box link that per-fact previews had; the numbering is
-the fallback where contrast alone does not carry.
+cannot*: **what did the model not read?** Three boxes on a twelve-field form tells the reader the
+extraction was partial; three separate single-box previews let them assume it was complete. The
+rendered page around the boxes is the denominator — no "N of M" count is needed, and none is
+available (the wire carries only the facts the answer *cited*, never the extractor's total).
+
+**Numbered badges, not selected-lit/rest-dimmed** (revised after the live turn, JOS-88 phase 2). An
+earlier draft of this section had each fact open the preview with its own box lit and the others
+dimmed. Numbering is strictly better: it keeps an unambiguous fact→box link *while* every box stays
+equally visible — which is the coverage signal — where dimming trades one for the other. It also
+needs no selection state to encode or re-render, and it collapses N per-fact buttons into one card
+CTA, which was the actual defect the live turn exposed (seven near-identical `Check against the
+scan` buttons stacked down one lab card). A number is also legible where contrast alone is not.
+
+**A fact with no box gets no number** and is excluded from the CTA's count — a dash, not an index
+pointing at nothing. `bounding_box` is nullable and ingestion already drops what it cannot box
+(§3.5 below), so this is a defensive branch, but the count must never promise a check the overlay
+cannot deliver.
 
 **Boxless facts need no new state.** `bounding_box` is nullable on the wire, but ingestion already
 refuses to claim what it cannot box: lab values that miss the precision floor are skipped
@@ -192,6 +205,40 @@ nullable must **stay** nullable — `to_citation` routes on `doc_type`, never on
 branching on the box would silently demote a document fact to a FHIR citation (`schemas.py:100-109`).
 The panel therefore carries a **defensive branch, not a designed state**: a boxless document fact is
 excluded from the card's CTA count and withheld from the overlay.
+
+### 3.6 The lab table — system-stamped cells replace model prose (JOS-88 phase 2)
+
+A `lab_pdf` card renders its facts as a table (`Analyte` | `Value` | `Ref`, `tabular-nums`) instead
+of one model-authored sentence per result, **and drops the prose**. This is §3.3 ("answer prose
+links, does not restate") applied to the lab card: the sentence *"Potassium is high at 5.4 mmol/L
+(reference range 3.5–5.1)"* restates, less reliably, data the extractor already read off the page.
+
+The argument is trust, not density: **every cell in the table is system-stamped by the grounding gate
+from the extraction; the sentence is the model's retelling of the same numbers.** Where the two
+disagree, the table is right. Rendering both would show a physician the weaker version alongside the
+stronger one and imply they carry equal weight.
+
+**The backend this required.** `LabResult` always had `test_name`/`unit`/`reference_range`/
+`abnormal_flag`, but they reached only the model-facing `LabFactHandle` — the registry flattened them
+away before the wire. They now travel as one embedded `LabDetail` sub-model across all four hops
+(`_RecordedFact` → `Resolution` → `SourceRef` → `LabPdfCitation`). One optional sub-model rather than
+four loose scalars, so each hop keeps the single shape `registry.py`'s normalization rule exists to
+protect — `None` for a non-lab fact, not four dead columns.
+
+- **`test_name` is inside `LabDetail`** rather than read from the already-stamped `SourceRef.label`,
+  because that stamp is *conditional* on the resolution carrying an identity. The Analyte cell must
+  not depend on a branch that can fall through to model-authored text while Value and Ref cannot.
+- **`lab_detail` is stamped unconditionally** (`verification.py`), like `bounding_box`: written for
+  every fact, `None` for non-lab. **A model-authored `reference_range` could make a normal value read
+  as abnormal — or hide an abnormal one — under a UI that says the cells came off the page.** This is
+  the rule the whole feature rests on; the gate never *verifies* `lab_detail`, it stamps it.
+- **It hangs on `LabPdfCitation`, not `DocumentCitationBase`.** The base holds what both document arms
+  carry; an intake citation would inherit a `reference_range` that is meaningless for a date of birth
+  and that nothing can ever populate.
+- **`abnormal_flag: "no"` renders as nothing**, never the literal word. The enum mirrors OpenEMR's
+  `procedure_result.abnormal` and now crosses to the frontend.
+- **Absent `lab_detail` falls back to prose rows** — a claim grounded before the field existed, or a
+  hand-built ref. Also makes deploy order free: an old sidebar ignores the new field.
 
 ---
 
@@ -209,9 +256,17 @@ excluded from the card's CTA count and withheld from the overlay.
 - **Frontend — provenance tiering** (§3.5, JOS-88): switch on `source_type`; delete
   `isGuidelineRef` and the `resource_type === 'guideline'` check. Group into three tiers, omit
   empty ones, report counts per tier. Combine FHIR facts by resource type + collection date into a
-  panel table (`tabular-nums`); combine document facts by `document_id` → `page` into one card with
-  a single all-boxes preview. **No backend change** — every field this needs is already on the wire
-  and system-set. Requires a `$v_js_includes` bump (touches `.js`/`.css`).
+  shared source chip; combine document facts by `document_id` → `page` into one card with a single
+  all-boxes preview. Requires a `$v_js_includes` bump (touches `.js`/`.css`).
+- **Lab metadata to the wire** (§3.6, JOS-88 phase 2): a `LabDetail` sub-model
+  (`test_name`/`unit`/`reference_range`/`abnormal_flag`) embedded on `_RecordedFact` → `Resolution`
+  → `SourceRef` → `LabPdfCitation`, stamped **unconditionally** in `verification.py`. This is the one
+  backend change the tiering needed; the tiering itself (§3.5) was presentation-only.
+- **Viewer** (`public/source-view.php` + `src/Source/`): a packed `boxes=x,y,w,h;…` URL param
+  replacing the single `x/y/w/h` (which still works, folded into a one-element list), decoded by
+  `SourceBoxCodec` into typed `SourceBox` values — parsed at the boundary, unit-tested without a
+  bootstrap, mirroring `Smart/LaunchStateCodec`. Parsing happens *after* every existing gate (CSRF,
+  ACL, session pid, document access); the param is pure geometry and carries no identity.
 
 ---
 
@@ -247,11 +302,13 @@ excluded from the card's CTA count and withheld from the overlay.
 8. Counts are reported per tier; a tier with zero items renders nothing at all (no `(0)` row).
 9. Tier headers and counts are visible whenever the evidence section is open, with tier bodies
    collapsible and the document tier open by default.
-10. Four FHIR lab facts from one collection date render as **one** panel table with one
-    `View source`, not four prose lines with four identical source cards.
+10. Four FHIR record facts sharing a resource type and collection date share **one** source chip,
+    not four identical ones. *(Corrected: an earlier draft said "FHIR lab facts … one panel table".
+    Wrong tier — an uploaded report's results are `lab_pdf` **document** facts, so the table belongs
+    to the document tier, per §3.6. The record tier keeps prose rows + a shared chip.)*
 11. Three facts from one intake-form page render as **one** card with **one** preview showing all
-    three boxes — selected lit, others dimmed, numbered to the fact list — not three previews of
-    the same page.
+    three boxes, each numbered to match the fact list — not three previews of the same page, and not
+    three per-fact buttons. *(Corrected from "selected lit, others dimmed" — see §3.5.)*
 12. An unknown or future `source_type` degrades to the most conservative tier rather than rendering
     as a fact of record.
 13. A document fact arriving without a `bounding_box` (defensive; unreachable via ingestion today)
@@ -299,8 +356,14 @@ excluded from the card's CTA count and withheld from the overlay.
   but opening it reveals tier headers + counts immediately; the document tier is open, the rest
   collapsed. Trust-forward and answer-forward stop competing once the composition line carries the
   signal on its own.
-- **Group headers vs. inline stripe alone** — with tiers grouped, does each item still need its own
-  provenance chip, or does the header carry it? A function of list length; answer against a real
-  13-item panel, not a mockup.
+- ~~**Group headers vs. inline stripe alone**~~ — *answered.* The first live turn produced the panel
+  this needed (16 record + 7 read-from-scan). **Keep the per-item chip in the record tier; drop it in
+  the document tier.** They encode different things: the tier header names the *tier* (record vs
+  read-off-a-scan), while the chip names the *resource kind* (Condition vs Observation vs
+  AllergyIntolerance) — which varies *within* the record tier, so it is not redundant with the header
+  and cannot be folded into it. The document tier is the opposite case: its card header already names
+  the document, so a per-fact chip would only repeat it; those facts carry a number badge instead
+  (§3.5). *Caveat: the reasoning is sound but 16 chips' density has not been eyeballed with the
+  record tier expanded on a live turn — revisit if it reads as noise.*
 - **Grade badges** — render only where `grade` is reliably parseable from `text`; full support
   needs the corpus re-chunk.

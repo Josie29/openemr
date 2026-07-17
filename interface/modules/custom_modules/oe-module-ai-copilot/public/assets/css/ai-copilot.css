@@ -647,14 +647,92 @@ body.ai-copilot-resizing {
     flex-direction: column;
     gap: var(--copilot-space-2);
     margin: 0;
-    padding-left: var(--copilot-space-4);
+    padding-left: 0;
+    list-style: none;
 }
 
 .ai-copilot__doc-fact {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--copilot-space-1);
+    align-items: baseline;
+    gap: var(--copilot-space-2);
+}
+
+/*
+ * The number tying a fact to its rectangle in the overlay. This is what lets the overlay draw every
+ * cited box at equal weight — which is the only way to show how much of the page was NOT read —
+ * without losing which fact points where.
+ */
+.ai-copilot__doc-num {
+    flex: none;
+    min-width: 1.05rem;
+    height: 1.05rem;
+    border-radius: 2px;
+    background: var(--copilot-tier-document);
+    color: var(--copilot-surface);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1.05rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* A fact the extractor could not box has no rectangle to number — say so rather than imply one. */
+.ai-copilot__doc-num--none {
+    background: transparent;
+    color: var(--copilot-muted);
+    font-weight: 400;
+}
+
+/*
+ * The lab table. Replaces the model's prose sentence per result: every cell here is stamped by the
+ * grounding gate straight from the extraction, where the sentence was the model's retelling of the
+ * same numbers. Tabular figures so a reader can compare value against reference down a column —
+ * which is the actual clinical read.
+ */
+.ai-copilot__labs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--copilot-font-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.ai-copilot__labs th {
+    text-align: left;
+    padding: 0 var(--copilot-space-1) var(--copilot-space-1) 0;
+    border-bottom: 1px solid var(--copilot-tier-document-border);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__labs td {
+    padding: var(--copilot-space-1) var(--copilot-space-1) var(--copilot-space-1) 0;
+    vertical-align: baseline;
+}
+
+.ai-copilot__labs tbody tr + tr td {
+    border-top: 1px solid rgb(0 0 0 / 0.06);
+}
+
+.ai-copilot__labs-analyte {
+    display: flex;
+    align-items: baseline;
+    gap: var(--copilot-space-2);
+    font-weight: 600;
+}
+
+.ai-copilot__labs-ref {
+    color: var(--copilot-muted);
+    white-space: nowrap;
+}
+
+/* Out-of-range is the whole reason a physician scans a panel — and it is the extractor's own flag,
+   not the model's reading of it. A `no` flag renders as nothing at all. */
+.ai-copilot__labs-value--abnormal {
+    color: var(--copilot-error);
+    font-weight: 700;
 }
 
 /* The document tier's call to action is styled with the rest of the view-source button, below —

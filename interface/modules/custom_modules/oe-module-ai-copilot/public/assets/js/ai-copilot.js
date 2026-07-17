@@ -948,7 +948,12 @@
     }
 
     /**
-     * Render one document's facts as a single card.
+     * Render one document's facts as a single card: a numbered list of what was read off this page,
+     * and ONE affordance to check them all against the scan.
+     *
+     * The numbering is load-bearing. The overlay draws every cited box on the page at once — which is
+     * the only way to show what the model did *not* read — and the numbers are what keep each fact
+     * tied to its own rectangle once they are all visible at the same weight.
      *
      * @param {Array<object>} claims The facts read off this document page, in answer order.
      * @returns {HTMLElement} The document card.
@@ -964,26 +969,189 @@
         head.textContent = docKindLabel(source) + ' · ' + labels.page + ' ' + page;
         card.appendChild(head);
 
-        var list = document.createElement('ol');
+        // Only a boxed fact can be drawn, so only boxed facts are numbered — the badge a reader sees
+        // in the overlay is this index. An unboxed fact still lists, it just has nothing to point at.
+        var boxed = claims.filter(function (claim) { return hasBoundingBox(claim.source); });
+        card.appendChild(
+            isLabTable(claims) ? renderLabTable(claims, boxed) : renderDocumentFacts(claims, boxed)
+        );
+
+        if (boxed.length > 0) {
+            card.appendChild(buildCheckAllButton(boxed, source));
+        }
+        return card;
+    }
+
+    /**
+     * Whether this document's facts render as a lab table rather than prose.
+     *
+     * Requires `lab_detail` on every fact: it is what makes the table trustworthy — each cell is
+     * system-stamped from the extraction, where the claim prose is model-authored. A fact without it
+     * (a claim grounded before the field existed, or a hand-built ref) has no analyte or reference
+     * range to put in a cell, so the whole card falls back to prose rather than render blank columns.
+     *
+     * @param {Array<object>} claims The document's facts.
+     * @returns {boolean} True when every fact carries analyte metadata.
+     */
+    function isLabTable(claims) {
+        return claims.every(function (claim) {
+            var citation = primaryCitation(claim);
+            return !!citation
+                && citation.source_type === 'lab_pdf'
+                && !!citation.lab_detail
+                && !!citation.lab_detail.test_name;
+        });
+    }
+
+    /**
+     * Render a lab document's facts as a compact table of system-stamped values.
+     *
+     * This replaces the model's prose ("Potassium is high at 5.4 mmol/L (reference range 3.5-5.1)")
+     * rather than sitting beside it. Every cell here is stamped by the grounding gate straight from
+     * the extraction; the sentence is the model's retelling of the same numbers. Showing both would
+     * restate the table in a less reliable form (spec §3.3).
+     *
+     * @param {Array<object>} claims The document's facts, in answer order.
+     * @param {Array<object>} boxed The subset that carries a box, defining the numbering.
+     * @returns {HTMLElement} The table.
+     */
+    function renderLabTable(claims, boxed) {
+        var table = document.createElement('table');
+        table.className = 'ai-copilot__labs';
+
+        var head = document.createElement('thead');
+        var headRow = document.createElement('tr');
+        [labels.labAnalyte, labels.labValue, labels.labRef].forEach(function (heading) {
+            var th = document.createElement('th');
+            th.textContent = heading;
+            headRow.appendChild(th);
+        });
+        head.appendChild(headRow);
+        table.appendChild(head);
+
+        var body = document.createElement('tbody');
+        claims.forEach(function (claim) {
+            var detail = primaryCitation(claim).lab_detail;
+            var row = document.createElement('tr');
+
+            var analyte = document.createElement('td');
+            analyte.className = 'ai-copilot__labs-analyte';
+            analyte.appendChild(buildFactNumber(claim, boxed));
+            analyte.appendChild(document.createTextNode(detail.test_name));
+            row.appendChild(analyte);
+
+            var value = document.createElement('td');
+            value.className = 'ai-copilot__labs-value';
+            // `no` means the report showed no abnormal marker — render nothing, not the word "no".
+            if (detail.abnormal_flag === 'high' || detail.abnormal_flag === 'low') {
+                value.classList.add('ai-copilot__labs-value--abnormal');
+            }
+            value.textContent = detail.unit
+                ? claim.source.value + ' ' + detail.unit
+                : claim.source.value;
+            row.appendChild(value);
+
+            var ref = document.createElement('td');
+            ref.className = 'ai-copilot__labs-ref';
+            ref.textContent = detail.reference_range || '';
+            row.appendChild(ref);
+
+            body.appendChild(row);
+        });
+        table.appendChild(body);
+        return table;
+    }
+
+    /**
+     * Render a non-lab document's facts as numbered prose rows (an intake form is not tabular).
+     *
+     * @param {Array<object>} claims The document's facts, in answer order.
+     * @param {Array<object>} boxed The subset that carries a box, defining the numbering.
+     * @returns {HTMLElement} The list.
+     */
+    function renderDocumentFacts(claims, boxed) {
+        var list = document.createElement('ul');
         list.className = 'ai-copilot__doc-facts';
         claims.forEach(function (claim) {
             var item = document.createElement('li');
             item.className = 'ai-copilot__doc-fact';
+            item.appendChild(buildFactNumber(claim, boxed));
 
             var text = document.createElement('span');
             text.className = 'ai-copilot__claim-text';
             text.textContent = claim.text;
             item.appendChild(text);
-
-            // Per-fact affordance: the overlay draws one box per request today. A fact whose value
-            // could not be boxed gets no button rather than a promise the overlay cannot keep.
-            if (hasBoundingBox(claim.source)) {
-                item.appendChild(buildViewSourceButton(claim.source, TIER_DOCUMENT));
-            }
             list.appendChild(item);
         });
-        card.appendChild(list);
-        return card;
+        return list;
+    }
+
+    /**
+     * The badge tying one fact to its rectangle in the overlay.
+     *
+     * @param {object} claim The fact.
+     * @param {Array<object>} boxed The boxed facts, in the order the overlay draws them.
+     * @returns {HTMLElement} A numbered badge, or a placeholder when the fact has no box to point at.
+     */
+    function buildFactNumber(claim, boxed) {
+        var badge = document.createElement('span');
+        var index = boxed.indexOf(claim);
+        if (index < 0) {
+            // Unlocatable on the page, so there is no box to number. Render a dash rather than a
+            // number that points at nothing.
+            badge.className = 'ai-copilot__doc-num ai-copilot__doc-num--none';
+            badge.textContent = '–'; // en dash: "no box for this fact"
+            badge.title = labels.noBox;
+            return badge;
+        }
+        badge.className = 'ai-copilot__doc-num';
+        badge.textContent = String(index + 1);
+        return badge;
+    }
+
+    /**
+     * Build the card's single check-the-source affordance.
+     *
+     * One button per document page, not one per fact: the facts share a page, so N buttons opened N
+     * previews of the same scan. The wording is imperative for the same reason it is elsewhere in
+     * this tier — "View source" reads as a receipt, implying the check is already done.
+     *
+     * @param {Array<object>} boxed The boxed facts, in the order the overlay numbers them.
+     * @param {object} source Any fact's SourceRef — they share document and page.
+     * @returns {HTMLButtonElement} The keyboard-accessible affordance.
+     */
+    function buildCheckAllButton(boxed, source) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-copilot__view-source ai-copilot__view-source--check';
+        button.textContent = boxed.length > 1
+            ? labels.checkAllSource.replace('{count}', String(boxed.length))
+            : labels.checkSource;
+        button.dataset.documentId = String(source.document_id);
+        button.dataset.page = String(normalizePage(source));
+        button.dataset.boxes = JSON.stringify(boxed.map(function (claim) {
+            return claim.source.bounding_box;
+        }));
+        button.dataset.docTitle = docKindLabel(source);
+        button.addEventListener('click', onCheckAllClick);
+        return button;
+    }
+
+    // Read the request off the clicked card button and hand every box to the preview.
+    function onCheckAllClick(event) {
+        var button = event.currentTarget;
+        var boxes = [];
+        try {
+            boxes = JSON.parse(button.dataset.boxes) || [];
+        } catch (err) {
+            boxes = [];
+        }
+        var documentId = button.dataset.documentId;
+        var page = parseInt(button.dataset.page, 10);
+        if (!documentId || isNaN(page)) {
+            return;
+        }
+        openSourceInChartTab(documentId, page, boxes, button.dataset.docTitle || labels.viewSource);
     }
 
     /**
@@ -1230,7 +1398,9 @@
         return button;
     }
 
-    // Read the request off the clicked chip and hand it to the preview pane.
+    // Read the request off the clicked chip and hand it to the preview pane. This is the remaining
+    // single-box path: a document citation appearing as a SUPPORTING citation on a record claim,
+    // which has no document card to carry a shared button.
     function onViewSourceClick(event) {
         var button = event.currentTarget;
         var bbox = null;
@@ -1244,24 +1414,31 @@
         if (!documentId || isNaN(page)) {
             return;
         }
-        openSourceInChartTab(documentId, page, bbox, button.dataset.docTitle || labels.viewSource);
+        openSourceInChartTab(
+            documentId, page, bbox ? [bbox] : [], button.dataset.docTitle || labels.viewSource
+        );
     }
 
     // Open the cited source as a tab in OpenEMR's main content (chart) area, via the
     // session-authenticated viewer (source-view.php) — it reads the document through the core
     // document ACL, so no patient-scoped SMART Binary scope is needed. The sidebar runs in the top
     // window, so top.navigateTab / top.activateTabByName are callable directly.
-    function openSourceInChartTab(documentId, page, bbox, title) {
+    function openSourceInChartTab(documentId, page, boxes, title) {
         var url = config.sourceViewUrl
             + '?doc=' + encodeURIComponent(documentId)
             + '&page=' + encodeURIComponent(page)
             + '&csrf_token=' + encodeURIComponent(config.csrfToken)
             + '&label=' + encodeURIComponent(title);
-        if (bbox) {
-            url += '&x=' + encodeURIComponent(bbox.x)
-                + '&y=' + encodeURIComponent(bbox.y)
-                + '&w=' + encodeURIComponent(bbox.width)
-                + '&h=' + encodeURIComponent(bbox.height);
+        // Every box for the page, packed as `x,y,w,h;x,y,w,h` in the order the sidebar numbered them.
+        // One scalar param rather than boxes[]: the viewer reads its input with filter_input, which
+        // takes scalars. Note the field-name shift — JS boxes are {x, y, width, height}, the URL and
+        // PHP both speak x/y/w/h.
+        var packed = (boxes || [])
+            .filter(Boolean)
+            .map(function (box) { return [box.x, box.y, box.width, box.height].join(','); })
+            .join(';');
+        if (packed !== '') {
+            url += '&boxes=' + encodeURIComponent(packed);
         }
         var tabName = 'ai_doc_' + documentId;
         var win = window.top;
@@ -1552,8 +1729,14 @@
             // Provenance tiering (JOS-88, spec §3.5). `checkSource` is deliberately imperative: it
             // is the document tier's whole safety mechanism, not a synonym for viewSource.
             checkSource: els.sidebar.dataset.labelCheckSource || 'Check against the scan',
+            checkAllSource: els.sidebar.dataset.labelCheckAllSource
+                || 'Check all {count} against the scan',
+            noBox: els.sidebar.dataset.labelNoBox || 'This value could not be located on the page',
             evidence: els.sidebar.dataset.labelEvidence || 'Evidence',
             page: els.sidebar.dataset.labelPage || 'p.',
+            labAnalyte: els.sidebar.dataset.labelLabAnalyte || 'Analyte',
+            labValue: els.sidebar.dataset.labelLabValue || 'Value',
+            labRef: els.sidebar.dataset.labelLabRef || 'Reference',
             tierGuidelines: els.sidebar.dataset.labelTierGuidelines || 'Guidelines',
             tierGuidelinesShort: els.sidebar.dataset.labelTierGuidelinesShort || 'guideline',
             tierRecord: els.sidebar.dataset.labelTierRecord || 'From the record',

@@ -221,6 +221,16 @@ def test_grounded_document_claim_projects_to_lab_pdf_citation() -> None:
     assert citation.source_id == "doc-777"  # the document, not the synthetic Observation key
     assert citation.bounding_box == stamped.bounding_box  # the overlay box survives the projection
 
+    # The analyte metadata survives all four hops from a REAL extraction: LabResult -> _RecordedFact
+    # -> Resolution -> SourceRef -> LabPdfCitation. Every hop defaults to None, so a missed one is
+    # invisible — no type error, no other test failing, just an empty column in the sidebar's lab
+    # table. This assertion is what catches that.
+    assert citation.lab_detail is not None
+    assert citation.lab_detail.test_name == "Creatinine"
+    assert citation.lab_detail.unit == "mg/dL"
+    assert citation.lab_detail.reference_range == handle.reference_range  # off the fixture page
+    assert citation.lab_detail.abnormal_flag is AbnormalFlag.HIGH
+
 
 def _final_tool_name(info: AgentInfo) -> str:
     """Return the structured-output tool name for the current Pydantic AI version."""

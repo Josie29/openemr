@@ -81,6 +81,36 @@ class BoundingBox(BaseModel):
     height: float = Field(gt=0, description="Box height in PDF points")
 
 
+class LabDetail(BaseModel):
+    """The analyte metadata a lab fact carries beyond its bare value — one lab-table row.
+
+    Composed onto each hop (:class:`~copilot.verification.Resolution`,
+    :class:`~copilot.schemas.SourceRef`, :class:`~copilot.schemas.LabPdfCitation`) as ONE optional
+    field rather than spread as loose scalars, so every hop keeps a single shape across document
+    types: a non-lab fact carries ``None``, not four dead columns.
+
+    **System-built from the extractor's** :class:`LabResult` **and stamped unconditionally by the
+    grounding gate — never model-authored.** The sidebar renders these as system-stamped fact, so a
+    fabricated ``reference_range`` could make a normal value read as abnormal, or hide an abnormal
+    one, under a UI that says the cells came off the page.
+
+    ``test_name`` lives here rather than being read from the already-stamped ``SourceRef.label``
+    because that stamp is *conditional* on the resolution carrying an identity. Sourcing the whole
+    row from one unconditionally-stamped object is the point.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    test_name: str = Field(description="Analyte/test name exactly as printed on the report.")
+    unit: str | None = Field(default=None, description="Unit as printed. None when unitless.")
+    reference_range: str | None = Field(
+        default=None, description="Reference range verbatim. None when the report prints none."
+    )
+    abnormal_flag: AbnormalFlag = Field(
+        description="Abnormal indicator; NO when the report shows none."
+    )
+
+
 class Citation(BaseModel):
     """Machine-readable citation for one extracted fact — the W2 citation contract (§3.3).
 

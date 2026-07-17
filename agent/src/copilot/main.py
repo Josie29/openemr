@@ -462,11 +462,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 except UsageLimitExceeded:
                     # The turn hit the per-turn tool-call ceiling (a runaway loop) — degrade to a
                     # refusal rather than let the exception 500 (which the browser surfaces as
-                    # "Failed to fetch"). A resource-limit failure, distinct from a grounding miss.
-                    # NOTE (follow-up): the verified(passed=False) below records this as
-                    # verification_grounding=0 — a resource-limit hit logged as a grounding failure.
-                    # Left as-is deliberately so the existing grounding monitor keeps its semantics;
-                    # splitting the score is a separate change.
+                    # "Failed to fetch"). A resource-limit failure, distinct from a grounding miss:
+                    # scored as `tool_ceiling` (not verification_grounding=0) so the A4 grounding
+                    # monitor — a trust signal — isn't polluted by runaway turns.
                     logger.warning(
                         "agent hit the tool-call ceiling before answering",
                         extra={
@@ -474,7 +472,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             "reason": ChatFailureReason.TOOL_CEILING,
                         },
                     )
-                    turn.verified(passed=False)
+                    turn.limited()
                     content = _UNAVAILABLE_ANSWER.model_dump()
                 except ModelHTTPError as exc:
                     # LLM provider rejected the call (billing, rate limit, outage). Always logged;

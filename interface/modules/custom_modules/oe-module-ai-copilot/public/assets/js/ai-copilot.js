@@ -421,7 +421,8 @@
         // piece of evidence, not three.
         var section = renderEvidenceSection(
             Array.isArray(answer.evidence) ? answer.evidence : [],
-            Array.isArray(answer.claims) ? answer.claims : []
+            Array.isArray(answer.claims) ? answer.claims : [],
+            Array.isArray(answer.derived_facts) ? answer.derived_facts : []
         );
         if (section) {
             wrapper.appendChild(section);
@@ -732,9 +733,14 @@
      * @param {Array<object>} claims The answer's claims, each carrying `citations[]`.
      * @returns {HTMLElement|null} The section, or null when no tier has anything to show.
      */
-    function renderEvidenceSection(evidence, claims) {
+    function renderEvidenceSection(evidence, claims, derivedFacts) {
         var recordClaims = claimsInTier(claims, TIER_RECORD);
-        var documentClaims = claimsInTier(claims, TIER_DOCUMENT);
+        // The document tier renders the full extracted-and-persisted fact set, not the subset the
+        // model happened to cite — so "Check all N against the scan" equals "Added to chart: N" and
+        // every persisted fact is verifiable (the two used to diverge, e.g. 27 shown vs 28 written).
+        var documentClaims = reconcileDocumentFacts(
+            claimsInTier(claims, TIER_DOCUMENT), derivedFacts || []
+        );
 
         var tiers = [];
         if (evidence.length > 0) {
@@ -921,6 +927,84 @@
         // thing N times.
         item.appendChild(renderCitation(claims[0].source, TIER_RECORD));
         return item;
+    }
+
+    /**
+     * Reconcile the document tier's facts with the extracted-and-persisted set.
+     *
+     * The lab table must show what was written to the chart, not the subset the model chose to cite:
+     * the write-back persists every extracted lab fact (`answer.derived_facts`), so a card built from
+     * `answer.claims` alone under-counts (e.g. 27 rows for 28 written) and leaves a persisted fact
+     * unverifiable. For every lab document that produced derived facts, this replaces its cited
+     * claims with the full fact set, adapted to the claim shape the card renderer already consumes.
+     * Intake-form facts, and lab documents that yielded no derived fact (all uncoded), keep their
+     * claim-based rendering.
+     *
+     * @param {Array<object>} documentClaims The document-tier claims the model cited.
+     * @param {Array<object>} derivedFacts The `{document_id, doc_type, facts}` groups from write-back.
+     * @returns {Array<object>} The reconciled fact set to render, claim-shaped.
+     */
+    function reconcileDocumentFacts(documentClaims, derivedFacts) {
+        var labGroups = derivedFacts.filter(function (group) {
+            return group && group.doc_type === 'lab_pdf' && Array.isArray(group.facts);
+        });
+        var reconciledDocs = labGroups.map(function (group) { return String(group.document_id); });
+        var kept = documentClaims.filter(function (claim) {
+            var citation = primaryCitation(claim);
+            // Non-lab document facts (intake forms) stay claim-based — the write-back shape carries
+            // no analyte metadata for them, and they are not the surface being reconciled here.
+            if (!citation || citation.source_type !== 'lab_pdf') {
+                return true;
+            }
+            var documentId = String((claim.source || {}).document_id);
+            // A lab document with no derived facts (every analyte uncoded) has nothing to swap in, so
+            // fall back to its cited claims rather than dropping the table entirely.
+            return reconciledDocs.indexOf(documentId) < 0;
+        });
+        var derivedLab = [];
+        labGroups.forEach(function (group) {
+            group.facts.forEach(function (fact) {
+                if (fact && fact.type === 'lab') {
+                    derivedLab.push(adaptLabFact(group, fact));
+                }
+            });
+        });
+        return kept.concat(derivedLab);
+    }
+
+    /**
+     * Adapt one write-back lab fact to the claim shape the document card renderer consumes.
+     *
+     * The renderer reads `source.{document_id, doc_type, page, value, bounding_box}` and a primary
+     * citation carrying `lab_detail`; this maps the write-back keys (`bbox.{w,h}` → `width`/`height`,
+     * `label`/`units`/`range`/`abnormal` → `lab_detail`) onto it, so a derived fact renders and
+     * boxes identically to a cited claim.
+     *
+     * @param {object} group The fact's document group (`document_id`, `doc_type`).
+     * @param {object} fact One `type: 'lab'` fact from `derived_facts`.
+     * @returns {object} A claim-shaped object.
+     */
+    function adaptLabFact(group, fact) {
+        var box = fact.bbox || {};
+        return {
+            text: fact.label,
+            source: {
+                document_id: group.document_id,
+                doc_type: group.doc_type,
+                page: fact.page,
+                value: fact.value,
+                bounding_box: { page: fact.page, x: box.x, y: box.y, width: box.w, height: box.h }
+            },
+            citations: [{
+                source_type: 'lab_pdf',
+                lab_detail: {
+                    test_name: fact.label,
+                    unit: fact.units,
+                    reference_range: fact.range,
+                    abnormal_flag: fact.abnormal
+                }
+            }]
+        };
     }
 
     /**

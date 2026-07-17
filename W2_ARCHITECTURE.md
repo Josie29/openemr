@@ -158,9 +158,27 @@ Two further probe rules were learned the same way, and both are load-bearing:
   omits a defaulted field from the JSON Schema's `required` list, and Mistral then silently drops it
   from `document_annotation` — this cost **six of nine intake fields**, and looked for weeks like a
   stale fixture rather than an API behaviour.
-- **Values must be demanded verbatim.** Asked plainly, Mistral normalizes (`03 / 14 / 1979` →
-  `1979-03-14`). A normalized value cannot be located on the page, so the fact is correctly dropped
-  rather than boxed wrongly — but the field is lost. Every probe field says "exactly as printed".
+
+  > **It recurred, so it is now enforced rather than documented (JOS-87/88).** Writing the rule
+  > here did not stop `_LabResultProbe` from asking for seven fields and requiring two. Adding a
+  > seventh (`loinc`) tipped Mistral into dropping the rest: `unit` fell from 27 of 28 rows to
+  > **0**, `collection_date` 28 → **0**, and `reference_range` 28 → 21 — losing it on exactly the
+  > seven **abnormal** rows, i.e. the lab table kept rendering but without the unit and range that
+  > are what prove a value is abnormal. The failure is silent by construction: an omitted key is
+  > indistinguishable from a document that never printed the value. `tests/test_probe_schemas.py`
+  > now asserts the `required` list of **every** probe, so the next `default=None` fails CI instead
+  > of quietly deleting a column.
+- **Values must be demanded verbatim** — *when the value is located on the page.* Asked plainly,
+  Mistral normalizes (`03 / 14 / 1979` → `1979-03-14`). A normalized value cannot be found in the
+  page's text, so it earns no box and the fact is correctly dropped rather than boxed wrongly — but
+  the field is lost. Every **locatable** probe field says "exactly as printed".
+
+  > **The exception proves the rule's purpose.** Verbatim serves *locatability*, so a field that is
+  > never located does not want it. `collection_date` is parsed into a `date` and carries no box;
+  > demanding it verbatim only welded the parser to the page's print format — the lab fixture prints
+  > `2026-07-08 09:40`, which the ISO parser rejected outright, silently zeroing all 28 dates. It
+  > asks for an ISO date instead, and `_parse_date` takes the leading date while still refusing
+  > non-ISO input rather than guessing.
 
 ### 3.1 The flow
 

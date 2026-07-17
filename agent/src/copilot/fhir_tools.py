@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Sequence
 from typing import Any, Protocol
 
@@ -10,6 +11,7 @@ from copilot.fhir.models import (
     Medication,
     NoteContent,
     PatientDemographics,
+    PatientSummary,
     Problem,
 )
 from copilot.verification import FetchLog, FhirRecordable
@@ -49,7 +51,10 @@ def _track[D: FhirReadDeps, T: FhirRecordable | Sequence[FhirRecordable]](
 
 
 def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
-    """Register the six patient-scoped FHIR read tools on ``agent``.
+    """Register the patient-scoped FHIR read tools on ``agent``.
+
+    Includes ``get_patient_summary`` (one call for a broad orientation) alongside the individual
+    per-resource reads (for focused questions); both record what they read into the ``FetchLog``.
 
     Every tool is scoped to the one open patient (the deps carry a patient-scoped client and id),
     and every fetch is recorded via :func:`_track` so the grounding gate can resolve any field a
@@ -58,6 +63,46 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
     Args:
         agent: The agent to attach the read tools to (its deps must satisfy :class:`FhirReadDeps`).
     """
+
+    @agent.tool
+    async def get_patient_summary(ctx: RunContext[D]) -> PatientSummary:
+        """Read the open patient's whole structured picture in ONE call.
+
+        Returns demographics, the problem list, current medications, allergies, and recent
+        encounters together — use this for a broad "who is this / give me the picture" orientation
+        instead of calling the five individual reads. For a focused question, call only the
+        specific ``get_*`` tool it needs.
+
+        The five reads run concurrently, and each sub-resource is recorded individually so a claim
+        citing any Condition/MedicationRequest/etc. grounds exactly as with the per-list tools.
+        """
+        pid = ctx.deps.patient_id
+        patient, problems, medications, allergies, encounters = await asyncio.gather(
+            ctx.deps.fhir.get_patient(pid),
+            ctx.deps.fhir.get_problems(pid),
+            ctx.deps.fhir.get_medications(pid),
+            ctx.deps.fhir.get_allergies(pid),
+            ctx.deps.fhir.get_encounters(pid),
+        )
+        summary = PatientSummary(
+            patient=patient,
+            problems=problems,
+            medications=medications,
+            allergies=allergies,
+            recent_encounters=encounters,
+        )
+        # Record each individual record — never the summary wrapper, which carries no id and is
+        # never cited — so a claim grounds against the same objects the per-list tools would record.
+        ctx.deps.fetched.record_all(
+            [
+                summary.patient,
+                *summary.problems,
+                *summary.medications,
+                *summary.allergies,
+                *summary.recent_encounters,
+            ]
+        )
+        return summary
 
     @agent.tool
     async def get_patient(ctx: RunContext[D]) -> PatientDemographics:

@@ -90,6 +90,47 @@ def test_uc1_orientation_grounds_across_problem_and_medication(settings: Setting
     assert "metformin 500 mg tablet" in values
 
 
+def test_patient_summary_grounds_a_cross_resource_answer_in_one_call(settings: Settings) -> None:
+    # Guards the JOS-89 Mode A relief: get_patient_summary must populate the FetchLog with each
+    # individual sub-resource so a broad orientation grounds a Condition AND a MedicationRequest
+    # claim after a SINGLE tool call (not five). If the summary tool stopped recording its
+    # components individually, these claims would be wrongly refused even though the data was read.
+    claims = [
+        Claim(
+            text="Active problem: type 2 diabetes mellitus.",
+            source=SourceRef(resource_type="Condition", resource_id="cond-dm2", field="display"),
+        ),
+        Claim(
+            text="Currently on metformin 500 mg.",
+            source=SourceRef(
+                resource_type="MedicationRequest", resource_id="med-metformin", field="name"
+            ),
+        ),
+    ]
+    app = create_app(settings)
+    with override_graph(
+        app.state.graph,
+        router=route_model([Route.EXTRACT_INTAKE, Route.ANSWER]),
+        extractor=worker_model(
+            [("get_patient_summary", {})],  # ONE call replaces the five per-resource reads
+            ExtractorOutput(summary="DM on metformin.", claims=claims),
+        ),
+        answerer=worker_model(
+            [], ChatResponse(summary="68F with type 2 diabetes; on metformin.", claims=claims)
+        ),
+    ):
+        response = TestClient(app).post(
+            "/chat", json={"patient_id": "1", "message": "Give me the picture."}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    values = {c["source"]["value"] for c in body["claims"]}
+    # The real record values were stamped in by the gate, proving each component was recorded.
+    assert "Type 2 diabetes mellitus" in values
+    assert "metformin 500 mg tablet" in values
+
+
 def test_chat_without_a_patient_token_is_rejected_in_http_mode() -> None:
     # Guards the contract with the PHP module (deployment-strategy.md, Option D): in live HTTP mode
     # the agent must refuse a /chat call that carries no patient-scoped token BEFORE any FHIR read

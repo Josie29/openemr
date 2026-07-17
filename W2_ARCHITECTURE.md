@@ -594,6 +594,15 @@ the sidebar turns it into a URL **text fragment** so a citation's "View source" 
 passage in the source PDF/page instead of opening at page 1 (JOS-85). It is optional — a source that
 blocks the fetch keeps no anchor and falls back to a plain link.
 
+**The evidence-retriever model sees only `{chunk_id, text}`, never the rest.** `search_guidelines`
+records the full snippet server-side (for grounding and for the serializer to stamp provenance) but
+returns a trimmed `RetrievedGuideline` view to the model. This is deliberate: the model quotes from
+`text`, and the grounding gate checks the quote against `text`, so those must be the only text the
+model can reach. Exposing `anchor_quote` — a *verbatim source span* that differs from the (reworded)
+`text` — invited the model to copy it into a claim quote that then could never ground, failing the
+turn into a refusal (JOS-89). Withholding it makes that mismatch unrepresentable rather than merely
+caught by the gate's case/whitespace normalization.
+
 ### 5.1 The pipeline
 
 ```

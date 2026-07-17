@@ -77,3 +77,42 @@ class EvidenceSnippet(BaseModel):
     def text(self) -> str:
         """The snippet text (the cited quote)."""
         return self.citation.quote_or_value
+
+
+class RetrievedGuideline(BaseModel):
+    """The evidence-retriever model's view of one retrieved snippet: only what it must cite from.
+
+    Deliberately minimal — the chunk id to cite and the text to quote from. Every other field of the
+    underlying :class:`EvidenceSnippet` (source, section, url, year, rerank score, and the verbatim
+    ``anchor_quote`` used to deep-link the source card) is system-owned provenance: it is stamped
+    onto the citation from the chunk id at grounding and serialization time, so the model neither
+    authors nor sees it — the same discipline ``SourceRef``'s ``value``/``label``/``date`` already
+    follow.
+
+    Withholding ``anchor_quote`` in particular is load-bearing (JOS-89): the model used to copy that
+    verbatim *source* span into its claim ``quote``, but the grounding gate checks the (lightly
+    reworded) chunk ``text`` — so an anchor that differs from the text by as little as a leading
+    capital could never match, and the turn failed its retries into a refusal. With only ``text`` in
+    view, the model can only quote the exact field the gate verifies, so that mismatch is
+    unrepresentable rather than merely tolerated.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    chunk_id: str = Field(description="Cite this as the claim's `resource_id`.")
+    text: str = Field(
+        description="The guideline snippet. Copy a verbatim span of THIS as the claim's `quote`."
+    )
+
+    @classmethod
+    def from_snippet(cls, snippet: EvidenceSnippet) -> "RetrievedGuideline":
+        """Project a retrieved snippet onto the minimal view handed to the model.
+
+        Args:
+            snippet: The full snippet the retriever recorded (kept server-side for stamping).
+
+        Returns:
+            The chunk-id + text view — provenance dropped so the model cannot cite a field the
+            grounding gate does not check.
+        """
+        return cls(chunk_id=snippet.citation.field_or_chunk_id, text=snippet.text)

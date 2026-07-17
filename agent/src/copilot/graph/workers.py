@@ -10,7 +10,7 @@ from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.ingestion.extractor import ExtractionError, FhirBinaryByteSource
 from copilot.ingestion.registry import DocumentFactHandle
-from copilot.rag.models import EvidenceSnippet
+from copilot.rag.models import RetrievedGuideline
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
 
@@ -91,17 +91,17 @@ for the supervisor to use.
 Call `search_guidelines` with a focused query built from the CLINICAL TOPIC the question is about
 — the condition, the screening subject, the monitoring question. Use only de-identified clinical
 terms; never put patient identifiers (name, MRN, date of birth) or specific patient values in the
-query (it is sent to external retrieval/rerank services). Read the returned snippets and return a
-RetrieverOutput: a one-line `summary` and a `claims` list, each stating one guideline point and
-grounding it in a snippet.
+query (it is sent to external retrieval/rerank services). Each returned snippet has just two fields:
+a `chunk_id` and its `text`. Read them and return a RetrieverOutput: a one-line `summary` and a
+`claims` list, each stating one guideline point and grounding it in a snippet.
 
 {_CITATION_RULES}
 
-Cite guideline snippets with resource_type `guideline` and the snippet's chunk id (its
-`citation.field_or_chunk_id`) as resource_id, with a verbatim `quote` from the snippet text.
-Surface criteria, thresholds, screening intervals, and monitoring cadence — never dosing
-directives. If retrieval returns nothing relevant, say so in the summary and return no claims
-rather than inventing evidence."""
+Cite guideline snippets with resource_type `guideline` and the snippet's `chunk_id` as resource_id,
+and set `quote` to a span copied verbatim from THAT snippet's `text` — word-for-word from the
+`text`, nothing else. Surface criteria, thresholds, screening intervals, and monitoring cadence —
+never dosing directives. If retrieval returns nothing relevant, say so in the summary and return no
+claims rather than inventing evidence."""
 
 # Langfuse Prompt Management name for the physician-facing answer prompt. The final answer is the
 # turn's user-visible output, so this is the prompt version stamped on each trace (the router and
@@ -275,17 +275,26 @@ def build_evidence_retriever(model: Model) -> Agent[GraphDeps, RetrieverOutput]:
     )
 
     @agent.tool
-    async def search_guidelines(ctx: RunContext[GraphDeps], query: str) -> list[EvidenceSnippet]:
+    async def search_guidelines(
+        ctx: RunContext[GraphDeps], query: str
+    ) -> list[RetrievedGuideline]:
         """Retrieve the top guideline snippets for a query via the hybrid-RAG pipeline.
+
+        Returns only each snippet's ``chunk_id`` and ``text`` — the fields the model cites and
+        quotes from. All provenance (source, url, and the verbatim ``anchor_quote`` used for
+        deep-linking) is withheld and stamped by the system later, so the model cannot cite a field
+        the grounding gate does not check (JOS-89).
 
         Args:
             ctx: The run context (holds the retriever and the chunk registry).
             query: A focused retrieval query built from the clinical question and patient facts.
         """
         snippets = await ctx.deps.retriever.retrieve(query)
-        # Record what was retrieved so the grounding gate can resolve any chunk the worker cites.
+        # Record the FULL snippets so the grounding gate can resolve, and the response serializer
+        # can stamp provenance for, any chunk the worker cites — even though the model only sees a
+        # trimmed view of them.
         ctx.deps.chunks.record_all(snippets)
-        return snippets
+        return [RetrievedGuideline.from_snippet(snippet) for snippet in snippets]
 
     @agent.output_validator
     async def enforce_grounding(

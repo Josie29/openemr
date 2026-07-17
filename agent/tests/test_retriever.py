@@ -1,7 +1,7 @@
 import pytest
 
 from copilot.config import FhirClientMode, RetrievalMode, Settings
-from copilot.rag.models import EvidenceSnippet
+from copilot.rag.models import EvidenceSnippet, RetrievedGuideline
 from copilot.rag.retriever import (
     FixtureEvidenceRetriever,
     QdrantEvidenceRetriever,
@@ -22,6 +22,34 @@ def _scored_snippet(score: float) -> EvidenceSnippet:
         guideline="g",
         rerank_score=score,
     )
+
+
+def test_model_facing_projection_withholds_anchor_quote_from_the_model() -> None:
+    # Regression (JOS-89): the model must only ever see the field the grounding gate checks against
+    # (the chunk `text`), never the verbatim `anchor_quote`. When both were exposed the model copied
+    # the anchor — which differs from `text` (here by a leading capital) — into its claim quote, the
+    # gate rejected it against `text`, and the turn failed into a refusal. If the projection ever
+    # leaks anchor_quote again, that mismatch becomes possible again.
+    snippet = EvidenceSnippet(
+        citation=GuidelineCitation(
+            source_id="uspstf-t2dm-2021",
+            page_or_section="Screening Tests",
+            field_or_chunk_id="uspstf-t2dm-2021-screening-tests-04",
+            quote_or_value="an abnormal screening result: the diagnosis should be confirmed.",
+        ),
+        guideline="t2dm",
+        anchor_quote="The diagnosis should be confirmed.",  # capitalized — NOT a substring of text
+        rerank_score=0.5,
+    )
+
+    view = RetrievedGuideline.from_snippet(snippet)
+
+    assert view.chunk_id == "uspstf-t2dm-2021-screening-tests-04"
+    assert view.text == snippet.text
+    # The footgun field is absent from everything the model can see...
+    assert "anchor_quote" not in view.model_dump()
+    # ...while the full snippet still carries it for the system-side deep-link at serialization.
+    assert snippet.anchor_quote == "The diagnosis should be confirmed."
 
 
 async def test_fixture_retriever_returns_cited_guideline_snippets() -> None:

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from copilot.config import ExtractorMode, Settings
 from copilot.fhir.client import FhirClient, FhirError
+from copilot.ingestion import loinc
 from copilot.ingestion.errors import ExtractionError
 from copilot.ingestion.geometry.document import DocumentGeometry
 from copilot.ingestion.geometry.fields import FieldId, spec_for
@@ -63,6 +64,11 @@ __all__ = [
 
 class _LabResultProbe(BaseModel):
     test_name: str = Field(description="Analyte/test name as printed")
+    # Terse on purpose, like its siblings. A longer, emphatic description here ("never use a code
+    # from memory...") sent the model into a repetition loop that consumed the output budget and
+    # returned 1 result instead of 28. Grounding is enforced in code (see `_ground_loinc`), not
+    # asked for in the prompt — which is both more reliable and cheaper.
+    loinc: str | None = Field(default=None, description="LOINC code as printed. Null if absent.")
     value: str = Field(description="Result value verbatim")
     unit: str | None = Field(default=None, description="Unit if printed")
     reference_range: str | None = Field(default=None, description="Reference range if printed")
@@ -529,7 +535,7 @@ def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport
             # No text-layer word, no table geometry, no page box — drop rather than fabricate.
             logger.warning("dropping lab result with no locatable box", extra={"test": test_name})
             continue
-        results.append(_build_lab_result(raw, located.box, page))
+        results.append(_build_lab_result(raw, located.box, page, geometry))
     return LabReport(results=results)
 
 
@@ -690,11 +696,80 @@ def _map_family_history(
     return items
 
 
-def _build_lab_result(raw: dict[str, Any], box: BoundingBox, page: dict[str, Any]) -> LabResult:
-    """Build one cited ``LabResult`` from a document_annotation row and its located box."""
+def _document_prints(code: str, geometry: DocumentGeometry) -> bool:
+    """Is ``code`` actually printed on the document, per the page's own text evidence?
+
+    Both sources are checked because each covers a case the other cannot: ``words`` is the PDF text
+    layer (authoritative, but empty for a scanned/image-only PDF), and the OCR's parsed table cells
+    are what the model read off the pixels (present either way).
+
+    Args:
+        code: The candidate LOINC code.
+        geometry: The document's normalized evidence.
+
+    Returns:
+        True when the code appears somewhere in the document's text.
+    """
+    if any(code in word.text for word in geometry.words):
+        return True
+    return any(code in cell for table in geometry.tables for row in table.rows for cell in row)
+
+
+def _ground_loinc(raw: dict[str, Any], geometry: DocumentGeometry) -> str | None:
+    """Accept a LOINC code only if the page really prints it and its check digit holds.
+
+    A model asked for a LOINC code can supply one from training rather than from the page — the
+    exact fabrication this pipeline exists to prevent, and one a checksum alone cannot catch,
+    because a recalled code is usually a *real* code and passes. So the code has to be found in the
+    document's text before it is believed; the prompt is not asked to promise anything.
+
+    Two independent failures, deliberately distinguished in the logs: a code the page does not print
+    (hallucinated) and a code the page prints but OCR mangled (misread).
+
+    Args:
+        raw: One ``document_annotation`` result row.
+        geometry: The document's normalized evidence.
+
+    Returns:
+        The validated code, or None when it is absent, ungrounded, or malformed.
+    """
+    raw_loinc = raw.get("loinc")
+    if raw_loinc is None or not str(raw_loinc).strip():
+        return None
+
+    candidate = str(raw_loinc).strip()
+    if not _document_prints(candidate, geometry):
+        logger.warning(
+            "discarding a LOINC code the document does not print — the model supplied it, the "
+            "page did not",
+            extra={"test_name": raw.get("test_name"), "loinc": candidate},
+        )
+        return None
+
+    code = loinc.parse(candidate)
+    if code is None:
+        logger.warning(
+            "discarding a LOINC code that fails its check digit; the result keeps its value but "
+            "cannot be written back",
+            extra={"test_name": raw.get("test_name"), "loinc": candidate},
+        )
+    return code
+
+
+def _build_lab_result(
+    raw: dict[str, Any], box: BoundingBox, page: dict[str, Any], geometry: DocumentGeometry
+) -> LabResult:
+    """Build one cited ``LabResult`` from a document_annotation row and its located box.
+
+    A LOINC code that is not grounded on the page, or that fails its check digit, is dropped to None
+    rather than passed through — but the result itself still stands, because its value and box are
+    unaffected by a bad code. Losing the code costs write-back (JOS-81 refuses an uncoded result);
+    losing the result would cost the answer.
+    """
     value = str(raw.get("value", "")).strip()
     return LabResult(
         test_name=str(raw.get("test_name", "")).strip(),
+        loinc=_ground_loinc(raw, geometry),
         value=value,
         unit=_clean(raw.get("unit")),
         reference_range=_clean(raw.get("reference_range")),

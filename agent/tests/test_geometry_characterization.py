@@ -44,6 +44,9 @@ def _snapshot(name: str) -> list[dict[str, Any]]:
     return [
         {
             "test_name": result.test_name,
+            # Pinned per analyte: a code silently shifting to a neighbouring row would relabel which
+            # test was run, and the write-back would persist it under the wrong Observation.code.
+            "loinc": result.loinc,
             "value": result.value,
             "unit": result.unit,
             "reference_range": result.reference_range,

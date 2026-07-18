@@ -29,6 +29,12 @@ namespace OpenEMR\Modules\AiCopilot\Smart;
  * And because `AuthorizationController::processAuthorizeFlowForLaunch()` overrides the request's
  * scopes with whatever is registered on the `oauth_clients` row, this list must match the client
  * registration exactly. See the module README's admin prerequisites.
+ *
+ * **Editing this list is not enough on its own** — the granted token comes from the registered row,
+ * so each environment's `oauth_clients.scope` must be re-synced or a new scope stays inert (this
+ * 502'd prod once, JOS-82). Local worktrees: `scripts/bootstrap-worktree-copilot.sh` (it reads this
+ * list and re-syncs on every run). Prod: `scripts/sync-copilot-scopes.sh --prod`, run as the last
+ * step of the qa→main promotion (see the project CLAUDE.md "Branching & integration workflow").
  */
 final readonly class CopilotScopes
 {

@@ -74,9 +74,11 @@ override="${compose_dir}/docker-compose.override.yml"
 
 redirect_uri="${origin}/interface/modules/custom_modules/${MODULE_DIR}/public/callback.php"
 
-# The exact scopes the Co-Pilot's tools need. `launch` (never `launch/patient`,
-# whose substring match re-triggers the patient picker). See CopilotScopes.php.
-scope="openid fhirUser online_access launch patient/Patient.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Encounter.read patient/Observation.read patient/DocumentReference.read patient/Binary.read"
+# The exact scopes the Co-Pilot's tools need, read from CopilotScopes (the single source of truth)
+# rather than hardcoded here — so adding a scope in code needs no edit to this script. `launch`
+# (never `launch/patient`, whose substring match re-triggers the patient picker). See CopilotScopes.php.
+scope="$(docker exec "$openemr_ctr" php "${CONTAINER_WEBROOT}/interface/modules/custom_modules/${MODULE_DIR}/scripts/print-copilot-scopes.php")"
+[[ -n "$scope" ]] || die "could not read CopilotScopes::asString() from the container"
 
 sql() { docker exec -i "$mysql_ctr" mariadb -uroot -proot openemr "$@"; }
 
@@ -112,9 +114,12 @@ else
     [[ -n "$client_id" && -n "$client_secret" ]] || die "registration failed: $reg"
 fi
 
-# 3. Enable the client + skip the per-launch consent screen (EHR launch).
-info "enabling client + authorization-flow skip"
-sql -e "UPDATE oauth_clients SET is_enabled=1, skip_ehr_launch_authorization_flow=1 WHERE client_id='${client_id}';"
+# 3. Enable the client + skip the per-launch consent screen (EHR launch), and re-sync the scope to
+#    the canonical set. Setting `scope` here (not just on first registration) keeps a REUSED client
+#    current when CopilotScopes gains a scope — the registered row, not the code, is what a launched
+#    token is granted, so without this a new scope stays inert on an already-registered worktree.
+info "enabling client + authorization-flow skip + scope sync"
+sql -e "UPDATE oauth_clients SET is_enabled=1, skip_ehr_launch_authorization_flow=1, scope='${scope}' WHERE client_id='${client_id}';"
 
 # 4. Register + enable the custom module in the fresh DB (Module Manager parity).
 #    Run as the web user — OpenEMR CLI refuses to run as root.

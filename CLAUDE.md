@@ -106,6 +106,13 @@ tooling, evals). Integrate them on `qa/integration`, test locally, then promote 
   token per-request. Do **not** hand-roll a per-module `?v=` (it just doubles the
   shell's query); the version bump is the sanctioned mechanism (see
   `version.php` header comment and `src/Core/Header.php`).
+- **Sync prod SMART scopes whenever the promotion changes `CopilotScopes.php`.** The token a
+  launch grants comes from the registered `oauth_clients.scope` row, not the code — core's
+  `processAuthorizeFlowForLaunch()` overrides the request with the row — so a new scope is inert
+  until the row is updated. This already 502'd prod (JOS-82: every lab question failed until the
+  prod row got `patient/Observation.read`). Run it as the **last step of the promotion**:
+  `interface/modules/custom_modules/oe-module-ai-copilot/scripts/sync-copilot-scopes.sh --prod`
+  (add `--dry-run` first to preview). Then re-launch to confirm a fresh token carries the scope.
 
 ### Which worktree tool — depends on whether the component needs OpenEMR
 

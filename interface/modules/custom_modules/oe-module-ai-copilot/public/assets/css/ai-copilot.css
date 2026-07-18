@@ -928,6 +928,34 @@ body.ai-copilot-resizing {
     white-space: nowrap;
 }
 
+/* The badge is the handle for the whole fact: clicking it shows every box backing that one result.
+   It already reads as an affordance (a filled chip), so it needs a cursor and a focus ring, not
+   more decoration. */
+.ai-copilot__doc-num--provable {
+    cursor: pointer;
+}
+
+.ai-copilot__doc-num--provable:hover {
+    filter: brightness(1.15);
+}
+
+.ai-copilot__doc-num--provable:focus-visible,
+.ai-copilot__labs-col--provable:focus-visible {
+    outline: 2px solid var(--copilot-accent);
+    outline-offset: 2px;
+}
+
+/* A column header that shows its field across the whole panel. Underlined on hover only: a header
+   is a label first, and every column reading as a button would compete with the data. */
+.ai-copilot__labs-col--provable {
+    cursor: pointer;
+}
+
+.ai-copilot__labs-col--provable:hover {
+    color: var(--copilot-accent);
+    text-decoration: underline;
+}
+
 /* A value that can prove itself against the scan. Deliberately quiet — a dotted underline that
    firms up on hover, not a link colour: every cell in the table would otherwise read as a call to
    action and the panel would stop scanning as data. The affordance is discovered on hover, which is

@@ -1290,9 +1290,22 @@
 
         var head = document.createElement('thead');
         var headRow = document.createElement('tr');
-        [labels.labAnalyte, labels.labValue, labels.labRef].forEach(function (heading) {
+        // The analyte column is not proof of anything — the test NAME is a locator anchor, never
+        // boxed — so only the two value columns become headers you can interrogate.
+        var columns = [
+            { heading: labels.labAnalyte, field: null },
+            { heading: labels.labValue, field: 'value' },
+            { heading: labels.labRef, field: 'reference_range' }
+        ];
+        columns.forEach(function (column) {
             var th = document.createElement('th');
-            th.textContent = heading;
+            th.textContent = column.heading;
+            if (column.field) {
+                // "Show me every reference range you read." Costs the same rectangle count as the
+                // default result column, so auditing one dimension across the panel is no more
+                // cluttered than what the card already opens with.
+                makeColumnProvable(th, claims, boxed, column.field);
+            }
             headRow.appendChild(th);
         });
         head.appendChild(headRow);
@@ -1352,6 +1365,102 @@
             return entry.field === field;
         });
         return matches.length ? matches[0] : null;
+    }
+
+    /**
+     * Every located box backing ONE fact — its value plus each qualifier that resolved.
+     *
+     * All of them carry the same badge number on purpose: they are three proofs of a single fact,
+     * so the overlay reads "everything numbered 7 supports result 7" rather than renumbering each
+     * rectangle as if it were a separate finding.
+     *
+     * @param {object} claim The fact.
+     * @param {number} ordinal Its badge number in the list.
+     * @returns {Array<object>} Boxes in the overlay's packing shape; empty when nothing located.
+     */
+    function boxesForFact(claim, ordinal) {
+        var source = claim.source || {};
+        var boxes = [];
+        if (source.bounding_box) {
+            boxes.push(source.bounding_box);
+        }
+        (source.field_boxes || []).forEach(function (entry) {
+            boxes.push(entry);
+        });
+        return boxes.map(function (box) {
+            return { x: box.x, y: box.y, width: box.width, height: box.height, n: ordinal };
+        });
+    }
+
+    /**
+     * One field's box across EVERY fact on the page — the column view.
+     *
+     * Each rectangle keeps its own fact's number, so a column of ranges lines up with the list above
+     * it. Facts whose value for that field was never located are simply absent, which is what makes
+     * the column honest: the gaps show what could not be placed.
+     *
+     * @param {Array<object>} boxed The page's boxed facts, in badge order.
+     * @param {string} field Which value to show for each — 'value', 'reference_range', 'unit'.
+     * @returns {Array<object>} Boxes in the overlay's packing shape.
+     */
+    function boxesForColumn(boxed, field) {
+        var boxes = [];
+        boxed.forEach(function (claim, index) {
+            var box = boxForField(claim, field);
+            if (box) {
+                boxes.push({
+                    x: box.x, y: box.y, width: box.width, height: box.height, n: index + 1
+                });
+            }
+        });
+        return boxes;
+    }
+
+    /**
+     * Open the scan showing a specific set of boxes, or do nothing when there are none.
+     *
+     * @param {object} source A source carrying the document id (any fact on the page will do).
+     * @param {Array<object>} boxes The rectangles to draw, already packed.
+     * @param {number} page The 1-based page they sit on.
+     */
+    function openBoxes(source, boxes, page) {
+        if (!boxes.length || !source || !source.document_id) {
+            return;
+        }
+        openSourceInChartTab(String(source.document_id), page, boxes, docKindLabel(source));
+    }
+
+    /**
+     * Make a column header show that field across every fact on the page.
+     *
+     * Inert when nothing in the column was located — a header that opens an empty overlay would
+     * imply the page was checked and found wanting, rather than never placed.
+     *
+     * @param {HTMLElement} th The header cell.
+     * @param {Array<object>} claims The document page's facts.
+     * @param {Array<object>} boxed The boxed subset, defining the badge numbering.
+     * @param {string} field Which value the column shows.
+     */
+    function makeColumnProvable(th, claims, boxed, field) {
+        var boxes = boxesForColumn(boxed, field);
+        if (!boxes.length || !claims.length) {
+            return;
+        }
+        th.classList.add('ai-copilot__labs-col--provable');
+        th.setAttribute('role', 'button');
+        th.setAttribute('tabindex', '0');
+        th.title = labels.checkSource;
+        var source = claims[0].source;
+        var open = function () {
+            openBoxes(source, boxes, normalizePage(source));
+        };
+        th.addEventListener('click', open);
+        th.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                open();
+            }
+        });
     }
 
     /**
@@ -1450,6 +1559,27 @@
         }
         badge.className = 'ai-copilot__doc-num';
         badge.textContent = String(index + 1);
+
+        // The number is the handle for the whole fact: clicking it shows everything backing this
+        // one result at once — the value, the range that makes it abnormal, and its unit. That is
+        // the evidence behind "why is this flagged", which a single cell cannot answer alone.
+        var boxes = boxesForFact(claim, index + 1);
+        if (boxes.length > 1) {
+            badge.classList.add('ai-copilot__doc-num--provable');
+            badge.setAttribute('role', 'button');
+            badge.setAttribute('tabindex', '0');
+            badge.title = labels.checkSource;
+            var open = function () {
+                openBoxes(claim.source, boxes, normalizePage(claim.source));
+            };
+            badge.addEventListener('click', open);
+            badge.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    open();
+                }
+            });
+        }
         return badge;
     }
 

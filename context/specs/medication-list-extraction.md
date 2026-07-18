@@ -57,8 +57,16 @@ source — a dedicated medication list is.
 
 Doc type is resolved from the OpenEMR **category**, never the model (`resolve_doc_type`): `Lab
 Report` (substring) → `lab_pdf`, `Patient Information` (exact) → `intake_form`, `Medication List`
-(exact) → `medication_list`. Like `Patient Information`, medication-list matches its category
-**exactly** — a loose match risks reading an unrelated document through the medication schema.
+**and** `Medical Record` (exact) → `medication_list`. Like `Patient Information`, medication-list
+matches its category **exactly** — a loose match risks reading an unrelated document through the
+medication schema.
+
+`Medical Record` is a **demo fallback**: the seeded `Medication List` category does not reliably
+surface in OpenEMR's cached Documents tree (a session/iframe cache quirk, not a data problem — the
+row is correct and renders in a fresh session), so the demo uploads the med list under the
+always-present default `Medical Record` category. **Tradeoff:** any `Medical Record` upload then
+extracts as a medication list. Acceptable for the demo; gate behind config or drop before promoting
+to prod, where the proper `Medication List` category should be seeded instead.
 
 `Medication List` is **not an OpenEMR default category** — only the first two ship with OpenEMR. It
 is seeded per deployment by `scripts/seed-medication-list-category.sh`: an **idempotent** MPTT

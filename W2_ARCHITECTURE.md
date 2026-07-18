@@ -139,7 +139,10 @@ decision the category exists to make. Intake and medication-list both match thei
 Photograph`), so a loose match there would read a driver's licence through the intake schema.
 `Medication List` is **not an OpenEMR default** — it is seeded for this deployment by
 `scripts/seed-medication-list-category.sh` (an idempotent MPTT append under the categories root), so
-it too is matched exactly.
+it too is matched exactly. For the demo, the default `Medical Record` category also resolves to
+`medication_list`: the seeded category does not reliably surface in OpenEMR's cached Documents tree,
+so the med list is uploaded under `Medical Record` instead — a demo tradeoff (any Medical Record
+upload then extracts as a medication list) to gate or drop before prod.
 
 **Decided extractor: Mistral OCR 4 in schema mode**
 ([`vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md)). It returns, in **one

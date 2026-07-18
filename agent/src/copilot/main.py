@@ -306,6 +306,25 @@ def _build_model(settings: Settings) -> Model:
     return AnthropicModel(model_id, provider=provider)
 
 
+# Shared across the FHIR-backed read endpoints (a document read failing surfaces the same way
+# whether it is the list or the extraction path). /chat keeps its own inline copy — its error
+# handling is entangled with per-turn observability scoring, so it is left untouched.
+_FHIR_UNAVAILABLE_MESSAGE = "patient data is temporarily unavailable"
+
+
+def _json_error(correlation_id: str, status_code: int, message: str) -> JSONResponse:
+    """Build the service's standard error response body: ``{error, correlation_id}``.
+
+    One factory so every failure branch emits the shape a client can rely on, with the correlation
+    id that ties a user-facing failure back to its trace. Logging stays at the call site, where the
+    reason code and traceback context live.
+    """
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": message, "correlation_id": correlation_id},
+    )
+
+
 def _require_token(
     request: Request, settings: Settings, correlation_id: str
 ) -> JSONResponse | None:
@@ -330,10 +349,7 @@ def _require_token(
     if _bearer_token(request) or settings.fhir_bearer_token:
         return None
     logger.info("rejected read with no patient token", extra={"cid": correlation_id})
-    return JSONResponse(
-        status_code=401,
-        content={"error": "missing patient-scoped FHIR token", "correlation_id": correlation_id},
-    )
+    return _json_error(correlation_id, 401, "missing patient-scoped FHIR token")
 
 
 def _resolve_request_fhir(
@@ -641,11 +657,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Each exposes ONE Week-2 subsystem directly, bypassing the LLM/graph, so a caller (a grader's
     # API collection, a contract test) can exercise document listing, extraction, or evidence
     # retrieval without paying for a full /chat turn. All three are read-only (no writes, no
-    # corpus mutation) and gated by the same SMART patient token as /chat. Handlers return a raw
-    # JSONResponse (like /chat) but declare `response_model` so the committed OpenAPI is precise.
+    # corpus mutation) and gated by the same SMART patient token as /chat. On success they return
+    # the response_model directly, so FastAPI serializes AND validates the body against the schema
+    # committed to openapi.json — the endpoint cannot drift from its own contract at runtime.
 
     @app.get("/documents", response_model=DocumentsResponse)
-    async def documents(request: Request, patient_id: str) -> JSONResponse:
+    async def documents(request: Request, patient_id: str) -> DocumentsResponse | JSONResponse:
         """List the patient's uploaded, extractable documents (metadata only).
 
         Backs the ``list_documents`` tool: the same patient-scoped FHIR ``DocumentReference``
@@ -665,26 +682,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 extra={"cid": correlation_id, "reason": ChatFailureReason.FHIR_READ_FAILED},
                 exc_info=True,
             )
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "error": "patient data is temporarily unavailable",
-                    "correlation_id": correlation_id,
-                },
-            )
+            return _json_error(correlation_id, 502, _FHIR_UNAVAILABLE_MESSAGE)
         finally:
             if per_request_client is not None:
                 await per_request_client.aclose()
-        return JSONResponse(
-            content=DocumentsResponse(patient_id=patient_id, documents=summaries).model_dump(
-                mode="json"
-            )
-        )
+        return DocumentsResponse(patient_id=patient_id, documents=summaries)
 
     @app.get("/documents/{document_id}/extraction", response_model=ExtractionResponse)
     async def document_extraction(
         request: Request, document_id: str, patient_id: str
-    ) -> JSONResponse:
+    ) -> ExtractionResponse | JSONResponse:
         """Extract one uploaded document into its strict-schema facts (synchronous; no LLM).
 
         Backs ``attach_and_extract`` via the shared ``resolve_and_extract`` core: the document's
@@ -696,13 +703,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings = request.app.state.settings
         extractor = request.app.state.extractor
         if extractor is None:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": "document extraction is not available",
-                    "correlation_id": correlation_id,
-                },
-            )
+            return _json_error(correlation_id, 503, "document extraction is not available")
         resolved = _resolve_request_fhir(request, settings, correlation_id)
         if isinstance(resolved, JSONResponse):
             return resolved
@@ -720,40 +721,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 extra={"cid": correlation_id, "document_id": document_id},
                 exc_info=True,
             )
-            return JSONResponse(
-                status_code=502,
-                content={"error": "could not read the document", "correlation_id": correlation_id},
-            )
+            return _json_error(correlation_id, 502, "could not read the document")
         except FhirError:
             logger.warning(
                 "document read failed for extraction",
                 extra={"cid": correlation_id, "reason": ChatFailureReason.FHIR_READ_FAILED},
                 exc_info=True,
             )
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "error": "patient data is temporarily unavailable",
-                    "correlation_id": correlation_id,
-                },
-            )
+            return _json_error(correlation_id, 502, _FHIR_UNAVAILABLE_MESSAGE)
         finally:
             if per_request_client is not None:
                 await per_request_client.aclose()
         if extracted is None:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "error": "document not found for this patient",
-                    "correlation_id": correlation_id,
-                },
-            )
-        return JSONResponse(
-            content=ExtractionResponse.from_extracted(extracted).model_dump(mode="json")
-        )
+            return _json_error(correlation_id, 404, "document not found for this patient")
+        return ExtractionResponse.from_extracted(extracted)
 
     @app.get("/evidence", response_model=EvidenceResponse)
-    async def evidence(request: Request, query: str, top_n: int | None = None) -> JSONResponse:
+    async def evidence(
+        request: Request, query: str, top_n: int | None = None
+    ) -> EvidenceResponse | JSONResponse:
         """Retrieve ranked guideline chunks for a query (the hybrid-RAG path; no LLM, no PHI).
 
         Backs ``search_guidelines``: runs the retriever (Qdrant + rerank, or the fixture fallback)
@@ -772,20 +758,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.warning(
                 "evidence retrieval failed", extra={"cid": correlation_id}, exc_info=True
             )
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "error": "evidence retrieval is temporarily unavailable",
-                    "correlation_id": correlation_id,
-                },
-            )
+            return _json_error(correlation_id, 502, "evidence retrieval is temporarily unavailable")
         items = [EvidenceItem.from_snippet(snippet) for snippet in snippets]
         resolved_top_n = top_n if top_n is not None else settings.rerank_top_n
-        return JSONResponse(
-            content=EvidenceResponse(
-                query=query, top_n=resolved_top_n, evidence=items
-            ).model_dump(mode="json")
-        )
+        return EvidenceResponse(query=query, top_n=resolved_top_n, evidence=items)
 
     return app
 

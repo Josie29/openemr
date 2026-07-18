@@ -4,12 +4,18 @@ from copilot.ingestion.extractor import ExtractedDocument
 from copilot.ingestion.schemas import (
     Allergy,
     BoundingBox,
+    CitedText,
+    Demographics,
+    FamilyHistoryItem,
     IntakeForm,
     LabReport,
     LabResult,
     Medication,
     MedicationList,
 )
+
+# The Demographics attributes projected to the wire, in the persist endpoint's field vocabulary.
+_DEMOGRAPHIC_FIELDS = ("full_name", "date_of_birth", "sex", "address", "phone")
 
 
 def _box_payload(box: BoundingBox) -> dict[str, Any]:
@@ -99,6 +105,78 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
     return fact
 
 
+def _family_history_fact(item: FamilyHistoryItem) -> dict[str, Any] | None:
+    """Project one family-history entry onto the wire, or None if it cannot be placed.
+
+    OpenEMR files family history under a per-relative column (``history_mother`` etc.), so a relation
+    is required to persist it. An entry with no relation is dropped here rather than sent, because the
+    persist parser is all-or-nothing: one unpersistable fact would reject the whole document's batch.
+
+    Args:
+        item: One extracted family-history entry.
+
+    Returns:
+        The wire dict, or None when the entry has no relation to place it on.
+    """
+    if item.relation is None or item.relation.strip() == "":
+        return None
+    fact: dict[str, Any] = {
+        "type": "family_history",
+        "condition": item.condition,
+        "relation": item.relation,
+        "confidence": item.confidence,
+    }
+    _attach_optional_box(fact, item.citation.bounding_box)
+    return fact
+
+
+def _chief_concern_fact(cited: CitedText) -> dict[str, Any]:
+    """Project the chief concern onto the wire.
+
+    Args:
+        cited: The extracted chief concern with its citation.
+
+    Returns:
+        The wire dict keyed as the persist endpoint expects.
+    """
+    fact: dict[str, Any] = {
+        "type": "chief_concern",
+        "text": cited.value,
+        "confidence": cited.confidence,
+    }
+    _attach_optional_box(fact, cited.citation.bounding_box)
+    return fact
+
+
+def _demographic_facts(demographics: Demographics) -> list[dict[str, Any]]:
+    """Project the present demographic fields onto the wire.
+
+    One fact per non-null field, tagged with the field name the persist endpoint's
+    ``DemographicField`` enum expects. Demographics are accept-gated server-side, but that is the
+    persister's concern — the wire simply carries every field the extractor read.
+
+    Args:
+        demographics: The extracted demographics block.
+
+    Returns:
+        The wire dicts for each field present on the form.
+    """
+    facts: list[dict[str, Any]] = []
+    for field in _DEMOGRAPHIC_FIELDS:
+        cited: CitedText | None = getattr(demographics, field)
+        if cited is None:
+            continue
+        fact: dict[str, Any] = {
+            "type": "demographic",
+            "field": field,
+            "value": cited.value,
+            "confidence": cited.confidence,
+        }
+        _attach_optional_box(fact, cited.citation.bounding_box)
+        facts.append(fact)
+    return facts
+
+
 def _attach_optional_box(fact: dict[str, Any], box: BoundingBox | None) -> None:
     """Attach ``bbox``/``page`` to a document fact when it has geometry.
 
@@ -114,11 +192,14 @@ def _attach_optional_box(fact: dict[str, Any], box: BoundingBox | None) -> None:
 def _facts_for_document(extracted: ExtractedDocument) -> list[dict[str, Any]]:
     """Project one document's persistable facts onto the wire.
 
-    An intake form yields allergies (medications moved to ``medication_list``); its demographics,
-    chief concern, and family history have no honest write target (JOS-81) and are omitted. A
-    medication list yields medications. Match every schema explicitly: a fall-through to
-    ``return []`` would silently persist nothing, and the endpoint's parser is all-or-nothing, so one
-    unpersistable ``type`` would reject the whole payload.
+    Every extracted family now has a native destination
+    (``context/specs/intake-write-back-completion.md``): labs down the procedure chain, allergies to
+    ``lists``, family history to ``history_data``, the chief concern to a new encounter, and
+    demographics to ``patient_data`` behind an accept gate. Medications belong to the
+    ``medication_list`` document type (JOS-91), not the intake form. Match every schema explicitly: a
+    fall-through to ``return []`` would silently persist nothing, and only facts that cannot be
+    persisted faithfully are dropped — an uncoded lab, a family-history entry with no relation —
+    because the endpoint's parser is all-or-nothing and one bad fact would reject the whole batch.
 
     Args:
         extracted: The full typed extraction for one document.
@@ -130,7 +211,18 @@ def _facts_for_document(extracted: ExtractedDocument) -> list[dict[str, Any]]:
     if isinstance(report, LabReport):
         return [fact for result in report.results if (fact := _lab_fact(result)) is not None]
     if isinstance(report, IntakeForm):
-        return [_allergy_fact(allergy) for allergy in report.allergies]
+        facts: list[dict[str, Any]] = [
+            *_demographic_facts(report.demographics),
+            *(_allergy_fact(allergy) for allergy in report.allergies),
+            *(
+                fact
+                for item in report.family_history
+                if (fact := _family_history_fact(item)) is not None
+            ),
+        ]
+        if report.chief_concern is not None:
+            facts.append(_chief_concern_fact(report.chief_concern))
+        return facts
     if isinstance(report, MedicationList):
         return [_medication_fact(medication) for medication in report.medications]
     return []

@@ -1901,13 +1901,26 @@
                     transportFailed = true;
                 }
             });
-            appendFactWriteback(written, skipped, failed, transportFailed);
+            // Suppress the "no new facts" card when nothing auto-wrote but a demographics review is
+            // about to render — the review card is the meaningful output in that case.
+            var hasPreview = outcomes.some(function (o) { return o.preview && o.preview.length; });
+            var reported = written.length || skipped.length || failed.length || transportFailed;
+            if (reported || !hasPreview) {
+                appendFactWriteback(written, skipped, failed, transportFailed);
+            }
             if (written.length) {
                 // persist-facts.php wrote straight to the DB, but the already-open chart tabs still
                 // show their pre-write server render — so a just-added med/allergy/lab is invisible
                 // until a manual refresh. Reload the Dashboard panel in place so it appears at once.
                 refreshChartDashboard();
             }
+            // Demographics never auto-write (they overwrite chart identity data with no marker); each
+            // document that returned a preview gets a per-field review card the clinician accepts from.
+            outcomes.forEach(function (o) {
+                if (o.group && o.preview && o.preview.length) {
+                    appendDemographicReview(o.group, o.preview);
+                }
+            });
         });
     }
 
@@ -1931,19 +1944,30 @@
         frame.contentWindow.location.reload();
     }
 
-    // POST one document's facts and normalize the reply. The endpoint answers 200 (all saved), 207
-    // (partial), or 500 (none) — all with a {written, skipped, failed} JSON body. A non-JSON reply
-    // (an expired session returns an HTML login page as 200) is a transport failure: we saved nothing
-    // and cannot say what. Fire-and-forget: this never rejects into the chat turn's promise chain.
+    // POST one document's facts (unaccepted). Keeps the group on the outcome so a demographics
+    // preview can be turned into a review card and re-posted with the clinician's accept.
     function postFactGroup(group) {
+        return postFacts(group.document_id, group.facts, false).then(function (outcome) {
+            outcome.group = group;
+            return outcome;
+        });
+    }
+
+    // POST + normalize. `accept` gates the demographics overwrite server-side: without it, gated
+    // fields come back as a `preview` (chart-vs-form diff) and nothing is written. The endpoint
+    // answers 200 (saved / preview), 207 (partial), or 500 (none) with a {written, skipped, failed,
+    // preview} JSON body. A non-JSON reply (an expired session returns an HTML login page) is a
+    // transport failure: we saved nothing and cannot say what. Fire-and-forget — never rejects.
+    function postFacts(documentId, facts, accept) {
         return fetch(config.persistFactsUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'same-origin', // session cookie authorizes the write; NEVER the SMART token
             body: JSON.stringify({
                 csrf_token: config.csrfToken,
-                document: group.document_id,
-                facts: group.facts // already in the endpoint's shape (see agent wire.py)
+                document: documentId,
+                accept: accept === true,
+                facts: facts // already in the endpoint's shape (see agent wire.py)
             })
         })
             .then(function (response) {
@@ -1958,6 +1982,7 @@
                         transportFailed: false,
                         written: Array.isArray(body.written) ? body.written : [],
                         skipped: Array.isArray(body.skipped) ? body.skipped : [],
+                        preview: Array.isArray(body.preview) ? body.preview : [],
                         // A non-ok reply with no `failed` list still means the whole group failed.
                         failed: Array.isArray(body.failed) ? body.failed : (response.ok ? [] : ['all'])
                     };
@@ -1969,7 +1994,7 @@
     }
 
     function emptyOutcome(transportFailed) {
-        return { transportFailed: transportFailed, written: [], skipped: [], failed: [] };
+        return { transportFailed: transportFailed, written: [], skipped: [], preview: [], failed: [] };
     }
 
     // ---- write-back confirmation card ------------------------------------
@@ -2012,14 +2037,21 @@
     }
 
     // Count fact identities by destination and render "28 lab results, 2 allergies and 1 medication".
-    // Identities are the endpoint's keys: `allergy:`/`medication:` prefixes, else a bare LOINC code.
+    // Identities are the endpoint's keys: prefixes `allergy:`/`medication:`/`family_history:`/
+    // `demographic:`, the exact key `chief_concern`, else a bare LOINC code.
     function describeFacts(identities) {
-        var counts = { lab: 0, allergy: 0, medication: 0 };
+        var counts = { lab: 0, allergy: 0, medication: 0, famhx: 0, chief: 0, demographic: 0 };
         identities.forEach(function (id) {
             if (id.indexOf('allergy:') === 0) {
                 counts.allergy++;
             } else if (id.indexOf('medication:') === 0) {
                 counts.medication++;
+            } else if (id.indexOf('family_history:') === 0) {
+                counts.famhx++;
+            } else if (id.indexOf('demographic:') === 0) {
+                counts.demographic++;
+            } else if (id === 'chief_concern') {
+                counts.chief++;
             } else {
                 counts.lab++;
             }
@@ -2034,13 +2066,123 @@
         if (counts.medication) {
             parts.push(counts.medication + ' ' + (counts.medication === 1 ? labels.factMed : labels.factMeds));
         }
+        if (counts.famhx) {
+            parts.push(counts.famhx + ' ' + (counts.famhx === 1 ? labels.factFamHx : labels.factFamHxs));
+        }
+        if (counts.chief) {
+            parts.push(counts.chief + ' ' + labels.factChiefConcern);
+        }
+        if (counts.demographic) {
+            parts.push(counts.demographic + ' ' + (counts.demographic === 1 ? labels.factDemographic : labels.factDemographics));
+        }
         return joinList(parts);
     }
 
     function friendlyFamily(family) {
-        return family === 'labs' ? labels.factLabs
-            : family === 'intake' ? (labels.factAllergies + ' / ' + labels.factMeds)
-            : family;
+        switch (family) {
+            case 'labs': return labels.factLabs;
+            case 'intake': return labels.factAllergies + ' / ' + labels.factMeds;
+            case 'family_history': return labels.factFamHxs;
+            case 'chief_concern': return labels.factChiefConcern;
+            case 'demographics': return labels.factDemographics;
+            default: return family;
+        }
+    }
+
+    // ---- demographics review card (accept gate) --------------------------
+    // Demographics overwrite clinician-entered identity data in place with no not-confirmed marker,
+    // so they never auto-write. This renders the endpoint's chart-vs-form diff as a per-field
+    // checklist; accepting posts only the chosen fields back with accept:true, which makes the
+    // clinician the author of the change.
+    function appendDemographicReview(group, preview) {
+        var card = document.createElement('div');
+        card.className = 'ai-copilot__writeback ai-copilot__demo-review';
+        card.setAttribute('role', 'group');
+
+        card.appendChild(writebackLine('note', labels.dxTitle));
+
+        var note = document.createElement('div');
+        note.className = 'ai-copilot__demo-note';
+        note.textContent = labels.dxNote;
+        card.appendChild(note);
+
+        var checkboxes = [];
+        preview.forEach(function (row) {
+            var wrap = document.createElement('label');
+            wrap.className = 'ai-copilot__demo-row';
+
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'ai-copilot__demo-check';
+            cb.value = row.field;
+            checkboxes.push(cb);
+            wrap.appendChild(cb);
+
+            var text = document.createElement('span');
+            text.className = 'ai-copilot__demo-text';
+
+            var name = document.createElement('strong');
+            name.textContent = fieldLabel(row.field);
+            text.appendChild(name);
+
+            var diff = document.createElement('span');
+            diff.className = 'ai-copilot__demo-diff';
+            diff.textContent = labels.dxChart + ': ' + (row.chart || labels.dxEmptyChart)
+                + '  →  ' + labels.dxForm + ': ' + row.extracted; // → = right arrow
+            text.appendChild(diff);
+
+            wrap.appendChild(text);
+            card.appendChild(wrap);
+        });
+
+        var actions = document.createElement('div');
+        actions.className = 'ai-copilot__demo-actions';
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-copilot__demo-accept';
+        button.textContent = labels.dxAccept;
+        actions.appendChild(button);
+        card.appendChild(actions);
+
+        button.addEventListener('click', function () {
+            var chosen = checkboxes
+                .filter(function (c) { return c.checked; })
+                .map(function (c) { return c.value; });
+            if (!chosen.length) {
+                button.textContent = labels.dxPick;
+                return;
+            }
+            var facts = group.facts.filter(function (f) {
+                return f.type === 'demographic' && chosen.indexOf(f.field) !== -1;
+            });
+            button.disabled = true;
+            postFacts(group.document_id, facts, true).then(function (o) {
+                card.classList.add('ai-copilot__demo-review--done');
+                if (o.written.length) {
+                    card.appendChild(writebackLine('saved', labels.dxAdded.replace('{facts}', describeFacts(o.written))));
+                    refreshChartDashboard();
+                } else if (o.failed.length || o.transportFailed) {
+                    card.appendChild(writebackLine('failed', labels.wbFailed.replace('{families}', labels.factDemographics)));
+                    button.disabled = false; // let them retry
+                } else {
+                    // Accepted, but the values matched the chart or could not be normalized safely.
+                    card.appendChild(writebackLine('skipped', labels.wbSkipped.replace('{facts}', describeFacts(o.skipped))));
+                }
+            });
+        });
+
+        appendNode(card);
+    }
+
+    function fieldLabel(field) {
+        switch (field) {
+            case 'full_name': return labels.dfFullName;
+            case 'date_of_birth': return labels.dfDateOfBirth;
+            case 'sex': return labels.dfSex;
+            case 'address': return labels.dfAddress;
+            case 'phone': return labels.dfPhone;
+            default: return field;
+        }
     }
 
     // "a", "a and b", "a, b and c".
@@ -2190,7 +2332,28 @@
             factAllergy: els.sidebar.dataset.labelFactAllergy || 'allergy',
             factAllergies: els.sidebar.dataset.labelFactAllergies || 'allergies',
             factMed: els.sidebar.dataset.labelFactMed || 'medication',
-            factMeds: els.sidebar.dataset.labelFactMeds || 'medications'
+            factMeds: els.sidebar.dataset.labelFactMeds || 'medications',
+            factFamHx: els.sidebar.dataset.labelFactFamHx || 'family history entry',
+            factFamHxs: els.sidebar.dataset.labelFactFamHxs || 'family history entries',
+            factChiefConcern: els.sidebar.dataset.labelFactChiefConcern || 'chief concern',
+            factDemographic: els.sidebar.dataset.labelFactDemographic || 'demographic',
+            factDemographics: els.sidebar.dataset.labelFactDemographics || 'demographics',
+            // Demographics review card (intake-write-back-completion). Demographics overwrite the
+            // chart in place with no marker, so they are never written until the clinician accepts.
+            dxTitle: els.sidebar.dataset.labelDxTitle || 'Demographics from the intake form',
+            dxNote: els.sidebar.dataset.labelDxNote
+                || 'These would overwrite the chart. Review each against the current value, then add only the ones you accept.',
+            dxChart: els.sidebar.dataset.labelDxChart || 'Chart',
+            dxForm: els.sidebar.dataset.labelDxForm || 'Form',
+            dxEmptyChart: els.sidebar.dataset.labelDxEmptyChart || '(blank)',
+            dxAccept: els.sidebar.dataset.labelDxAccept || 'Add selected to chart',
+            dxPick: els.sidebar.dataset.labelDxPick || 'Select at least one field to add.',
+            dxAdded: els.sidebar.dataset.labelDxAdded || 'Updated {facts} in the chart.',
+            dfFullName: els.sidebar.dataset.labelDfFullName || 'Full name',
+            dfDateOfBirth: els.sidebar.dataset.labelDfDateOfBirth || 'Date of birth',
+            dfSex: els.sidebar.dataset.labelDfSex || 'Sex',
+            dfAddress: els.sidebar.dataset.labelDfAddress || 'Address',
+            dfPhone: els.sidebar.dataset.labelDfPhone || 'Phone'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

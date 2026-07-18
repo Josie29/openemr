@@ -13,14 +13,20 @@
  * logged-in clinician's own ACL, not by a service credential. The agent never holds write authority.
  *
  * POST JSON — each fact carries a `type` discriminator:
- *   { "csrf_token": "...", "document": "<uuid>", "facts": [
+ *   { "csrf_token": "...", "document": "<uuid>", "accept": false, "facts": [
  *       {type:"lab", loinc, label, value, units, range, abnormal, page, bbox:{x,y,w,h}, confidence},
  *       {type:"allergy", substance, reaction, page, bbox?, confidence},
- *       {type:"medication", name, dose, frequency, page, bbox?, confidence}
+ *       {type:"medication", name, dose, frequency, page, bbox?, confidence},
+ *       {type:"family_history", condition, relation, page, bbox?, confidence},
+ *       {type:"chief_concern", text, page, bbox?, confidence},
+ *       {type:"demographic", field, value, page, bbox?, confidence}
  *   ] }
  *
- * Demographics, chief concern and family history are extracted by the agent but are NOT persistable
- * — no honest derived-marker exists for them — so the parser refuses those types outright.
+ * Every kind now has a native destination. Most write on arrival; demographics is the exception —
+ * it overwrites clinician-entered identity data with no marker, so it is gated: posted without
+ * `accept:true` it returns a chart-vs-document `preview` (per field) and writes nothing, and the
+ * sidebar re-posts the accepted fields with `accept:true`. See
+ * `context/specs/intake-write-back-completion.md`.
  *
  * @package   OpenEMR\Modules\AiCopilot
  * @link      https://www.open-emr.org
@@ -141,10 +147,29 @@ $contentHash = hash('sha256', $bytes);
 $documentId = (int) $document->get_id();
 $username = (string) ($session->get('authUser') ?? '');
 
+// Gated (overwrite) families write only when the clinician has accepted their review card.
+$accept = ($payload['accept'] ?? false) === true;
+
+// Session context for families that create native records under the clinician's identity (an
+// encounter's author/provider/facility). From the session, never the payload.
+$sessionInt = static function (string $key) use ($session): ?int {
+    $value = $session->get($key);
+    return is_numeric($value) ? (int) $value : null;
+};
+
 // Each fact family writes in its own transaction and is caught on its own, so a failure in one
 // does not discard another that already committed. The outcome reports exactly what landed.
-$outcome = (new DerivedFactPersister(new ExtractionSidecar()))
-    ->persist($pid, $documentId, $contentHash, $parsed, $username);
+$outcome = (new DerivedFactPersister(new ExtractionSidecar()))->persist(
+    $pid,
+    $documentId,
+    $contentHash,
+    $parsed,
+    $username,
+    $accept,
+    $sessionInt('authUserID'),
+    $sessionInt('authProvider'),
+    $sessionInt('facilityId'),
+);
 
 $response = [
     'written' => $outcome->written,
@@ -154,12 +179,16 @@ $response = [
 if ($outcome->procedureOrderId !== null) {
     $response['order_id'] = $outcome->procedureOrderId;
 }
+if ($outcome->hasPreview()) {
+    // The chart-vs-document diff for gated fields the clinician has not yet accepted.
+    $response['preview'] = $outcome->preview;
+}
 if ($outcome->hasFailures()) {
     $response['failed'] = $outcome->failed;
 }
 
 if (!$outcome->hasFailures()) {
-    // Everything requested reached the chart.
+    // Everything requested reached the chart (or is a preview awaiting accept).
     respond(200, $response);
 }
 if ($outcome->anythingLanded()) {

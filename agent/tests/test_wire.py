@@ -44,7 +44,7 @@ def _lab_document(*results: LabResult, document_id: str = "doc-lab") -> Extracte
 
 
 def _intake_document(document_id: str = "doc-intake") -> ExtractedDocument:
-    """An intake form exercising every section — including the three that must NOT be persisted."""
+    """An intake form exercising every section — all of which now persist to a native record."""
     return ExtractedDocument(
         document_id=document_id,
         doc_type=DocType.INTAKE_FORM,
@@ -57,7 +57,9 @@ def _intake_document(document_id: str = "doc-intake") -> ExtractedDocument:
                 Allergy(substance="Penicillin", reaction="hives", citation=_citation("Penicillin"))
             ],
             family_history=[
-                FamilyHistoryItem(condition="diabetes", citation=_citation("diabetes"))
+                FamilyHistoryItem(
+                    condition="diabetes", relation="mother", citation=_citation("diabetes")
+                )
             ],
         ),
     )
@@ -131,19 +133,59 @@ def test_a_document_whose_every_lab_was_dropped_is_omitted_entirely() -> None:
     assert groups == []
 
 
-def test_intake_form_emits_only_allergies() -> None:
-    """Demographics, chief concern and family history must never reach the payload.
+def test_intake_form_emits_every_persistable_family() -> None:
+    """Every intake family now has a native destination and must reach the payload.
 
-    They are extracted but have no honest write target, and the endpoint parser is all-or-nothing:
-    one unpersistable `type` rejects the whole POST. If this regresses, every intake form 422s.
-    Medications are no longer here — they come from a medication list — so an intake form persists
-    allergies alone.
+    Demographics (accept-gated server-side), chief concern, allergies, and family history each write
+    to a native OpenEMR record now (`context/specs/intake-write-back-completion.md`). Medications are
+    the exception — they belong to the medication_list document type (JOS-91). If any regresses to
+    being omitted, that fact silently never reaches the chart.
     """
     groups = derived_facts_for({"doc-intake": _intake_document()})
 
     assert len(groups) == 1
     types = sorted(fact["type"] for fact in groups[0]["facts"])
-    assert types == ["allergy"]
+    assert types == ["allergy", "chief_concern", "demographic", "family_history"]
+
+
+def test_family_history_without_a_relation_is_dropped() -> None:
+    """OpenEMR files family history under a per-relative column, so a relation is required.
+
+    An entry with no relation is dropped rather than posted, because the all-or-nothing parser would
+    otherwise reject the whole document's batch on that one fact.
+    """
+    document = ExtractedDocument(
+        document_id="doc-intake",
+        doc_type=DocType.INTAKE_FORM,
+        report=IntakeForm(
+            demographics=Demographics(),
+            allergies=[],
+            family_history=[
+                FamilyHistoryItem(condition="asthma", citation=_citation("asthma")),
+                FamilyHistoryItem(
+                    condition="diabetes", relation="mother", citation=_citation("diabetes")
+                ),
+            ],
+        ),
+    )
+
+    facts = derived_facts_for({"doc-intake": document})[0]["facts"]
+
+    assert [fact["type"] for fact in facts] == ["family_history"]
+    assert facts[0]["condition"] == "diabetes"
+    assert facts[0]["relation"] == "mother"
+
+
+def test_demographic_chief_concern_and_family_history_carry_their_fields() -> None:
+    groups = derived_facts_for({"doc-intake": _intake_document()})
+    facts = {fact["type"]: fact for fact in groups[0]["facts"]}
+
+    assert facts["demographic"]["field"] == "full_name"
+    assert facts["demographic"]["value"] == "Sergio"
+    assert facts["chief_concern"]["text"] == "cough"
+    assert facts["family_history"]["condition"] == "diabetes"
+    assert facts["family_history"]["relation"] == "mother"
+    assert facts["family_history"]["bbox"] == {"x": 72.0, "y": 144.0, "w": 96.0, "h": 12.0}
 
 
 def test_intake_allergy_carries_its_fields_and_box() -> None:

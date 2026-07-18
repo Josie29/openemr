@@ -13,11 +13,12 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\AiCopilot\Fact;
 
 /**
- * One payload's facts, sorted by destination.
+ * One payload's facts, sorted by family at the trust boundary.
  *
- * The two families take different write paths (a lab means four rows down the procedure chain; an
- * intake fact means a `lists` row), so they are separated once at the boundary rather than
- * re-inspected downstream.
+ * Each family takes a different write path (a lab means four rows down the procedure chain; an intake
+ * fact means a `lists` row; family history means a `history_data` row; chief concern a new encounter;
+ * a demographic an accept-gated `patient_data` overwrite), so they are separated once here rather than
+ * re-inspected downstream. The projectors read the family they own.
  */
 final readonly class ParsedFacts
 {
@@ -25,11 +26,17 @@ final readonly class ParsedFacts
      * @param list<DerivedLabResult> $labs
      * @param list<DerivedAllergy> $allergies
      * @param list<DerivedMedication> $medications
+     * @param list<DerivedFamilyHistory> $familyHistory
+     * @param list<DerivedChiefConcern> $chiefConcerns
+     * @param list<DerivedDemographic> $demographics
      */
     public function __construct(
         public array $labs,
         public array $allergies,
         public array $medications,
+        public array $familyHistory,
+        public array $chiefConcerns,
+        public array $demographics,
     ) {
     }
 

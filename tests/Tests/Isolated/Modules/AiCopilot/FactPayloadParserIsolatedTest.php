@@ -151,32 +151,40 @@ class FactPayloadParserIsolatedTest extends TestCase
     }
 
     /**
-     * The agent extracts kinds we deliberately never persist — demographics, chief concern and
-     * family history have no honest derived-marker in this fork. If one arrives it must be refused
-     * outright, not written somewhere approximate.
+     * Family history, chief concern and demographics all have native destinations now
+     * (`context/specs/intake-write-back-completion.md`), so the parser produces value objects for
+     * them rather than refusing them. Demographics is still special downstream (accept-gated), but
+     * that is the persister's concern, not the parser's.
      */
     #[Test]
-    #[DataProvider('unpersistableTypeProvider')]
-    public function refusesFactTypesThatHaveNoHonestWriteTarget(string $type): void
+    public function parsesTheIntakeFamiliesThatWriteToNativeRecords(): void
+    {
+        $parsed = $this->parser->parse([
+            ['type' => 'family_history', 'condition' => 'Type 2 diabetes', 'relation' => 'Mother'],
+            ['type' => 'chief_concern', 'text' => 'Lower back pain for several months'],
+            ['type' => 'demographic', 'field' => 'date_of_birth', 'value' => '03 / 14 / 1979'],
+        ]);
+
+        $this->assertCount(1, $parsed->familyHistory);
+        $this->assertSame('Type 2 diabetes', $parsed->familyHistory[0]->condition);
+        $this->assertSame('Mother', $parsed->familyHistory[0]->relation);
+        $this->assertCount(1, $parsed->chiefConcerns);
+        $this->assertSame('Lower back pain for several months', $parsed->chiefConcerns[0]->text);
+        $this->assertCount(1, $parsed->demographics);
+        $this->assertSame('03 / 14 / 1979', $parsed->demographics[0]->value);
+        $this->assertSame(
+            \OpenEMR\Modules\AiCopilot\Fact\DemographicField::DateOfBirth,
+            $parsed->demographics[0]->field,
+        );
+    }
+
+    /** A type we do not recognise at all must be refused, never defaulted to a lab. */
+    #[Test]
+    public function refusesAnUnknownFactType(): void
     {
         $this->expectException(\DomainException::class);
 
-        $this->parser->parse([['type' => $type, 'value' => 'anything']]);
-    }
-
-    /**
-     * @return array<string, array{string}>
-     *
-     * @codeCoverageIgnore Data providers run before coverage instrumentation starts.
-     */
-    public static function unpersistableTypeProvider(): array
-    {
-        return [
-            'demographic' => ['demographic'],
-            'chief concern' => ['chief_concern'],
-            'family history' => ['family_history'],
-            'nonsense' => ['not-a-type'],
-        ];
+        $this->parser->parse([['type' => 'not-a-type', 'value' => 'anything']]);
     }
 
     /**
@@ -257,6 +265,12 @@ class FactPayloadParserIsolatedTest extends TestCase
             // Truncating a clinical value silently would change what the chart says.
             'substance too long' => [['type' => 'allergy', 'substance' => str_repeat('a', 256)]],
             'medication name too long' => [['type' => 'medication', 'name' => str_repeat('a', 256)]],
+            // The three families added in intake-write-back-completion hold their own invariants too.
+            'family history without relation' => [['type' => 'family_history', 'condition' => 'diabetes']],
+            'family history without condition' => [['type' => 'family_history', 'relation' => 'Mother']],
+            'chief concern without text' => [['type' => 'chief_concern']],
+            'demographic with unknown field' => [['type' => 'demographic', 'field' => 'ssn', 'value' => 'x']],
+            'demographic without a value' => [['type' => 'demographic', 'field' => 'sex']],
         ];
     }
 

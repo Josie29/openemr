@@ -308,13 +308,14 @@ flowchart TB
      page + pixel bbox that no OpenEMR or FHIR field can express. **The limitation, stated plainly:**
      provenance is visible to the module and to SQL, but not through FHIR. A
      `GET /fhir/AllergyIntolerance` will not show that a fact came from a document.
-   - **Intake facts — allergies only**, written as native `lists` records, not as Observations.
-     Demographics, chief concern, and family history are extracted but deliberately **not
-     persisted** — no honest destination exists for them (§6). **Medications now come from a
-     `medication_list` document, not an intake form** (the two document types are mutually
-     exclusive in what they persist): a medication fact is written to `lists` / `lists_medication`
-     exactly as before — the persist endpoint routes on the fact's `type`, not on document type, so
-     **no PHP changed** (§6).
+   - **Intake facts — every family persists to a native record now.** Allergies write to `lists`;
+     family history appends to `history_data` (via `SocialHistoryService`); the chief concern becomes a
+     new encounter's `form_encounter.reason`; and demographics write to `patient_data` behind a
+     per-field clinician-accept gate (the one destructive overwrite). Family history and chief concern
+     have no verification column, so their not-confirmed marker is inline in the value. **Medications
+     come from a `medication_list` document, not the intake form** (JOS-91; the two document types are
+     mutually exclusive in what they persist) — written to `lists` / `lists_medication` on the fact's
+     `type` (§6; `context/specs/intake-write-back-completion.md`).
 6. **Citations + overlay.** Every derived fact emits a citation record and, for PDFs, the
    bounding-box coordinates for the click-to-source overlay (§3.3).
 
@@ -336,11 +337,13 @@ fact** — a fact without a citation is a schema violation, not a warning.
 These schemas are the **canonical contract** for the ingestion boundary and are contract-tested
 in CI (§7, §8). The Pydantic definitions and their validation tests are a separate PRD deliverable.
 
-**Extracted is not the same as persisted.** `IntakeForm`'s field list is what the extractor is asked
-to read off the page; it is **not** a list of write targets. Of the intake fields only **allergies**
-have an honest destination in OpenEMR — demographics, chief concern, and family history are returned
-to the physician in the answer but written nowhere (§6); medications now arrive on a
-`medication_list` and persist to `lists` / `lists_medication`. Note also that an **empty list is
+**Extracted is not the same as auto-persisted.** `IntakeForm`'s field list is what the extractor is
+asked to read off the page. Every family now has a native destination, but they are not written the
+same way: allergies, family history, and the chief concern write automatically (each carries a
+not-confirmed marker — a native column or an inline annotation), while demographics overwrite
+clinician-entered `patient_data` in place, so they are written only after a clinician accepts a
+per-field chart-vs-document diff (§6). Medications arrive on a `medication_list` document, not the
+intake form (JOS-91), and persist to `lists` / `lists_medication`. Note also that an **empty list is
 missing data, not a negative finding**: an empty `allergies` (or an empty `medications`) means "none
 read from this document", never an affirmative NKDA / "no medications", so an empty section persists
 nothing rather than fabricating a clinical assertion.
@@ -747,8 +750,8 @@ Requirements, "data authority must be explicit").
 | Artifact | Authoritative owner | Lineage (where it came from) | Access | Validation |
 |---|---|---|---|---|
 | **Extracted lab observations** | OpenEMR — the native `procedure_order → order_code → report → result` chain, which projects out as FHIR `Observation` (there is no Observation write route, §3.1) | Derived from a stored `DocumentReference` via Mistral OCR 4 extraction; linked by `procedure_result.document_id` (native FK to `documents.id`) + the sidecar — **not** a FHIR Provenance tag | Written via a session-authed module endpoint under the physician's ACL; read via the same patient-scoped SMART read as all FHIR data ([`ARCHITECTURE.md`](ARCHITECTURE.md) §5) | `LabReport` schema; abnormal-flag + reference-range sanity checks; written `result_status='preliminary'` |
-| **Intake facts** | OpenEMR — **allergies only** (`lists`, `type='allergy'`). Demographics, chief concern, and family history are **not persisted** — see below | Derived from a stored `intake_form` `DocumentReference` via extraction; linked through the sidecar (`lists` has no document FK) | Same session-authed write / patient-scoped read | `IntakeForm` schema; allergy `verification='unconfirmed'` |
-| **Medication-list facts** | OpenEMR — medications (`lists` / `lists_medication`) | Derived from a stored `medication_list` `DocumentReference` via extraction; linked through the sidecar. Persisted by the **same** endpoint and `IntakeFactWriter::writeMedication` as before — the endpoint routes on the fact's `type`, not document type, so **no PHP changed** | Same session-authed write / patient-scoped read | `MedicationList` schema; medication `request_intent='proposal'` |
+| **Intake facts** | OpenEMR — allergies (`lists`), family history (`history_data`), chief concern (`form_encounter.reason`, a new encounter), demographics (`patient_data`, accept-gated) | Derived from a stored `intake_form` `DocumentReference` via extraction; linked through the sidecar (these tables have no document FK) | Session-authed write / patient-scoped read; demographics require a per-field clinician accept | `IntakeForm` schema; allergy `verification='unconfirmed'`, family history + chief concern carry an inline derived marker |
+| **Medication-list facts** | OpenEMR — medications (`lists` / `lists_medication`) | Derived from a stored `medication_list` `DocumentReference` via extraction; linked through the sidecar. Persisted by the **same** endpoint and `IntakeFactWriter::writeMedication` — the endpoint routes on the fact's `type`, not document type | Same session-authed write / patient-scoped read | `MedicationList` schema; medication `request_intent='proposal'` |
 | **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{chunk_id, guideline, source, source_url, section, date, text, anchor_quote}` (anchor_quote optional) |
 | **Citation records** | The agent (emitted per claim) | Composed from an extraction or a retrieval result; for `lab_pdf`, the page + pixel bbox are **native output of Mistral OCR 4**, not a reconstructed rectangle | Rides with the answer payload | Must satisfy the full citation shape (§3.3); a `lab_pdf` citation whose field lacks a resolved bbox is refused, not shipped with a fabricated box |
 | **Extraction-result cache (sidecar)** | Derived cache — **rebuildable**, not a system of record | One extraction pass over a stored source document; keyed to `(document id, content hash)` (§3.4) | Same patient scope as the source document it derives from | Holds the validated facts + page/bbox citations; superseded when the source version (hash) changes |
@@ -799,12 +802,14 @@ markers differ in strength:
 | Labs (`lab_pdf`) | `procedure_result` | `result_status='preliminary'` | `Observation.status: preliminary` | Strong — verified round-trip |
 | Allergies (`intake_form`) | `lists` (`type='allergy'`) | `verification='unconfirmed'` | `AllergyIntolerance.verificationStatus: unconfirmed` | Strong |
 | Medications (`medication_list`) | `lists_medication` | `request_intent='proposal'` (+ `lists.comments`) | `MedicationRequest.intent: proposal` (+ `note`) | **Weaker — see below** |
-| Demographics / chief concern (`intake_form`) | — | none exists | — | **Not written** |
-| Family history (`intake_form`) | — | no target exists | — | **Not written** |
+| Family history (`intake_form`) | `history_data` (`history_<relative>`) | inline `[AI Co-Pilot]` marker in the value | not exposed over FHIR | Present but coarse — no verification column |
+| Chief concern (`intake_form`) | `form_encounter.reason` (new encounter) | inline `[AI Co-Pilot]` marker in the reason | `Encounter.reasonCode` | Present but coarse |
+| Demographics (`intake_form`) | `patient_data` | none — the clinician authors it via an accept gate | `Patient.*` | Human-gated (the accept is the authority) |
 
-The persist endpoint routes on each fact's `type` (`lab` / `allergy` / `medication`), never on the
-document type it arrived from, so moving medications from the intake form to a `medication_list`
-changed **which document produces the fact**, not one line of the write path (§3.1).
+The persist endpoint routes on each fact's `type` (`lab` / `allergy` / `medication` / `family_history` /
+`chief_concern` / `demographic`), never on the document type it arrived from, so moving medications from
+the intake form to a `medication_list` changed **which document produces the fact**, not the write path
+for the others (§3.1).
 
 - **The medication marker is weaker, and that is a documented limitation.** `lists.verification` is
   **never read for a medication** — only the allergy and condition services read that column, so
@@ -817,19 +822,28 @@ changed **which document produces the fact**, not one line of the write path (§
   consumer filtering on `status` sees an ordinary active medication. The signal is coded and
   spec-blessed, but weaker than the allergy path; a disclosure in `lists.comments` (surfacing as
   `MedicationRequest.note`) reinforces it.
-- **Demographics and chief concern are not persisted, deliberately.** No verification concept exists
-  anywhere in `PatientService` / `patient_data` / FHIR `Patient`. Writing extracted demographics
-  would be an **unflagged in-place overwrite of clinician-entered chart data**, with no way for any
-  reader to know it was machine-derived. There is no honest way to do it, so we do not.
-- **Family history is not persisted.** No FHIR resource, no service, no structured table — nine
-  fixed free-text columns (`history_data.relatives_*`). No target exists to write to.
+- **Family history and chief concern have native targets but no marker column.** Family history
+  appends to `history_data`'s per-relative columns (via `SocialHistoryService`); the chief concern
+  becomes a new encounter's `form_encounter.reason` (`EncounterService`, which also writes the `forms`
+  registry row that lists the visit). Neither table has a verification column, and
+  `SocialHistoryService` locks `created_by` to the session user, so the not-confirmed signal is an
+  **inline annotation in the value** (`[AI Co-Pilot - unconfirmed, from intake form]`) — visible where
+  a clinician reads it, plus the sidecar for provenance. Diagnosis codes (`dc_*`) are left empty: the
+  form prints none, and fabricating one would launder a guess into a coded assertion.
+- **Demographics are the one destructive write, so they are accept-gated.** `patient_data` has no
+  verification concept, and a write overwrites clinician-entered identity in place. Auto-writing would
+  be unflagged tampering; instead the sidebar shows a per-field chart-vs-document diff and the clinician
+  accepts each field, which makes *them* the author — the only honest way to do it. This doubles as the
+  UX for the DOB discrepancy the agent already surfaces.
 
-**Consequence for PRD Core Req 1 — partially met, and stated as such.** The requirement is to
-"persist derived facts as appropriate FHIR resources or OpenEMR records." Labs are persisted and
-round-trip verified; allergies and medications persist by the design above; demographics, chief
-concern, and family history are extracted and surfaced but **not persisted**, because no destination
-exists that could mark them as derived. Full evidence:
-[`derived-fact-write-back.md`](context/specs/derived-fact-write-back.md).
+**Consequence for PRD Core Req 1 — met.** The requirement is to "persist derived facts as appropriate
+FHIR resources or OpenEMR records." Labs round-trip as Observations; allergies and medications persist
+to `lists`; family history and the chief concern persist to `history_data` / a new encounter; and
+demographics persist to `patient_data` behind a clinician-accept gate. The markers differ in strength
+(native columns for labs/allergies/meds, inline annotations for family history/chief concern, and
+human authorship for demographics), and each is stated plainly above rather than glossed. Full
+evidence: [`derived-fact-write-back.md`](context/specs/derived-fact-write-back.md) and
+[`intake-write-back-completion.md`](context/specs/intake-write-back-completion.md).
 
 ---
 
@@ -1168,6 +1182,10 @@ decision — including the options not taken — is recorded in `/context/`:
 - [`context/specs/derived-fact-write-back.md`](context/specs/derived-fact-write-back.md) — the
   write-back design contract (§3.1, §3.4, §6): the surface-by-surface evidence that **no** write
   scope or FHIR/REST write route the agent could reach exists, why writes therefore go through a
-  session-authenticated module endpoint posted by the sidebar, the per-fact marker table and why the
-  markers are asymmetric, and why demographics and family history have no honest destination.
+  session-authenticated module endpoint posted by the sidebar, and the per-fact marker table and why
+  the markers are asymmetric.
+- [`context/specs/intake-write-back-completion.md`](context/specs/intake-write-back-completion.md) —
+  extends the above to the remaining intake families: the projector registry, family history →
+  `history_data`, chief concern → a new encounter, and demographics → `patient_data` behind a
+  per-field clinician-accept gate (the one destructive overwrite).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the Week-1 baseline every section here cross-references.

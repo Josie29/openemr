@@ -20,14 +20,21 @@ use OpenEMR\Core\ModulesClassLoader;
 use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\Modules\AiCopilot\Fact\AbnormalFlag;
 use OpenEMR\Modules\AiCopilot\Fact\BoundingBox;
+use OpenEMR\Modules\AiCopilot\Fact\ChiefConcernWriter;
+use OpenEMR\Modules\AiCopilot\Fact\DemographicField;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedAllergy;
+use OpenEMR\Modules\AiCopilot\Fact\DerivedChiefConcern;
+use OpenEMR\Modules\AiCopilot\Fact\DerivedDemographic;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedFactPersister;
+use OpenEMR\Modules\AiCopilot\Fact\DerivedFamilyHistory;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedLabResult;
 use OpenEMR\Modules\AiCopilot\Fact\DerivedMedication;
 use OpenEMR\Modules\AiCopilot\Fact\ExtractionSidecar;
+use OpenEMR\Modules\AiCopilot\Fact\FamilyHistoryWriter;
 use OpenEMR\Modules\AiCopilot\Fact\IntakeFactWriter;
 use OpenEMR\Modules\AiCopilot\Fact\LabResultWriter;
 use OpenEMR\Modules\AiCopilot\Fact\ParsedFacts;
+use OpenEMR\Modules\AiCopilot\Fact\ProjectionRequest;
 use OpenEMR\Services\FHIR\FhirAllergyIntoleranceService;
 use OpenEMR\Services\FHIR\FhirMedicationRequestService;
 use OpenEMR\Services\FHIR\Observation\FhirObservationLaboratoryService;
@@ -110,12 +117,14 @@ class DerivedFactWriteBackTest extends TestCase
         $this->intakeWriter = new IntakeFactWriter($this->sidecar);
         $this->removeChain();
         $this->removeIntakeFacts();
+        $this->removeNewFamilies();
     }
 
     protected function tearDown(): void
     {
         $this->removeChain();
         $this->removeIntakeFacts();
+        $this->removeNewFamilies();
         $this->fixtureManager->removePatientFixtures();
     }
 
@@ -413,7 +422,7 @@ class DerivedFactWriteBackTest extends TestCase
             []
         );
 
-        $parsed = new ParsedFacts($this->results(), [$this->allergy()], []);
+        $parsed = new ParsedFacts($this->results(), [$this->allergy()], [], [], [], []);
         $outcome = (new DerivedFactPersister($this->sidecar))
             ->persist($absentPid, self::DOCUMENT_ID, self::CONTENT_HASH, $parsed, 'admin');
 
@@ -429,6 +438,177 @@ class DerivedFactWriteBackTest extends TestCase
             [$absentPid, 'allergy']
         );
         $this->assertSame(0, $orphanAllergies, 'The failed intake write rolled back — no orphan allergy row.');
+    }
+
+    // --- family history, chief concern, demographics ---------------------------------------------
+
+    /**
+     * The target JOS-81 believed did not exist. Family history has no verification column, so the
+     * not-confirmed signal is an inline marker on the value the History → Family History tab renders.
+     */
+    #[Test]
+    public function derivedFamilyHistoryIsAppendedToTheRelativeColumnWithAMarker(): void
+    {
+        (new FamilyHistoryWriter($this->sidecar))->write(
+            $this->pid,
+            self::DOCUMENT_ID,
+            self::CONTENT_HASH,
+            [new DerivedFamilyHistory('Type 2 diabetes', 'mother', new BoundingBox(30.0, 100.0, 90.0, 10.0), 1, 0.9)],
+            'admin'
+        );
+
+        $mother = (string) QueryUtils::fetchSingleValue(
+            'SELECT history_mother FROM history_data WHERE pid = ? ORDER BY id DESC LIMIT 1',
+            'history_mother',
+            [$this->pid]
+        );
+
+        $this->assertStringContainsString('Type 2 diabetes', $mother);
+        $this->assertStringContainsString('Co-Pilot', $mother, 'The derived marker must be visible in the value.');
+    }
+
+    /**
+     * `history_data` is append-only, so idempotency is not free: a re-run must not append the same
+     * condition again, and must not spawn a new row.
+     */
+    #[Test]
+    public function reExtractingFamilyHistoryDoesNotDuplicateOrAddARow(): void
+    {
+        $item = new DerivedFamilyHistory('Type 2 diabetes', 'mother', null, 1, 0.9);
+        $writer = new FamilyHistoryWriter($this->sidecar);
+
+        $first = $writer->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [$item], 'admin');
+        $rowsAfterFirst = $this->countHistoryRows();
+        $second = $writer->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [$item], 'admin');
+
+        $this->assertNotSame([], $first->written);
+        $this->assertSame([], $second->written, 'A repeat family-history write must persist nothing.');
+        $this->assertSame($rowsAfterFirst, $this->countHistoryRows(), 'No new history_data row on a repeat.');
+    }
+
+    /** A relation we cannot place on a specific relative column is skipped, not mis-filed. */
+    #[Test]
+    public function familyHistoryWithAnUnmappableRelationIsSkipped(): void
+    {
+        $outcome = (new FamilyHistoryWriter($this->sidecar))->write(
+            $this->pid,
+            self::DOCUMENT_ID,
+            self::CONTENT_HASH,
+            [new DerivedFamilyHistory('cancer', 'maternal grandmother', null, 1, null)],
+            'admin'
+        );
+
+        $this->assertSame([], $outcome->written);
+        $this->assertNotSame([], $outcome->skipped);
+    }
+
+    /**
+     * The chief concern is the reason for the visit, so it lands as a new encounter's reason, marked
+     * as Co-Pilot-derived. EncounterService writes the `forms` registry row that makes it list.
+     */
+    #[Test]
+    public function derivedChiefConcernCreatesOneEncounterWhoseReasonCarriesTheText(): void
+    {
+        (new ChiefConcernWriter($this->sidecar))->write(
+            $this->pid,
+            self::DOCUMENT_ID,
+            self::CONTENT_HASH,
+            [new DerivedChiefConcern('Lower back pain for several months', new BoundingBox(30.0, 60.0, 200.0, 12.0), 1, 0.9)],
+            $this->request(),
+            'admin'
+        );
+
+        $reasons = QueryUtils::fetchRecords('SELECT reason FROM form_encounter WHERE pid = ?', [$this->pid]);
+
+        $this->assertCount(1, $reasons);
+        $this->assertStringContainsString('Lower back pain', (string) $reasons[0]['reason']);
+        $this->assertStringContainsString('Co-Pilot', (string) $reasons[0]['reason']);
+    }
+
+    /** Re-running must refresh the one intake-derived encounter, not spawn a second visit. */
+    #[Test]
+    public function reExtractingAChiefConcernUpdatesTheEncounterRatherThanCreatingASecond(): void
+    {
+        $writer = new ChiefConcernWriter($this->sidecar);
+        $concern = new DerivedChiefConcern('Cough', new BoundingBox(30.0, 60.0, 200.0, 12.0), 1, null);
+
+        $writer->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [$concern], $this->request(), 'admin');
+        $writer->write($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, [$concern], $this->request(), 'admin');
+
+        $this->assertSame(
+            1,
+            (int) QueryUtils::fetchSingleValue('SELECT COUNT(*) AS c FROM form_encounter WHERE pid = ?', 'c', [$this->pid]),
+            'A re-run must not create a second visit.'
+        );
+    }
+
+    /**
+     * Demographics overwrite clinician-entered identity data with no marker — the one destructive
+     * write. It must never happen without an explicit accept; instead a chart-vs-document preview is
+     * returned for review.
+     */
+    #[Test]
+    public function demographicsAreNeverWrittenWithoutAnAcceptButAPreviewIsReturned(): void
+    {
+        $before = $this->chartDob();
+        $parsed = new ParsedFacts([], [], [], [], [], [
+            new DerivedDemographic(DemographicField::DateOfBirth, '03 / 14 / 1979', null, 1, 0.9),
+        ]);
+
+        $outcome = (new DerivedFactPersister($this->sidecar))
+            ->persist($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, $parsed, 'admin', false);
+
+        $this->assertTrue($outcome->hasPreview(), 'A gated demographic returns a preview.');
+        $this->assertSame('date_of_birth', $outcome->preview[0]['field']);
+        $this->assertSame([], $outcome->written);
+        $this->assertSame($before, $this->chartDob(), 'Nothing may be written without an accept.');
+    }
+
+    /** With an accept, the value is normalized (verbatim date → Y-m-d) and written. */
+    #[Test]
+    public function acceptedDemographicsOverwriteTheChartValue(): void
+    {
+        $parsed = new ParsedFacts([], [], [], [], [], [
+            new DerivedDemographic(DemographicField::DateOfBirth, '03 / 14 / 1979', null, 1, 0.9),
+        ]);
+
+        $outcome = (new DerivedFactPersister($this->sidecar))
+            ->persist($this->pid, self::DOCUMENT_ID, self::CONTENT_HASH, $parsed, 'admin', true);
+
+        $this->assertNotSame([], $outcome->written);
+        $this->assertSame('1979-03-14', $this->chartDob(), 'An accepted DOB is normalized and written.');
+    }
+
+    private function request(): ProjectionRequest
+    {
+        return new ProjectionRequest(
+            pid: $this->pid,
+            documentId: self::DOCUMENT_ID,
+            contentHash: self::CONTENT_HASH,
+            username: 'admin',
+            accept: false,
+            sidecar: $this->sidecar,
+            authUserId: 1,
+            authProviderId: 1,
+            facilityId: null,
+        );
+    }
+
+    private function countHistoryRows(): int
+    {
+        return (int) QueryUtils::fetchSingleValue('SELECT COUNT(*) AS c FROM history_data WHERE pid = ?', 'c', [$this->pid]);
+    }
+
+    private function chartDob(): string
+    {
+        return (string) QueryUtils::fetchSingleValue('SELECT DOB FROM patient_data WHERE pid = ?', 'DOB', [$this->pid]);
+    }
+
+    private function removeNewFamilies(): void
+    {
+        QueryUtils::sqlStatementThrowException('DELETE FROM history_data WHERE pid = ?', [$this->pid]);
+        QueryUtils::sqlStatementThrowException('DELETE FROM forms WHERE pid = ? AND formdir = ?', [$this->pid, 'newpatient']);
+        QueryUtils::sqlStatementThrowException('DELETE FROM form_encounter WHERE pid = ?', [$this->pid]);
     }
 
     private function allergy(): DerivedAllergy

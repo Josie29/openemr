@@ -39,6 +39,9 @@ final readonly class FactPayloadParser
         $labs = [];
         $allergies = [];
         $medications = [];
+        $familyHistory = [];
+        $chiefConcerns = [];
+        $demographics = [];
 
         foreach ($facts as $index => $fact) {
             if (!is_array($fact)) {
@@ -49,9 +52,9 @@ final readonly class FactPayloadParser
             if (!is_string($rawType) || $rawType === '') {
                 throw new \DomainException("Fact #$index is missing 'type'.");
             }
-            // No default. A fact whose type we do not recognise must not be quietly treated as a
-            // lab, and the agent extracts kinds we deliberately never persist (demographics, chief
-            // concern, family history) — those must be refused here, not written somewhere wrong.
+            // No default, and no fall-through: a fact whose type we do not recognise must not be
+            // quietly treated as a lab. Every kind the agent extracts now has a case — the match is
+            // exhaustive over FactType, and PHPStan verifies it stays that way.
             $type = FactType::tryFrom($rawType);
             if ($type === null) {
                 throw new \DomainException("Fact #$index has an unpersistable type '$rawType'.");
@@ -61,10 +64,13 @@ final readonly class FactPayloadParser
                 FactType::Lab => $labs[] = $this->parseLabResult($fact, $index),
                 FactType::Allergy => $allergies[] = $this->parseAllergy($fact, $index),
                 FactType::Medication => $medications[] = $this->parseMedication($fact, $index),
+                FactType::FamilyHistory => $familyHistory[] = $this->parseFamilyHistory($fact, $index),
+                FactType::ChiefConcern => $chiefConcerns[] = $this->parseChiefConcern($fact, $index),
+                FactType::Demographic => $demographics[] = $this->parseDemographic($fact, $index),
             };
         }
 
-        return new ParsedFacts($labs, $allergies, $medications);
+        return new ParsedFacts($labs, $allergies, $medications, $familyHistory, $chiefConcerns, $demographics);
     }
 
     /**
@@ -116,6 +122,59 @@ final readonly class FactPayloadParser
             name: $this->stringField($fact, 'name', $index),
             dose: $this->nullableStringField($fact, 'dose', $index),
             frequency: $this->nullableStringField($fact, 'frequency', $index),
+            box: $this->parseOptionalBox($fact, $index),
+            page: $this->parsePage($fact, $index),
+            confidence: $this->parseConfidence($fact, $index),
+        );
+    }
+
+    /**
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
+    private function parseFamilyHistory(array $fact, int $index): DerivedFamilyHistory
+    {
+        return new DerivedFamilyHistory(
+            condition: $this->stringField($fact, 'condition', $index),
+            relation: $this->stringField($fact, 'relation', $index),
+            box: $this->parseOptionalBox($fact, $index),
+            page: $this->parsePage($fact, $index),
+            confidence: $this->parseConfidence($fact, $index),
+        );
+    }
+
+    /**
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
+    private function parseChiefConcern(array $fact, int $index): DerivedChiefConcern
+    {
+        return new DerivedChiefConcern(
+            text: $this->stringField($fact, 'text', $index),
+            box: $this->parseOptionalBox($fact, $index),
+            page: $this->parsePage($fact, $index),
+            confidence: $this->parseConfidence($fact, $index),
+        );
+    }
+
+    /**
+     * @param array<mixed> $fact
+     *
+     * @throws \DomainException
+     */
+    private function parseDemographic(array $fact, int $index): DerivedDemographic
+    {
+        $rawField = $this->stringField($fact, 'field', $index);
+        $field = DemographicField::tryFrom($rawField);
+        if ($field === null) {
+            throw new \DomainException("Fact #$index has an unrecognised demographic field '$rawField'.");
+        }
+
+        return new DerivedDemographic(
+            field: $field,
+            value: $this->stringField($fact, 'value', $index),
             box: $this->parseOptionalBox($fact, $index),
             page: $this->parsePage($fact, $index),
             confidence: $this->parseConfidence($fact, $index),

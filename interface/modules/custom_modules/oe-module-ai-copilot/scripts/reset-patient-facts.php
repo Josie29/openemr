@@ -23,6 +23,15 @@
  *                  (LabResultWriter::DERIVED_STATUS; baseline labs are 'final'). The whole
  *                  order -> order_code -> report -> result chain is created per source document
  *                  and is exclusively derived, so the emptied order/report/code rows are removed too.
+ *   - family hist. history_data rows whose relative column carries the inline '[AI Co-Pilot' marker
+ *                  (FamilyHistoryWriter has no verification column, so the marker is in the value).
+ *                  history_data is append-only, so deleting the marked row reverts to the prior
+ *                  (baseline) version.
+ *   - chief conc.  form_encounter rows whose reason carries the inline '[AI Co-Pilot' marker, plus
+ *                  the paired `forms` registry row that lists the visit.
+ *   - demographics IRREVERSIBLE. An accepted demographic is an in-place patient_data overwrite with
+ *                  no prior version and no marker, so it CANNOT be undone — only its provenance
+ *                  sidecar row is cleared. Reported, never reverted.
  * The citation-geometry sidecar (ai_copilot_document_facts) is a rebuildable cache with no
  * clinical value once the rows it points at are gone, so its rows for this patient are cleared last.
  *
@@ -58,6 +67,12 @@ $fileroot = dirname(__DIR__, 5);
 require $fileroot . '/interface/globals.php';
 
 use OpenEMR\Common\Database\QueryUtils;
+
+// The prefix the writers stamp inline onto values that have no native "derived" column: a
+// history_data relative column (FamilyHistoryWriter) and form_encounter.reason (ChiefConcernWriter).
+// The reset scopes family history and chief concern by this marker, not by the rebuildable sidecar.
+const COPILOT_MARKER_LIKE = '[AI Co-Pilot%';
+const COPILOT_MARKER_ANYWHERE = '%[AI Co-Pilot%';
 
 /**
  * Parse and validate the CLI arguments.
@@ -136,6 +151,37 @@ $allergyCount = (int) QueryUtils::fetchSingleValue(
     [$pid],
 );
 $labResultIds = derivedLabResultIds($pid);
+
+// Chief-concern encounters: form_encounter rows whose reason carries the inline marker. Capture the
+// row id (to remove the encounter) and the encounter number (to remove its `forms` registry row).
+$encounters = QueryUtils::fetchRecords(
+    'SELECT id, encounter FROM form_encounter WHERE pid = ? AND reason LIKE ?',
+    [$pid, COPILOT_MARKER_LIKE],
+);
+$encounterRowIds = array_map(static fn(array $r): int => (int) $r['id'], $encounters);
+$encounterNumbers = array_map(static fn(array $r): int => (int) $r['encounter'], $encounters);
+
+// Family history: history_data is append-only, so a co-pilot write is its own versioned row (the
+// prior version, i.e. baseline, remains). Deleting the marked rows reverts to baseline. Scoped by the
+// inline marker in any relative column.
+$historyRowIds = array_map(
+    static fn(array $r): int => (int) $r['id'],
+    QueryUtils::fetchRecords(
+        'SELECT id FROM history_data WHERE pid = ? AND ('
+        . 'history_mother LIKE ? OR history_father LIKE ? OR history_siblings LIKE ?'
+        . ' OR history_spouse LIKE ? OR history_offspring LIKE ?)',
+        array_merge([$pid], array_fill(0, 5, COPILOT_MARKER_ANYWHERE)),
+    ),
+);
+
+// Demographics are an in-place patient_data overwrite with no prior version — they CANNOT be reverted.
+// Reported for transparency; only the provenance sidecar row is cleared (below), never the chart value.
+$demographicCount = (int) QueryUtils::fetchSingleValue(
+    "SELECT COUNT(*) AS n FROM ai_copilot_document_facts WHERE pid = ? AND fact_table = 'patient_data'",
+    'n',
+    [$pid],
+);
+
 $sidecarCount = (int) QueryUtils::fetchSingleValue(
     'SELECT COUNT(*) AS n FROM ai_copilot_document_facts WHERE pid = ?',
     'n',
@@ -146,6 +192,9 @@ echo "Derived facts for patient {$pid}:" . PHP_EOL;
 echo "  medications (proposal):     {$medCount}" . PHP_EOL;
 echo "  allergies (unconfirmed):    {$allergyCount}" . PHP_EOL;
 echo '  lab results (preliminary):  ' . count($labResultIds) . PHP_EOL;
+echo '  family history (marked):    ' . count($historyRowIds) . PHP_EOL;
+echo '  chief-concern visits:       ' . count($encounterRowIds) . PHP_EOL;
+echo "  demographics (IRREVERSIBLE): {$demographicCount} (chart value stays; provenance cleared)" . PHP_EOL;
 echo "  sidecar geometry rows:      {$sidecarCount}" . PHP_EOL;
 
 if ($dryRun) {
@@ -153,7 +202,10 @@ if ($dryRun) {
     exit(0);
 }
 
-if ($medCount === 0 && $allergyCount === 0 && $labResultIds === [] && $sidecarCount === 0) {
+if (
+    $medCount === 0 && $allergyCount === 0 && $labResultIds === []
+    && $historyRowIds === [] && $encounterRowIds === [] && $sidecarCount === 0
+) {
     echo PHP_EOL . 'Already at baseline — nothing to delete.' . PHP_EOL;
     exit(0);
 }
@@ -234,7 +286,32 @@ try {
         }
     }
 
-    // Sidecar geometry cache last: it only points at rows we just deleted.
+    // Family history: delete the marked (co-pilot-authored) history_data rows by id. Append-only
+    // versioning means the prior baseline row remains, so this reverts family history cleanly.
+    if ($historyRowIds !== []) {
+        $hin = inPlaceholders($historyRowIds);
+        QueryUtils::sqlStatementThrowException(
+            "DELETE FROM history_data WHERE id IN ({$hin})",
+            $historyRowIds,
+        );
+    }
+
+    // Chief concern: remove the intake-derived encounter and its `forms` registry row (the row that
+    // makes it list in "Select Encounter"). Delete the forms row by its form_id (= form_encounter.id).
+    if ($encounterRowIds !== []) {
+        $ein = inPlaceholders($encounterRowIds);
+        QueryUtils::sqlStatementThrowException(
+            "DELETE FROM forms WHERE formdir = 'newpatient' AND form_id IN ({$ein})",
+            $encounterRowIds,
+        );
+        QueryUtils::sqlStatementThrowException(
+            "DELETE FROM form_encounter WHERE id IN ({$ein})",
+            $encounterRowIds,
+        );
+    }
+
+    // Sidecar geometry cache last: it only points at rows we just deleted (including the demographic
+    // provenance rows — the chart demographic values themselves are an irreversible overwrite).
     QueryUtils::sqlStatementThrowException(
         'DELETE FROM ai_copilot_document_facts WHERE pid = ?',
         [$pid],

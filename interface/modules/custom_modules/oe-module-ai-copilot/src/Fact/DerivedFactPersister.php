@@ -15,28 +15,34 @@ namespace OpenEMR\Modules\AiCopilot\Fact;
 use OpenEMR\Common\Logging\SystemLogger;
 
 /**
- * Persists one document's derived facts across both fact families, family by family.
+ * Persists one document's derived facts, family by family, through the projector registry.
  *
- * Each family (labs down the procedure chain, intake facts to `lists`) writes in its own
- * transaction and is caught on its own. That isolation is the point: a failure persisting
- * medications must not discard labs that already committed, and the caller must be able to report
- * exactly what reached the chart rather than a blanket failure that hides a partial success.
+ * The registry (not this class) knows which families exist and how each writes — adding a fact kind
+ * is registering a projector, not editing a chain here. This class owns only the cross-family
+ * concerns: per-family isolation (each projector's write is caught on its own, so one family's
+ * failure never discards another's committed rows), the accept gate (a gated family with no accept
+ * yields a preview instead of writing), and aggregating every family's outcome into one.
  */
 final readonly class DerivedFactPersister
 {
-    public function __construct(private ExtractionSidecar $sidecar)
-    {
+    public function __construct(
+        private ExtractionSidecar $sidecar,
+        private ProjectorRegistry $registry = new ProjectorRegistry(),
+    ) {
     }
 
     /**
-     * Write every persistable fact, isolating each family's failure from the other.
+     * Write every persistable fact, isolating each family's failure from the others.
      *
      * Never throws for a write failure — a failed family is recorded in the outcome's `failed` list
-     * and logged, so a partial success is reported truthfully. (A programming error inside a writer
-     * would still surface as a `\Throwable`, but the writers convert write failures to
-     * `\RuntimeException`, which is caught here.)
+     * and logged, so a partial success is reported truthfully. A gated family (demographics) with
+     * `$accept = false` contributes a review diff to the outcome's `preview` and writes nothing.
      *
      * @param string $username The session user authorizing the write, for provenance.
+     * @param bool $accept Whether the clinician accepted gated (overwrite) facts this request.
+     * @param int|null $authUserId Session author id, needed by families that create encounters.
+     * @param int|null $authProviderId Session provider group, needed by families that create encounters.
+     * @param int|null $facilityId Session facility, or null to let a family resolve a default.
      */
     public function persist(
         int $pid,
@@ -44,60 +50,66 @@ final readonly class DerivedFactPersister
         string $contentHash,
         ParsedFacts $parsed,
         string $username,
+        bool $accept = false,
+        ?int $authUserId = null,
+        ?int $authProviderId = null,
+        ?int $facilityId = null,
     ): PersistOutcome {
+        $request = new ProjectionRequest(
+            pid: $pid,
+            documentId: $documentId,
+            contentHash: $contentHash,
+            username: $username,
+            accept: $accept,
+            sidecar: $this->sidecar,
+            authUserId: $authUserId,
+            authProviderId: $authProviderId,
+            facilityId: $facilityId,
+        );
+
         $written = [];
         $skipped = [];
         $failed = [];
+        $preview = [];
         $orderId = null;
 
-        if ($parsed->hasLabs()) {
+        foreach ($this->registry->all() as $projector) {
+            if (!$projector->hasWork($parsed)) {
+                continue;
+            }
+
+            // A destructive, unmarked write (demographics) is never made without an explicit accept —
+            // instead the projector yields the chart-vs-document diff the sidebar reviews.
+            if ($projector->mode() === ProjectionMode::AcceptGated && !$accept) {
+                if ($projector instanceof GatedProjector) {
+                    $preview = [...$preview, ...$projector->preview($parsed, $request)];
+                }
+                continue;
+            }
+
             try {
-                $outcome = (new LabResultWriter($this->sidecar))
-                    ->write($pid, $documentId, $contentHash, $parsed->labs, $username);
+                $outcome = $projector->write($parsed, $request);
                 $written = [...$written, ...$outcome->written];
                 $skipped = [...$skipped, ...$outcome->skipped];
-                $orderId = $outcome->procedureOrderId;
+                if ($outcome->procedureOrderId !== null) {
+                    $orderId = $outcome->procedureOrderId;
+                }
             } catch (\Throwable $e) {
-                $failed[] = 'labs';
-                $this->logFailure('lab', $pid, $documentId, ['lab_count' => count($parsed->labs)], $e);
+                $failed[] = $projector->familyName();
+                $this->logFailure($projector->familyName(), $pid, $documentId, $e);
             }
         }
 
-        if ($parsed->hasIntakeFacts()) {
-            try {
-                $outcome = (new IntakeFactWriter($this->sidecar))->write(
-                    $pid,
-                    $documentId,
-                    $contentHash,
-                    $parsed->allergies,
-                    $parsed->medications,
-                    $username,
-                );
-                $written = [...$written, ...$outcome->written];
-                $skipped = [...$skipped, ...$outcome->skipped];
-            } catch (\Throwable $e) {
-                $failed[] = 'intake';
-                $this->logFailure('intake', $pid, $documentId, [
-                    'allergy_count' => count($parsed->allergies),
-                    'medication_count' => count($parsed->medications),
-                ], $e);
-            }
-        }
-
-        return new PersistOutcome($written, $skipped, $orderId, $failed);
+        return new PersistOutcome($written, $skipped, $orderId, $failed, $preview);
     }
 
-    /**
-     * @param array<string, int> $counts Family-specific fact counts for the log context.
-     */
-    private function logFailure(string $family, int $pid, int $documentId, array $counts, \Throwable $e): void
+    private function logFailure(string $family, int $pid, int $documentId, \Throwable $e): void
     {
         // Log the real exception (it may carry SQL or paths); the endpoint returns only a generic
         // message. Context is enough to find the failed write without the extracted values.
         (new SystemLogger())->error("Co-Pilot {$family} write-back failed", [
             'pid' => $pid,
             'document_id' => $documentId,
-            ...$counts,
             'exception' => $e,
         ]);
     }

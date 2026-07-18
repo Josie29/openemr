@@ -80,6 +80,25 @@ final readonly class ExtractionSidecar
     }
 
     /**
+     * The primary key already recorded for a fact, or null if none.
+     *
+     * Unlike {@see citationsFor()} this does not skip rows whose box is empty — it answers "did we
+     * already write this fact for this document version?", which a boxless fact still did. Used by the
+     * chief-concern projector to update its one intake-derived encounter instead of creating another.
+     */
+    public function factIdFor(int $documentId, string $contentHash, string $factTable, string $field): ?int
+    {
+        $id = QueryUtils::fetchSingleValue(
+            'SELECT fact_id FROM ' . self::TABLE
+            . ' WHERE document_id = ? AND content_hash = ? AND fact_table = ? AND field = ?',
+            'fact_id',
+            [$documentId, $contentHash, $factTable, $field],
+        );
+
+        return $id === null ? null : (int) $id;
+    }
+
+    /**
      * Every citation recorded for a document version, keyed by field.
      *
      * @return array<string, array{page: int, box: BoundingBox, fact_table: string, fact_id: int}>

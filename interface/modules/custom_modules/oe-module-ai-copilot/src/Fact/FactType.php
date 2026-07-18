@@ -15,13 +15,19 @@ namespace OpenEMR\Modules\AiCopilot\Fact;
 /**
  * The kinds of derived fact this module can persist.
  *
- * Backed because the value arrives over the wire from the sidebar. Deliberately short: demographics,
- * chief concern, and family history are extracted by the agent but have no honest write target in
- * this fork, so they are not persistable and get no case here.
+ * Backed because the value arrives over the wire from the sidebar. Every kind the agent extracts now
+ * has a native OpenEMR destination and a {@see FactProjector} that writes it — labs and the two
+ * intake families were always here; family history, chief concern, and demographics were added once
+ * their native targets were found (`context/specs/intake-write-back-completion.md`). Demographics
+ * still differs: it is the one destructive overwrite, so its projector is accept-gated, not that it
+ * is unpersistable.
  */
 enum FactType: string
 {
     case Lab = 'lab';
     case Allergy = 'allergy';
     case Medication = 'medication';
+    case FamilyHistory = 'family_history';
+    case ChiefConcern = 'chief_concern';
+    case Demographic = 'demographic';
 }

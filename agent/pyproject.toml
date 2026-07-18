@@ -27,6 +27,11 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
     "mypy>=1.13",
+    # Declared for test_eval_gate.py, which reads .github/workflows/evals.yml to hold the workflow
+    # and the gate's code-side invariants in sync. Otherwise present only transitively (via
+    # huggingface_hub), which would make the hard-gate guard break on an unrelated dep bump.
+    "pyyaml>=6",
+    "types-PyYAML>=6",
 ]
 # Document extraction (JOS-54 intake-extractor OCR). OPTIONAL extra: mistralai 2.x pins
 # opentelemetry-semantic-conventions<0.61, which conflicts with langfuse's 0.63b1 — keeping it out

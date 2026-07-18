@@ -137,9 +137,9 @@ def test_intake_form_emits_every_persistable_family() -> None:
     """Every intake family now has a native destination and must reach the payload.
 
     Demographics (accept-gated server-side), chief concern, allergies, and family history each write
-    to a native OpenEMR record now (`context/specs/intake-write-back-completion.md`). Medications are
-    the exception — they belong to the medication_list document type (JOS-91). If any regresses to
-    being omitted, that fact silently never reaches the chart.
+    to a native OpenEMR record now (`context/specs/intake-write-back-completion.md`). Medications
+    are the exception — they belong to the medication_list document type (JOS-91). If any regresses
+    to being omitted, that fact silently never reaches the chart.
     """
     groups = derived_facts_for({"doc-intake": _intake_document()})
 

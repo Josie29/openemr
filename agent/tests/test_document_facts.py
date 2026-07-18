@@ -132,7 +132,10 @@ def test_document_facts_and_fetched_records_ground_side_by_side_under_a_shared_t
     # two document types are mutually exclusive in what they extract.
     by_kind = {
         handle.kind: handle
-        for handle in (*documents.record(_intake_document()), *documents.record(_medication_list_document()))
+        for handle in (
+            *documents.record(_intake_document()),
+            *documents.record(_medication_list_document())
+        )
     }
     resolver = CompositeResolver((fetched, documents))
 
@@ -153,7 +156,8 @@ def test_document_facts_and_fetched_records_ground_side_by_side_under_a_shared_t
     document_cases = (
         (FactKind.DEMOGRAPHIC, "Patient", "Sergio Angulo", "doc-intake", DocType.INTAKE_FORM),
         (FactKind.ALLERGY, "AllergyIntolerance", "Penicillin", "doc-intake", DocType.INTAKE_FORM),
-        (FactKind.MEDICATION, "MedicationRequest", "Metformin", "doc-meds", DocType.MEDICATION_LIST),
+        (FactKind.MEDICATION, "MedicationRequest", "Metformin", "doc-meds",
+         DocType.MEDICATION_LIST),
     )
     for kind, resource_type, expected, document_id, doc_type in document_cases:
         handle = by_kind[kind]

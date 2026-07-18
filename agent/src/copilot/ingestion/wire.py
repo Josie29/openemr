@@ -108,9 +108,10 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
 def _family_history_fact(item: FamilyHistoryItem) -> dict[str, Any] | None:
     """Project one family-history entry onto the wire, or None if it cannot be placed.
 
-    OpenEMR files family history under a per-relative column (``history_mother`` etc.), so a relation
-    is required to persist it. An entry with no relation is dropped here rather than sent, because the
-    persist parser is all-or-nothing: one unpersistable fact would reject the whole document's batch.
+    OpenEMR files family history under a per-relative column (``history_mother`` etc.), so a
+    relation is required to persist it. An entry with no relation is dropped here rather than sent,
+    because the persist parser is all-or-nothing: one unpersistable fact would reject the whole
+    document's batch.
 
     Args:
         item: One extracted family-history entry.
@@ -196,8 +197,8 @@ def _facts_for_document(extracted: ExtractedDocument) -> list[dict[str, Any]]:
     (``context/specs/intake-write-back-completion.md``): labs down the procedure chain, allergies to
     ``lists``, family history to ``history_data``, the chief concern to a new encounter, and
     demographics to ``patient_data`` behind an accept gate. Medications belong to the
-    ``medication_list`` document type (JOS-91), not the intake form. Match every schema explicitly: a
-    fall-through to ``return []`` would silently persist nothing, and only facts that cannot be
+    ``medication_list`` document type (JOS-91), not the intake form. Match every schema explicitly:
+    a fall-through to ``return []`` would silently persist nothing, and only facts that cannot be
     persisted faithfully are dropped — an uncoded lab, a family-history entry with no relation —
     because the endpoint's parser is all-or-nothing and one bad fact would reject the whole batch.
 

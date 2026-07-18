@@ -293,10 +293,11 @@ class DocumentFactRegistry:
 
         The section order — demographics in ``Demographics`` declaration order, chief concern,
         allergies, family history — is the contract, not a detail: a fact's citable id is its flat
-        ordinal within this one sequence, so the order is the only thing that makes an ordinal name a
-        stable fact. Reordering a section silently re-points every id after it at a different fact. A
-        field the form does not state consumes no ordinal. Medications are not part of this sequence —
-        the ``medication_list`` document type owns them (see :meth:`_record_medication_list`).
+        ordinal within this one sequence, so the order is the only thing that makes an ordinal name
+        a stable fact. Reordering a section silently re-points every id after it at a different
+        fact. A field the form does not state consumes no ordinal. Medications are not part of this
+        sequence — the ``medication_list`` document type owns them (see
+        :meth:`_record_medication_list`).
 
         Args:
             extracted: The document being recorded.

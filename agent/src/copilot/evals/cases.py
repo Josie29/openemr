@@ -314,8 +314,8 @@ CASES: list[EvalCase] = [
         intent="citation_present: every medication read off the medication list cites the box it "
         "was read from — six printed rows (budesonide, albuterol, fexofenadine, epinephrine, "
         "ibuprofen, naproxen), each of which must resolve to its own extracted value. A medication "
-        "list is where an uncited claim is most tempting and most dangerous: the reader cannot tell "
-        "a row the model read from a row it completed from the patient's chart.",
+        "list is where an uncited claim is most tempting and most dangerous: the reader cannot "
+        "tell a row the model read from a row it completed from the patient's chart.",
         expected=ExpectedOutcome(behavior=_A),
     ),
     EvalCase(

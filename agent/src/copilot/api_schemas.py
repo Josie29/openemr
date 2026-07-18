@@ -28,10 +28,10 @@ class ExtractionResponse(BaseModel):
     """``GET /documents/{id}/extraction`` — one document's strict-schema facts.
 
     ``report`` is the schema the document's TYPE selected — a ``LabReport`` for a ``lab_pdf``, an
-    ``IntakeForm`` for an ``intake_form``, a ``MedicationList`` for a ``medication_list`` — with each
-    fact carrying its citation (bounding box + verbatim value) and per-value confidence. ``doc_type``
-    is the human-readable discriminant, resolved server-side from the document's OpenEMR category
-    (never a caller input).
+    ``IntakeForm`` for an ``intake_form``, a ``MedicationList`` for a ``medication_list`` — with
+    each fact carrying its citation (bounding box + verbatim value) and per-value confidence.
+    ``doc_type`` is the human-readable discriminant, resolved server-side from the document's
+    OpenEMR category (never a caller input).
     """
 
     document_id: str = Field(description="The extracted DocumentReference id")

@@ -39,7 +39,8 @@ def _fixture_settings(*, lab: bool = True, intake: bool = True, meds: bool = Tru
     """Offline settings with the extractor + document bytes wired to the angulo fixtures.
 
     ``lab``/``intake``/``meds`` toggle whether each type is configured, so a test can drive the
-    partial-configuration failure path (a document whose type has no fixture raises ExtractionError).
+    partial-configuration failure path (a document whose type has no fixture raises
+    ExtractionError).
     """
     return Settings(
         model_tier=ModelTier.SONNET,
@@ -156,7 +157,9 @@ def test_extraction_reports_502_when_the_document_cannot_be_read() -> None:
 def test_extraction_reports_503_when_extraction_is_unconfigured() -> None:
     # Breaks the "extraction disabled" degradation: with no extractor wired the endpoint must say
     # so (503), not 500 or pretend the document has no facts.
-    settings = _fixture_settings(lab=False, intake=False, meds=False)  # no fixtures -> extractor None
+    settings = _fixture_settings(
+        lab=False, intake=False, meds=False
+    )  # no fixtures -> extractor None
     client = TestClient(create_app(settings))
     resp = client.get(f"/documents/{_LAB_DOC_ID}/extraction", params={"patient_id": _PATIENT})
     assert resp.status_code == 503

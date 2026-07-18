@@ -698,11 +698,11 @@ def _uploaded_document_attachment(resource: dict[str, Any]) -> dict[str, Any] | 
 # intake category would remove the ambiguity; until then, this set is the seam (add a name here, not
 # code, to support another deployment's naming).
 #
-# `Medication List` is a purpose-built seeded category (no OpenEMR default names it), matched EXACTLY
-# like intake. `Medical Record` is a DEMO fallback: the seeded category does not reliably surface in
-# OpenEMR's cached Documents tree, so the med list is uploaded under the always-present `Medical
-# Record` category. TRADEOFF — any Medical Record upload then extracts as a medication list;
-# acceptable for the demo, gate or drop before prod. Neither name contains "lab".
+# `Medication List` is a purpose-built seeded category (no OpenEMR default names it), matched
+# EXACTLY like intake. `Medical Record` is a DEMO fallback: the seeded category does not reliably
+# surface in OpenEMR's cached Documents tree, so the med list is uploaded under the always-present
+# `Medical Record` category. TRADEOFF — any Medical Record upload then extracts as a medication
+# list; acceptable for the demo, gate or drop before prod. Neither name contains "lab".
 _LAB_CATEGORY_SUBSTRING = "lab"
 _INTAKE_CATEGORY_NAMES = frozenset({"patient information"})
 _MEDICATION_LIST_CATEGORY_NAMES = frozenset({"medication list", "medical record"})

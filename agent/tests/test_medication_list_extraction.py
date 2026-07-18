@@ -11,7 +11,9 @@ _NAME = "sergio-angulo-medication-list"
 
 
 def _load(name: str) -> dict[str, Any]:
-    parsed: dict[str, Any] = json.loads((_FIXTURES / "extractions" / f"{name}.ocr.json").read_text())
+    parsed: dict[str, Any] = json.loads(
+        (_FIXTURES / "extractions" / f"{name}.ocr.json").read_text()
+    )
     return parsed
 
 

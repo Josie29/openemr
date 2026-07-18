@@ -326,8 +326,9 @@ class CitationSourceType(StrEnum):
     """The kind of source a :class:`Citation` points at (W2_ARCHITECTURE.md §3.3).
 
     ``GUIDELINE`` (evidence) and ``FHIR`` (patient-record claims) come from the supervisor graph's
-    final answer; ``LAB_PDF`` / ``INTAKE_FORM`` / ``MEDICATION_LIST`` come from a document-extraction
-    fact, selected by the ``doc_type`` the grounding gate stamps onto its citation.
+    final answer; ``LAB_PDF`` / ``INTAKE_FORM`` / ``MEDICATION_LIST`` come from a
+    document-extraction fact, selected by the ``doc_type`` the grounding gate stamps onto its
+    citation.
     """
 
     GUIDELINE = "guideline"

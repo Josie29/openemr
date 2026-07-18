@@ -39,6 +39,7 @@ Every `POST /chat` turn is one Langfuse `chat-turn` trace (`observability.py`), 
 | Token usage & cost | OTel auto-instrumentation | Yes |
 | Tool calls (each FHIR read = one span) | `register_fhir_read_tools` (intake-extractor worker) + `search_guidelines` (evidence-retriever) | Yes |
 | `verification_grounding` (0/1) | `TurnTrace.verified()` (called from `main.py`) | Yes |
+| `tool_ceiling` (=1 when the turn hit the per-turn tool-call ceiling) | `TurnTrace.limited()` in `/chat` | Yes |
 | `turn_error` (=1 on any failed turn) | `TurnTrace.errored()` in `/chat` handlers | Yes |
 | `tool_error` (=1 on a FHIR read failure) | `TurnTrace.errored(tool_failure=True)` | Yes |
 | `turn_cost` (turn model cost, USD) | `TurnTrace.costed()` in `/chat`; priced by `pricing.turn_cost_usd` | Yes |
@@ -128,7 +129,9 @@ grows.
   **no code** — the score already flows on every turn.
 - **What it means:** the model is increasingly producing claims it can't ground in the record, so
   the gate is refusing them. This is the failure mode the whole verification design exists to
-  catch — a spike means answers are degrading in *quality*, not availability.
+  catch — a spike means answers are degrading in *quality*, not availability. A tool-call-ceiling
+  refusal is deliberately **not** counted here — it never reached the gate — and emits the separate
+  `tool_ceiling` score instead, so a large-chart runaway can't masquerade as a trust regression.
 - **On-call response:** pull the refused traces in Langfuse; look for a common patient/question
   shape or a recent prompt/model change. A deploy correlation → consider rollback. Do **not**
   relax the gate to clear the alert.

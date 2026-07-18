@@ -19,17 +19,18 @@ generator derives them from the clean report's HTML (see below).
 
 ## The fixtures
 
-Clinical narrative (shared across the lab + intake so cross-document reasoning has something to
-resolve): aspirin allergy alongside NSAID exposure, declining renal function, eosinophilia /
-allergic asthma, and a family history of CKD + hypertension + type-2 diabetes.
+Clinical narrative (shared across the lab, intake, and medication list so cross-document reasoning
+has something to resolve): aspirin allergy alongside NSAID exposure, declining renal function,
+eosinophilia / allergic asthma, and a family history of CKD + hypertension + type-2 diabetes.
 
 | PDF | What it is |
 |-----|------------|
 | `sergio-angulo-lab-report.pdf` | Clean digital CMP + CBC report. Extracts near-perfectly (happy path). Prints a **LOINC** column (JOS-87): every code is real, sourced from loinc.org's panel pages and checksum-verified — never write one from memory, and never invent one for a new analyte. The write-back needs a code (JOS-81) and the extractor refuses any that the page does not print. |
 | `sergio-angulo-lab-report-scanned.pdf` | Lightly degraded scan — legible but imperfect. Tests graceful degradation. |
 | `sergio-angulo-lab-report-scanned-heavy.pdf` | Heavily degraded scan with localized damage (coffee ring over the renal values, dropout streak + dark edge over the Prior column, fold crease). **Failure-path fixture** — specific fields go low-confidence / missing so the confidence gate / `safe_refusal` cases have something to catch. |
-| `sergio-angulo-intake-form.pdf` | Patient-completed intake (handwriting-styled, tabular). |
+| `sergio-angulo-intake-form.pdf` | Patient-completed intake (handwriting-styled, tabular). Allergies + family history + demographics — **no medications** (those live on the medication list; JOS-91). |
 | `sergio-angulo-intake-form-v2.pdf` | Intake with a strictly linear single-column `Label: value` layout (no tables) — one discrete text region per field for OCR. |
+| `sergio-angulo-medication-list.pdf` | A Wells Branch Pharmacy medication profile — the **third document type** (`medication_list`, JOS-91). Six medications on single-line drug-name rows (locatable): Budesonide, Albuterol, Fexofenadine, Epinephrine, Ibuprofen, Naproxen — the asthma controllers/rescue + the NSAID exposure the narrative turns on. Owns medications; the intake form no longer does. |
 
 ## Regenerating
 

@@ -54,6 +54,33 @@ def test_intake_form_is_discovered_as_an_intake_form() -> None:
     assert summary.doc_type is DocType.INTAKE_FORM
 
 
+def test_medication_list_is_discovered_as_a_medication_list() -> None:
+    """A PDF filed under 'Medication List' resolves to the medication-list schema.
+
+    This is the third document type's discovery seam. If it breaks, an uploaded medication list is
+    invisible to the agent and its medications never reach the chart — the physician is told there
+    is nothing to extract.
+    """
+    summary = UploadedDocumentSummary.try_from_fhir(
+        _uploaded_pdf(resource_id="meds-1", category_text="Medication List")
+    )
+    assert summary is not None
+    assert summary.doc_type is DocType.MEDICATION_LIST
+
+
+def test_medical_record_category_resolves_to_medication_list() -> None:
+    """'Medical Record' is the demo fallback for a medication list (the seeded category does not
+    reliably render in OpenEMR's Documents tree). If this breaks, the demo upload path stops
+    resolving. TRADEOFF documented at resolve_doc_type: any Medical Record upload extracts as a
+    medication list — gate or drop before prod.
+    """
+    summary = UploadedDocumentSummary.try_from_fhir(
+        _uploaded_pdf(resource_id="mr-1", category_text="Medical Record")
+    )
+    assert summary is not None
+    assert summary.doc_type is DocType.MEDICATION_LIST
+
+
 def test_intake_category_is_matched_exactly_not_by_substring() -> None:
     """'Patient Information' matches exactly; its identity CHILDREN do not.
 

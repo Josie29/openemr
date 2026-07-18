@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from enum import StrEnum
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -10,19 +11,28 @@ from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, Usag
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
+from copilot.api_schemas import (
+    DocumentsResponse,
+    EvidenceItem,
+    EvidenceResponse,
+    ExtractionResponse,
+)
 from copilot.config import FhirClientMode, Settings, get_settings
 from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
+from copilot.fhir.models import LabObservation
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
 from copilot.health import check_readiness
-from copilot.ingestion.extractor import build_extractor
+from copilot.ingestion.extractor import ExtractionError, build_extractor, resolve_and_extract
 from copilot.ingestion.schemas import paths_by_doc_type
+from copilot.ingestion.wire import derived_facts_for
 from copilot.observability import (
     configure_observability,
     observe_turn,
@@ -30,9 +40,17 @@ from copilot.observability import (
     sync_system_prompt,
 )
 from copilot.pricing import turn_cost_usd
-from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
+from copilot.rag.retriever import FixtureEvidenceRetriever, RetrievalError, build_retriever
 from copilot.retrieval import ChunkRegistry
-from copilot.schemas import ChatRequest, ChatResponse, CitationSourceType, Evidence
+from copilot.schemas import (
+    ChatRequest,
+    ChatResponse,
+    CitationSourceType,
+    Evidence,
+    LabPoint,
+    LabSeries,
+)
+from copilot.verification import FetchLog
 
 logger = logging.getLogger("copilot")
 
@@ -51,31 +69,59 @@ def _configure_logging() -> None:
     )
 
 
+class ChatFailureReason(StrEnum):
+    """Distinct, greppable reason codes for every ``/chat`` failure branch.
+
+    Stamped onto each failure log line as a structured ``reason`` field so operators can tell the
+    branches apart in the Railway logs and alert on a specific one — the combined
+    ``UnexpectedModelBehavior``/``UsageLimitExceeded`` branch used to log all of these
+    indistinguishably. Backed (a :class:`~enum.StrEnum`) because the value is what lands in the log
+    record and what a grep/alert query matches.
+    """
+
+    # Grounding gate exhausted its retries — no attributable answer.
+    GROUNDING_EXHAUSTED = "grounding_exhausted"
+    # Per-turn tool-call ceiling hit — a runaway loop.
+    TOOL_CEILING = "tool_ceiling"
+    # The model provider rejected the call (billing / rate limit / outage).
+    LLM_HTTP_ERROR = "llm_http_error"
+    # A patient-data (FHIR) read failed.
+    FHIR_READ_FAILED = "fhir_read_failed"
+    # Any unforeseen failure caught by the route's catch-all boundary.
+    UNEXPECTED = "unexpected"
+
+
 _UNAVAILABLE_ANSWER = ChatResponse(
     summary="I could not produce an answer I can fully attribute to this patient's record.",
     claims=[],
 )
 
 
-def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, Any]:
-    """Serialize the final answer: per-claim wire citations plus the deduped evidence panel.
+def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry, deps: GraphDeps) -> dict[str, Any]:
+    """Serialize the final answer: per-claim wire citations, evidence panel, and derived facts.
 
     The response keeps the answer's own ``claims`` (with their gate-stamped ``source``) and adds,
     per claim, the project-wide :data:`~copilot.schemas.Citation` list the sidebar's click-to-source
     (JOS-57) consumes — each a pure projection of a grounded ``SourceRef`` via
     :meth:`~copilot.schemas.SourceRef.to_citation`. It also adds a top-level ``evidence`` array: the
     distinct guideline sources that grounded the answer, deduped by chunk and ranked by relevance
-    (§3.2). Both are additive — nothing the current sidebar reads is removed — and stay off the
-    LLM-facing ``Claim``/``ChatResponse`` models.
+    (§3.2); a ``derived_facts`` array: the persistable facts extracted from documents this turn,
+    grouped by document, which the sidebar posts to the session-authed write-back endpoint (JOS-81);
+    and a ``lab_series`` array: the trend charts projected from the lab Observations the agent read
+    this turn (JOS-83). All are additive — nothing the current sidebar reads is removed — and stay
+    off the LLM-facing ``Claim``/``ChatResponse`` models.
 
     Args:
         answer: The grounded final answer from the graph.
         chunks: The conversation's chunk registry — the source of the retrieved snippets' rerank
             scores and presentation metadata for the evidence panel.
+        deps: The turn's graph deps — the source of the typed extractions the write-back payload
+            projects (``deps.extractions``) and the fetch registry the lab charts read
+            (``deps.fetched``).
 
     Returns:
         The JSON-serializable response body, each claim carrying a ``citations`` list and the body
-        carrying an ``evidence`` list.
+        carrying ``evidence``, ``derived_facts``, and ``lab_series`` lists.
     """
     content: dict[str, Any] = answer.model_dump()
     for claim_dict, claim in zip(content["claims"], answer.claims, strict=True):
@@ -83,6 +129,8 @@ def _answer_payload(answer: ChatResponse, chunks: ChunkRegistry) -> dict[str, An
             ref.to_citation().model_dump(mode="json") for ref in [claim.source, *claim.supporting]
         ]
     content["evidence"] = _build_evidence(answer, chunks)
+    content["derived_facts"] = derived_facts_for(deps.extractions)
+    content["lab_series"] = _build_lab_series(deps.fetched)
     return content
 
 
@@ -124,6 +172,64 @@ def _build_evidence(answer: ChatResponse, chunks: ChunkRegistry) -> list[dict[st
     return [entry.model_dump(mode="json") for entry in ordered]
 
 
+_MAX_LAB_SERIES = 6
+
+
+def _build_lab_series(fetched: FetchLog) -> list[dict[str, Any]]:
+    """Project the turn's fetched lab Observations into trend series, one per LOINC code.
+
+    Present only when the agent read labs this turn (``get_lab_observations`` recorded them).
+    A point needs both a numeric value and a date to be plotted, so valueless questionnaire results
+    and undated draws are dropped — never coerced. A series needs two or more such points; one draw
+    is not a trend. Grouping by ``code`` keeps similar-named analytes apart and one unit per axis.
+    Capped at ``_MAX_LAB_SERIES`` so a broad fetch cannot wall the sidebar.
+
+    Args:
+        fetched: The turn's fetch registry.
+
+    Returns:
+        JSON-serializable series, each with two or more oldest-first points; empty when no analyte
+        has a plottable trend.
+    """
+    points_by_code: dict[str, list[LabPoint]] = {}
+    source_by_code: dict[str, LabObservation] = {}
+    for obs in fetched.records_of_type("Observation"):
+        if not isinstance(obs, LabObservation):
+            continue
+        code, value, date = obs.code, obs.value, obs.effective_date
+        if code is None or value is None or date is None:
+            continue
+        points_by_code.setdefault(code, []).append(
+            LabPoint(
+                date=date,
+                value=value,
+                status=obs.status or "final",
+                observation_id=obs.resource_id,
+            )
+        )
+        source_by_code.setdefault(code, obs)
+
+    series: list[LabSeries] = []
+    for code, points in points_by_code.items():
+        if len(points) < 2:
+            continue
+        points.sort(key=lambda p: p.date)
+        source = source_by_code[code]
+        series.append(
+            LabSeries(
+                code=code, display=source.display or code, unit=source.unit or "", points=points
+            )
+        )
+
+    # Most-recent draw first, so the analyte the physician just asked about tends to lead; a stable
+    # key also keeps the sidebar deterministic across identical turns.
+    series.sort(key=lambda s: s.points[-1].date, reverse=True)
+    if len(series) > _MAX_LAB_SERIES:
+        logger.info("lab_series truncated", extra={"found": len(series), "kept": _MAX_LAB_SERIES})
+        series = series[:_MAX_LAB_SERIES]
+    return [s.model_dump(mode="json") for s in series]
+
+
 def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirClient:
     """Construct the app-lifetime FHIR client used by the ``/ready`` probe (and fixture reads).
 
@@ -147,6 +253,7 @@ def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirC
             paths_by_doc_type(
                 lab_pdf=settings.document_pdf_path_lab_pdf,
                 intake_form=settings.document_pdf_path_intake_form,
+                medication_list=settings.document_pdf_path_medication_list,
             )
         )
     # HTTP mode. A missing base URL is a misconfiguration, but we do not raise at startup —
@@ -198,7 +305,58 @@ def _build_model(settings: Settings) -> Model:
     """
     _, _, model_id = settings.model_tier.value.partition(":")
     provider = AnthropicProvider(api_key=settings.anthropic_api_key or "not-configured")
-    return AnthropicModel(model_id, provider=provider)
+    # Lift pydantic-ai's 4096-token Anthropic default: a full lab report's claims overran it
+    # (finish_reason=length), dropping the claims array and degrading the turn to a fabrication.
+    # Short document-fact aliases keep normal outputs well under this — a backstop, not a target.
+    return AnthropicModel(
+        model_id, provider=provider, settings=ModelSettings(max_tokens=8192)
+    )
+
+
+# Shared across the FHIR-backed read endpoints (a document read failing surfaces the same way
+# whether it is the list or the extraction path). /chat keeps its own inline copy — its error
+# handling is entangled with per-turn observability scoring, so it is left untouched.
+_FHIR_UNAVAILABLE_MESSAGE = "patient data is temporarily unavailable"
+
+
+def _json_error(correlation_id: str, status_code: int, message: str) -> JSONResponse:
+    """Build the service's standard error response body: ``{error, correlation_id}``.
+
+    One factory so every failure branch emits the shape a client can rely on, with the correlation
+    id that ties a user-facing failure back to its trace. Logging stays at the call site, where the
+    reason code and traceback context live.
+    """
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": message, "correlation_id": correlation_id},
+    )
+
+
+def _require_token(
+    request: Request, settings: Settings, correlation_id: str
+) -> JSONResponse | None:
+    """Gate a read on the SMART patient-scoped bearer token, without building a FHIR client.
+
+    The token half of :func:`_resolve_request_fhir`, factored out so a read that needs auth but no
+    FHIR client (``GET /evidence`` over the non-PHI corpus) shares one source of truth for the 401
+    body. In fixture mode no token exists, so the gate is a no-op (matching ``/chat``), which is
+    what lets the contract tests run without a token.
+
+    Args:
+        request: The inbound request (carries the ``Authorization`` header).
+        settings: Service settings (mode, dev token fallback).
+        correlation_id: This turn's correlation id, for logging.
+
+    Returns:
+        ``None`` when the request may proceed; a 401 ``JSONResponse`` when a token is required and
+        absent.
+    """
+    if settings.fhir_client_mode is FhirClientMode.FIXTURE:
+        return None
+    if _bearer_token(request) or settings.fhir_bearer_token:
+        return None
+    logger.info("rejected read with no patient token", extra={"cid": correlation_id})
+    return _json_error(correlation_id, 401, "missing patient-scoped FHIR token")
 
 
 def _resolve_request_fhir(
@@ -222,16 +380,10 @@ def _resolve_request_fhir(
     """
     if settings.fhir_client_mode is FhirClientMode.FIXTURE:
         return request.app.state.fhir, None
+    denied = _require_token(request, settings, correlation_id)
+    if denied is not None:
+        return denied
     token = _bearer_token(request) or settings.fhir_bearer_token
-    if not token:
-        logger.info("rejected /chat with no patient token", extra={"cid": correlation_id})
-        return JSONResponse(
-            status_code=401,
-            content={
-                "error": "missing patient-scoped FHIR token",
-                "correlation_id": correlation_id,
-            },
-        )
     if not settings.fhir_base_url:
         logger.error("HTTP mode without a FHIR base URL", extra={"cid": correlation_id})
         return JSONResponse(
@@ -279,7 +431,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["POST"],
+        # POST for /chat; GET for the read-only Week-2 subsystem endpoints (/documents,
+        # /documents/{id}/extraction, /evidence). The browser preflights a cross-origin GET that
+        # carries an Authorization header, so GET must be allowed explicitly.
+        allow_methods=["GET", "POST"],
         allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"],
     )
 
@@ -328,7 +483,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/ready")
     async def ready(request: Request) -> JSONResponse:
-        """Readiness probe — 200 only when FHIR, the LLM, and Langfuse are all reachable."""
+        """Readiness probe — 200 only when every probed dependency is reachable.
+
+        Surfaces per-dependency status for FHIR, the LLM, Langfuse, document storage, the vector
+        index, and the reranker (W2_ARCHITECTURE.md §10); 503 with the same body otherwise.
+        """
         report = await check_readiness(request.app.state.settings, request.app.state.fhir)
         status_code = 200 if report.ready else 503
         return JSONResponse(status_code=status_code, content=report.model_dump())
@@ -415,31 +574,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
-                    content = _answer_payload(result.answer, session.chunks)
+                    content = _answer_payload(result.answer, session.chunks, deps)
                     turn.output(content)
-                except (UnexpectedModelBehavior, UsageLimitExceeded):
-                    # Either the gate exhausted its retries without an attributable answer, or the
-                    # turn hit the tool-call ceiling (a runaway loop). Both mean "no verified answer
-                    # within limits" — degrade to a refusal rather than ship an unverified claim or
-                    # let the exception 500 (which the browser surfaces as "Failed to fetch").
-                    logger.info(
-                        "agent could not answer within limits", extra={"cid": correlation_id}
-                    )  # noqa: E501
+                except UnexpectedModelBehavior:
+                    # The grounding gate exhausted its retries without an attributable answer —
+                    # degrade to a refusal rather than ship an unverified claim (§8). A user got a
+                    # non-answer, so this is a WARNING (not INFO), with its own greppable reason.
+                    logger.warning(
+                        "agent could not ground an answer within retries",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.GROUNDING_EXHAUSTED,
+                        },
+                    )
                     turn.verified(passed=False)
+                    content = _UNAVAILABLE_ANSWER.model_dump()
+                except UsageLimitExceeded:
+                    # The turn hit the per-turn tool-call ceiling (a runaway loop) — degrade to a
+                    # refusal rather than let the exception 500 (which the browser surfaces as
+                    # "Failed to fetch"). A resource-limit failure, distinct from a grounding miss:
+                    # scored as `tool_ceiling` (not verification_grounding=0) so the A4 grounding
+                    # monitor — a trust signal — isn't polluted by runaway turns.
+                    logger.warning(
+                        "agent hit the tool-call ceiling before answering",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.TOOL_CEILING,
+                        },
+                    )
+                    turn.limited()
                     content = _UNAVAILABLE_ANSWER.model_dump()
                 except ModelHTTPError as exc:
                     # LLM provider rejected the call (billing, rate limit, outage). Always logged;
                     # the specific reason is surfaced too, which aids debugging in this demo system.
                     # (A production PHI deployment would genericize this — see ARCHITECTURE.md §8.)
                     logger.warning(
-                        "LLM request failed", extra={"cid": correlation_id}, exc_info=True
-                    )  # noqa: E501
+                        "LLM request failed",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.LLM_HTTP_ERROR,
+                        },
+                        exc_info=True,
+                    )
                     turn.errored(tool_failure=False)
                     status_code = 502
                     content = {"error": str(exc), "correlation_id": correlation_id}
                 except FhirError:
                     # A data read failed — report the gap, never fabricate around it (§8).
-                    logger.warning("FHIR read failed", extra={"cid": correlation_id}, exc_info=True)
+                    logger.warning(
+                        "FHIR read failed",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.FHIR_READ_FAILED,
+                        },
+                        exc_info=True,
+                    )
                     turn.errored(tool_failure=True)
                     status_code = 502
                     content = {
@@ -454,7 +643,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # detail (audit, §8).
                     logger.error(
                         "unexpected error answering /chat",
-                        extra={"cid": correlation_id},
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.UNEXPECTED,
+                        },
                         exc_info=True,
                     )
                     turn.errored(tool_failure=False)
@@ -471,6 +663,116 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Echo the conversation id on every answered turn so the client keeps the thread.
         content["conversation_id"] = conversation_id
         return JSONResponse(status_code=status_code, content=content)
+
+    # --- Read-only Week-2 subsystem endpoints (JOS-63 / JOS-67) --------------------------------
+    # Each exposes ONE Week-2 subsystem directly, bypassing the LLM/graph, so a caller (a grader's
+    # API collection, a contract test) can exercise document listing, extraction, or evidence
+    # retrieval without paying for a full /chat turn. All three are read-only (no writes, no
+    # corpus mutation) and gated by the same SMART patient token as /chat. On success they return
+    # the response_model directly, so FastAPI serializes AND validates the body against the schema
+    # committed to openapi.json — the endpoint cannot drift from its own contract at runtime.
+
+    @app.get("/documents", response_model=DocumentsResponse)
+    async def documents(request: Request, patient_id: str) -> DocumentsResponse | JSONResponse:
+        """List the patient's uploaded, extractable documents (metadata only).
+
+        Backs the ``list_documents`` tool: the same patient-scoped FHIR ``DocumentReference``
+        search, filtered to uploaded PDFs whose category resolves to an extraction schema.
+        """
+        correlation_id = current_correlation_id()
+        settings: Settings = request.app.state.settings
+        resolved = _resolve_request_fhir(request, settings, correlation_id)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        fhir, per_request_client = resolved
+        try:
+            summaries = await fhir.get_documents(patient_id)
+        except FhirError:
+            logger.warning(
+                "document list read failed",
+                extra={"cid": correlation_id, "reason": ChatFailureReason.FHIR_READ_FAILED},
+                exc_info=True,
+            )
+            return _json_error(correlation_id, 502, _FHIR_UNAVAILABLE_MESSAGE)
+        finally:
+            if per_request_client is not None:
+                await per_request_client.aclose()
+        return DocumentsResponse(patient_id=patient_id, documents=summaries)
+
+    @app.get("/documents/{document_id}/extraction", response_model=ExtractionResponse)
+    async def document_extraction(
+        request: Request, document_id: str, patient_id: str
+    ) -> ExtractionResponse | JSONResponse:
+        """Extract one uploaded document into its strict-schema facts (synchronous; no LLM).
+
+        Backs ``attach_and_extract`` via the shared ``resolve_and_extract`` core: the document's
+        ``doc_type`` is resolved server-side from its OpenEMR category (never a caller input), and
+        an id that is not one of the patient's uploaded documents is a 404. The response IS the
+        extraction result — there is no async job/status to poll.
+        """
+        correlation_id = current_correlation_id()
+        settings = request.app.state.settings
+        extractor = request.app.state.extractor
+        if extractor is None:
+            return _json_error(correlation_id, 503, "document extraction is not available")
+        resolved = _resolve_request_fhir(request, settings, correlation_id)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        fhir, per_request_client = resolved
+        extracted = None
+        try:
+            # get_documents is also the security control: only a document the patient actually has,
+            # whose category maps to a schema, is extractable (no raw by-id path that would bypass
+            # the discovery filter).
+            summaries = await fhir.get_documents(patient_id)
+            extracted = await resolve_and_extract(document_id, summaries, extractor, fhir)
+        except ExtractionError:
+            logger.warning(
+                "document extraction failed",
+                extra={"cid": correlation_id, "document_id": document_id},
+                exc_info=True,
+            )
+            return _json_error(correlation_id, 502, "could not read the document")
+        except FhirError:
+            logger.warning(
+                "document read failed for extraction",
+                extra={"cid": correlation_id, "reason": ChatFailureReason.FHIR_READ_FAILED},
+                exc_info=True,
+            )
+            return _json_error(correlation_id, 502, _FHIR_UNAVAILABLE_MESSAGE)
+        finally:
+            if per_request_client is not None:
+                await per_request_client.aclose()
+        if extracted is None:
+            return _json_error(correlation_id, 404, "document not found for this patient")
+        return ExtractionResponse.from_extracted(extracted)
+
+    @app.get("/evidence", response_model=EvidenceResponse)
+    async def evidence(
+        request: Request, query: str, top_n: int | None = None
+    ) -> EvidenceResponse | JSONResponse:
+        """Retrieve ranked guideline chunks for a query (the hybrid-RAG path; no LLM, no PHI).
+
+        Backs ``search_guidelines``: runs the retriever (Qdrant + rerank, or the fixture fallback)
+        over the non-PHI corpus. Gated by the bearer token for a uniform surface, though it reads no
+        patient data. Corpus indexing stays a CLI dev op — this endpoint never mutates the corpus.
+        """
+        correlation_id = current_correlation_id()
+        settings = request.app.state.settings
+        denied = _require_token(request, settings, correlation_id)
+        if denied is not None:
+            return denied
+        retriever = request.app.state.retriever
+        try:
+            snippets = await retriever.retrieve(query, top_n=top_n)
+        except RetrievalError:
+            logger.warning(
+                "evidence retrieval failed", extra={"cid": correlation_id}, exc_info=True
+            )
+            return _json_error(correlation_id, 502, "evidence retrieval is temporarily unavailable")
+        items = [EvidenceItem.from_snippet(snippet) for snippet in snippets]
+        resolved_top_n = top_n if top_n is not None else settings.rerank_top_n
+        return EvidenceResponse(query=query, top_n=resolved_top_n, evidence=items)
 
     return app
 

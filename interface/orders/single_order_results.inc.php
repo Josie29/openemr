@@ -24,6 +24,7 @@
 
 require_once(\OpenEMR\Core\OEGlobalsBag::getInstance()->getSrcDir() . "/options.inc.php");
 
+use OpenEMR\ClinicalCopilot\DerivedFactBadge;
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Session\SessionWrapperFactory;
 use OpenEMR\Core\OEGlobalsBag;
@@ -192,7 +193,10 @@ function generate_result_row(&$ctx, &$row, &$rrow, $priors_omitted = false): voi
         echo "</td>\n";
 
         echo "  <td title='" . xla('Check mark indicates reviewed') . "'>";
-        echo myCellText(getListItem('proc_rep_status', $report_status));
+        // Badge a derived report; else render the status natively. (Our 'preliminary' has no
+        // proc_rep_status option, so getListItem would otherwise leak the raw "(preliminary)".)
+        $derivedBadge = DerivedFactBadge::html($report_status === DerivedFactBadge::LAB_STATUS);
+        echo $derivedBadge !== '' ? $derivedBadge : myCellText(getListItem('proc_rep_status', $report_status));
         if ($row['review_status'] == 'reviewed') {
             echo " &#x2713;"; // unicode check mark character
         }

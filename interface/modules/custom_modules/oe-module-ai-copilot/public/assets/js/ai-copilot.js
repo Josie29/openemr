@@ -21,6 +21,11 @@
 
     var EXPIRY_SKEW_MS = 60 * 1000; // re-launch this long before the token's stated expiry
     var LAUNCH_TIMEOUT_MS = 30 * 1000; // a launch that never posts back must not hang the panel
+    // The browser calls the agent directly (no server-side proxy in the chat path), so a hung or
+    // suspended agent would leave the turn's fetch pending forever and the panel stuck on
+    // "Checking the record...". Bound each attempt; 90s clears a real OCR-heavy turn (20-40s) with
+    // headroom while still failing a dead agent in bounded time.
+    var CHAT_TIMEOUT_MS = 90 * 1000;
     var LAUNCH_FAILURES = ['launch_failed', 'token_exchange_failed', 'launch_timeout'];
 
     var LS_OPEN = 'aicopilot.open';
@@ -416,12 +421,20 @@
         summary.textContent = answer.summary || '';
         wrapper.appendChild(summary);
 
+        // Lab trends (JOS-83): one static line chart per analyte the agent read this turn. Sits
+        // between the prose and the evidence so a "how has X changed" answer is seen, not just read.
+        var charts = renderLabCharts(Array.isArray(answer.lab_series) ? answer.lab_series : []);
+        if (charts) {
+            wrapper.appendChild(charts);
+        }
+
         // Evidence is grouped into provenance tiers (spec §3.5). Counting distinct sources — not raw
         // claim sentences — is what makes the counts honest: a source cited by three sentences is one
         // piece of evidence, not three.
         var section = renderEvidenceSection(
             Array.isArray(answer.evidence) ? answer.evidence : [],
-            Array.isArray(answer.claims) ? answer.claims : []
+            Array.isArray(answer.claims) ? answer.claims : [],
+            Array.isArray(answer.derived_facts) ? answer.derived_facts : []
         );
         if (section) {
             wrapper.appendChild(section);
@@ -432,6 +445,164 @@
             wrapper.appendChild(followUps);
         }
         appendNode(assistantTurn(wrapper));
+    }
+
+    var SVG_NS = 'http://www.w3.org/2000/svg';
+
+    /**
+     * Create an SVG element with attributes set. Colours are NOT set here — points, line, and axes
+     * carry classes so ai-copilot.css owns them (the same design tokens the rest of the sidebar uses).
+     *
+     * @param {string} name SVG tag name.
+     * @param {object} attrs Attribute name/value pairs.
+     * @returns {SVGElement}
+     */
+    function svgEl(name, attrs) {
+        var node = document.createElementNS(SVG_NS, name);
+        if (attrs) {
+            for (var key in attrs) {
+                if (Object.prototype.hasOwnProperty.call(attrs, key)) {
+                    node.setAttribute(key, attrs[key]);
+                }
+            }
+        }
+        return node;
+    }
+
+    /**
+     * Render every lab trend the answer carried, each as its own chart. The backend only sends a
+     * series with two or more points (a single draw is not a trend), so no guard is needed here.
+     *
+     * @param {Array<object>} series lab_series from the response.
+     * @returns {HTMLElement|null} A container of charts, or null when there are none.
+     */
+    function renderLabCharts(series) {
+        if (!series.length) {
+            return null;
+        }
+        var group = document.createElement('div');
+        group.className = 'ai-copilot__labcharts';
+        for (var i = 0; i < series.length; i++) {
+            var chart = renderLabChart(series[i]);
+            if (chart) {
+                group.appendChild(chart);
+            }
+        }
+        return group.childNodes.length ? group : null;
+    }
+
+    /**
+     * Render one analyte's trend as a static SVG line chart. Points are coloured by status via the
+     * JOS-88 trust gradient — 'final' reads as a coded record (green), 'preliminary' as an
+     * agent-extracted value not yet confirmed (amber). Values are labelled at the first and last
+     * draw; there is no interaction (spec: static).
+     *
+     * @param {object} s One series: {code, display, unit, points:[{date, value, status}]}.
+     * @returns {HTMLElement|null}
+     */
+    function renderLabChart(s) {
+        var points = (s && Array.isArray(s.points)) ? s.points : [];
+        if (points.length < 2) {
+            return null; // defensive; the backend already enforces this
+        }
+
+        var W = 300, H = 178, padL = 42, padR = 14, padT = 16, padB = 24;
+        var x0 = padL, x1 = W - padR, y0 = padT, y1 = H - padB;
+
+        var times = points.map(function (p) { return new Date(p.date).getTime(); });
+        var values = points.map(function (p) { return p.value; });
+        var tMin = Math.min.apply(null, times), tMax = Math.max.apply(null, times);
+        var vMin = Math.min.apply(null, values), vMax = Math.max.apply(null, values);
+        var vPad = (vMax - vMin) || Math.abs(vMax) || 1;
+        var lo = vMin - vPad * 0.15, hi = vMax + vPad * 0.15;
+
+        function sx(t, i) {
+            if (tMax === tMin) { return x0 + (points.length === 1 ? 0 : (i / (points.length - 1)) * (x1 - x0)); }
+            return x0 + ((t - tMin) / (tMax - tMin)) * (x1 - x0);
+        }
+        function sy(v) { return y1 - ((v - lo) / (hi - lo)) * (y1 - y0); }
+        function fmt(v) { return String(Math.round(v * 100) / 100); }
+
+        var svg = svgEl('svg', {
+            'class': 'ai-copilot__labchart-svg', viewBox: '0 0 ' + W + ' ' + H,
+            role: 'img', 'aria-label': s.display + ' trend, ' + fmt(values[0]) + ' to '
+                + fmt(values[values.length - 1]) + ' ' + (s.unit || '')
+        });
+
+        // axes (baseline + left rule)
+        svg.appendChild(svgEl('line', { 'class': 'ai-copilot__labchart-axis', x1: x0, y1: y0, x2: x0, y2: y1 }));
+        svg.appendChild(svgEl('line', { 'class': 'ai-copilot__labchart-axis', x1: x0, y1: y1, x2: x1, y2: y1 }));
+
+        // build the point coords once
+        var coords = points.map(function (p, i) { return { x: sx(times[i], i), y: sy(p.value), p: p }; });
+        var lineD = coords.map(function (c, i) { return (i ? 'L' : 'M') + c.x.toFixed(1) + ',' + c.y.toFixed(1); }).join(' ');
+
+        // area fill under the line
+        var areaD = 'M' + coords[0].x.toFixed(1) + ',' + y1 + ' '
+            + coords.map(function (c) { return 'L' + c.x.toFixed(1) + ',' + c.y.toFixed(1); }).join(' ')
+            + ' L' + coords[coords.length - 1].x.toFixed(1) + ',' + y1 + ' Z';
+        svg.appendChild(svgEl('path', { 'class': 'ai-copilot__labchart-area', d: areaD }));
+        svg.appendChild(svgEl('path', { 'class': 'ai-copilot__labchart-line', d: lineD }));
+
+        // y-axis min/max labels
+        svg.appendChild(labelEl(x0 - 4, y1, fmt(lo), 'end', 'ai-copilot__labchart-tick'));
+        svg.appendChild(labelEl(x0 - 4, y0 + 6, fmt(hi), 'end', 'ai-copilot__labchart-tick'));
+        // x-axis first/last year labels
+        svg.appendChild(labelEl(coords[0].x, H - 8, String(new Date(points[0].date).getUTCFullYear()), 'middle', 'ai-copilot__labchart-tick'));
+        svg.appendChild(labelEl(coords[coords.length - 1].x, H - 8, String(new Date(points[points.length - 1].date).getUTCFullYear()), 'middle', 'ai-copilot__labchart-tick'));
+
+        // points, coloured by status; endpoint emphasized
+        for (var i = 0; i < coords.length; i++) {
+            var c = coords[i];
+            var last = i === coords.length - 1;
+            var cls = 'ai-copilot__labchart-pt ai-copilot__labchart-pt--'
+                + (c.p.status === 'preliminary' ? 'prelim' : 'final');
+            svg.appendChild(svgEl('circle', { 'class': cls, cx: c.x.toFixed(1), cy: c.y.toFixed(1), r: last ? 4.5 : 3.5 }));
+        }
+        // value labels at first and last draw only
+        svg.appendChild(labelEl(coords[0].x + 5, coords[0].y + 12, fmt(values[0]), 'start', 'ai-copilot__labchart-val'));
+        var lastC = coords[coords.length - 1];
+        svg.appendChild(labelEl(lastC.x - 6, lastC.y - 7, fmt(values[values.length - 1]), 'end', 'ai-copilot__labchart-val ai-copilot__labchart-val--end'));
+
+        var figure = document.createElement('figure');
+        figure.className = 'ai-copilot__labchart';
+
+        var head = document.createElement('figcaption');
+        head.className = 'ai-copilot__labchart-head';
+        var name = document.createElement('span');
+        name.className = 'ai-copilot__labchart-name';
+        name.textContent = s.display || s.code;
+        head.appendChild(name);
+        if (s.unit) {
+            var unit = document.createElement('span');
+            unit.className = 'ai-copilot__labchart-unit';
+            unit.textContent = s.unit;
+            head.appendChild(unit);
+        }
+        var loinc = document.createElement('span');
+        loinc.className = 'ai-copilot__labchart-loinc';
+        loinc.textContent = 'LOINC ' + s.code;
+        head.appendChild(loinc);
+
+        figure.appendChild(head);
+        figure.appendChild(svg);
+        return figure;
+    }
+
+    /**
+     * A positioned SVG text label. Kept tiny because every chart tick and value goes through it.
+     *
+     * @param {number} x
+     * @param {number} y
+     * @param {string} text
+     * @param {string} anchor text-anchor value.
+     * @param {string} cls class name.
+     * @returns {SVGTextElement}
+     */
+    function labelEl(x, y, text, anchor, cls) {
+        var node = svgEl('text', { 'class': cls, x: x, y: y, 'text-anchor': anchor });
+        node.textContent = text;
+        return node;
     }
 
     /**
@@ -662,9 +833,9 @@
     // into `citations[]`) — never re-derived from `resource_type`, which cannot tell a Patient read
     // from FHIR apart from a Patient read off an intake form.
     //
-    // Four `source_type` values collapse to three tiers: LAB_PDF and INTAKE_FORM make the same claim
-    // about trust and differ only in *which* document — the grouping key one level down, inside the
-    // tier.
+    // Five `source_type` values collapse to three tiers: LAB_PDF, INTAKE_FORM, and MEDICATION_LIST
+    // make the same claim about trust and differ only in *which* document — the grouping key one
+    // level down, inside the tier.
 
     var TIER_GUIDELINE = 'guideline';
     var TIER_RECORD = 'record';
@@ -687,6 +858,7 @@
                 return TIER_RECORD;
             case 'lab_pdf':
             case 'intake_form':
+            case 'medication_list':
                 return TIER_DOCUMENT;
             default:
                 return TIER_DOCUMENT;
@@ -732,9 +904,14 @@
      * @param {Array<object>} claims The answer's claims, each carrying `citations[]`.
      * @returns {HTMLElement|null} The section, or null when no tier has anything to show.
      */
-    function renderEvidenceSection(evidence, claims) {
+    function renderEvidenceSection(evidence, claims, derivedFacts) {
         var recordClaims = claimsInTier(claims, TIER_RECORD);
-        var documentClaims = claimsInTier(claims, TIER_DOCUMENT);
+        // The document tier renders the full extracted-and-persisted fact set, not the subset the
+        // model happened to cite — so "Check all N against the scan" equals "Added to chart: N" and
+        // every persisted fact is verifiable (the two used to diverge, e.g. 27 shown vs 28 written).
+        var documentClaims = reconcileDocumentFacts(
+            claimsInTier(claims, TIER_DOCUMENT), derivedFacts || []
+        );
 
         var tiers = [];
         if (evidence.length > 0) {
@@ -921,6 +1098,84 @@
         // thing N times.
         item.appendChild(renderCitation(claims[0].source, TIER_RECORD));
         return item;
+    }
+
+    /**
+     * Reconcile the document tier's facts with the extracted-and-persisted set.
+     *
+     * The lab table must show what was written to the chart, not the subset the model chose to cite:
+     * the write-back persists every extracted lab fact (`answer.derived_facts`), so a card built from
+     * `answer.claims` alone under-counts (e.g. 27 rows for 28 written) and leaves a persisted fact
+     * unverifiable. For every lab document that produced derived facts, this replaces its cited
+     * claims with the full fact set, adapted to the claim shape the card renderer already consumes.
+     * Intake-form facts, and lab documents that yielded no derived fact (all uncoded), keep their
+     * claim-based rendering.
+     *
+     * @param {Array<object>} documentClaims The document-tier claims the model cited.
+     * @param {Array<object>} derivedFacts The `{document_id, doc_type, facts}` groups from write-back.
+     * @returns {Array<object>} The reconciled fact set to render, claim-shaped.
+     */
+    function reconcileDocumentFacts(documentClaims, derivedFacts) {
+        var labGroups = derivedFacts.filter(function (group) {
+            return group && group.doc_type === 'lab_pdf' && Array.isArray(group.facts);
+        });
+        var reconciledDocs = labGroups.map(function (group) { return String(group.document_id); });
+        var kept = documentClaims.filter(function (claim) {
+            var citation = primaryCitation(claim);
+            // Non-lab document facts (intake forms) stay claim-based — the write-back shape carries
+            // no analyte metadata for them, and they are not the surface being reconciled here.
+            if (!citation || citation.source_type !== 'lab_pdf') {
+                return true;
+            }
+            var documentId = String((claim.source || {}).document_id);
+            // A lab document with no derived facts (every analyte uncoded) has nothing to swap in, so
+            // fall back to its cited claims rather than dropping the table entirely.
+            return reconciledDocs.indexOf(documentId) < 0;
+        });
+        var derivedLab = [];
+        labGroups.forEach(function (group) {
+            group.facts.forEach(function (fact) {
+                if (fact && fact.type === 'lab') {
+                    derivedLab.push(adaptLabFact(group, fact));
+                }
+            });
+        });
+        return kept.concat(derivedLab);
+    }
+
+    /**
+     * Adapt one write-back lab fact to the claim shape the document card renderer consumes.
+     *
+     * The renderer reads `source.{document_id, doc_type, page, value, bounding_box}` and a primary
+     * citation carrying `lab_detail`; this maps the write-back keys (`bbox.{w,h}` → `width`/`height`,
+     * `label`/`units`/`range`/`abnormal` → `lab_detail`) onto it, so a derived fact renders and
+     * boxes identically to a cited claim.
+     *
+     * @param {object} group The fact's document group (`document_id`, `doc_type`).
+     * @param {object} fact One `type: 'lab'` fact from `derived_facts`.
+     * @returns {object} A claim-shaped object.
+     */
+    function adaptLabFact(group, fact) {
+        var box = fact.bbox || {};
+        return {
+            text: fact.label,
+            source: {
+                document_id: group.document_id,
+                doc_type: group.doc_type,
+                page: fact.page,
+                value: fact.value,
+                bounding_box: { page: fact.page, x: box.x, y: box.y, width: box.w, height: box.h }
+            },
+            citations: [{
+                source_type: 'lab_pdf',
+                lab_detail: {
+                    test_name: fact.label,
+                    unit: fact.units,
+                    reference_range: fact.range,
+                    abnormal_flag: fact.abnormal
+                }
+            }]
+        };
     }
 
     /**
@@ -1167,6 +1422,8 @@
                 return labels.docLabReport;
             case 'intake_form':
                 return labels.docIntakeForm;
+            case 'medication_list':
+                return labels.docMedicationList;
             default:
                 return labels.docGeneric;
         }
@@ -1544,14 +1801,35 @@
     }
 
     function postChat(message) {
+        // Each attempt gets its own deadline: on the 401 re-launch path sendTurn calls this twice,
+        // and the first attempt's timer is already cleared by the time the second fires.
+        var controller = new AbortController();
+        var timer = window.setTimeout(function () {
+            controller.abort();
+        }, CHAT_TIMEOUT_MS);
         return fetch(config.chatUrl, {
             method: 'POST',
             mode: 'cors',
+            signal: controller.signal,
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + token.accessToken
             },
             body: JSON.stringify({ patient_id: token.patient, message: message })
+        }).then(function (response) {
+            window.clearTimeout(timer);
+            return response;
+        }, function (err) {
+            window.clearTimeout(timer);
+            // An AbortError means our deadline fired -> the agent never responded. Retag it so the
+            // turn's catch shows the "no response / may be offline" message, not the generic fallback
+            // (which implies the agent answered but declined).
+            if (err && err.name === 'AbortError') {
+                var timeoutErr = new Error('chat_timeout');
+                timeoutErr.timedOut = true;
+                throw timeoutErr;
+            }
+            throw err;
         });
     }
 
@@ -1601,12 +1879,17 @@
                 removePending(pending);
                 appendAnswer(answer);
                 persistTurn(pidForTurn, message, answer); // Phase 3 stub
+                persistDerivedFacts(answer); // JOS-81: write extracted facts back to the chart
             })
             .catch(function (err) {
                 removePending(pending);
                 if (LAUNCH_FAILURES.indexOf(err.message) !== -1) {
                     setStatus(labels.authFailed, true);
                     appendError(labels.authFailed);
+                    return;
+                }
+                if (err && err.timedOut) {
+                    appendError(labels.timeout);
                     return;
                 }
                 // Only surface a message we authored (the agent's {error} body). Raw browser
@@ -1619,6 +1902,325 @@
                 setBusy(false);
                 els.input.focus();
             });
+    }
+
+    // ---- derived-fact write-back (JOS-81) --------------------------------
+    // The agent returns the facts it extracted this turn on answer.derived_facts, grouped by source
+    // document. We post each group to the session-authenticated persist endpoint (persist-facts.php),
+    // which writes them to the chart under the logged-in clinician's own ACL — the agent holds only a
+    // read token and cannot write. One POST per document, since the endpoint takes one document each.
+    function persistDerivedFacts(answer) {
+        var groups = answer && Array.isArray(answer.derived_facts) ? answer.derived_facts : [];
+        if (!groups.length || !config.persistFactsUrl) {
+            return; // nothing extracted this turn, or write-back not configured — no card.
+        }
+
+        Promise.all(groups.map(postFactGroup)).then(function (outcomes) {
+            // Fold every document's outcome into one turn-level summary, so a physician sees a single
+            // honest card: what was added, what was already there, and what failed. `written` and
+            // `skipped` carry the fact identities (a LOINC code, or `allergy:`/`medication:` keys).
+            var written = [];
+            var skipped = [];
+            var failed = [];
+            var transportFailed = false;
+            outcomes.forEach(function (o) {
+                written = written.concat(o.written);
+                skipped = skipped.concat(o.skipped);
+                failed = failed.concat(o.failed);
+                if (o.transportFailed) {
+                    transportFailed = true;
+                }
+            });
+            // Suppress the "no new facts" card when nothing auto-wrote but a demographics review is
+            // about to render — the review card is the meaningful output in that case.
+            var hasPreview = outcomes.some(function (o) { return o.preview && o.preview.length; });
+            var reported = written.length || skipped.length || failed.length || transportFailed;
+            if (reported || !hasPreview) {
+                appendFactWriteback(written, skipped, failed, transportFailed);
+            }
+            if (written.length) {
+                // persist-facts.php wrote straight to the DB, but the already-open chart tabs still
+                // show their pre-write server render — so a just-added med/allergy/lab is invisible
+                // until a manual refresh. Reload the Dashboard panel in place so it appears at once.
+                refreshChartDashboard();
+            }
+            // Demographics never auto-write (they overwrite chart identity data with no marker); each
+            // document that returned a preview gets a per-field review card the clinician accepts from.
+            outcomes.forEach(function (o) {
+                if (o.group && o.preview && o.preview.length) {
+                    appendDemographicReview(o.group, o.preview);
+                }
+            });
+        });
+    }
+
+    // Reload the patient Dashboard tab (frame name "pat" -> summary/demographics.php) in place, so a
+    // fact just persisted by the sidebar shows up without a manual page refresh or re-login. No-op
+    // when the Dashboard tab isn't open, and never switches the active tab (no focus steal) — if the
+    // clinician is on another tab it refreshes silently in the background. restoreSession keeps the
+    // session alive across the reload, matching how the rest of the sidebar drives top's tab frame.
+    function refreshChartDashboard() {
+        var win = window.top;
+        if (!win || !win.document) {
+            return;
+        }
+        var frame = win.document.querySelector('iframe[name="pat"]');
+        if (!frame || !frame.contentWindow) {
+            return; // Dashboard tab not open — nothing on screen to refresh.
+        }
+        if (typeof win.restoreSession === 'function') {
+            win.restoreSession();
+        }
+        frame.contentWindow.location.reload();
+    }
+
+    // POST one document's facts (unaccepted). Keeps the group on the outcome so a demographics
+    // preview can be turned into a review card and re-posted with the clinician's accept.
+    function postFactGroup(group) {
+        return postFacts(group.document_id, group.facts, false).then(function (outcome) {
+            outcome.group = group;
+            return outcome;
+        });
+    }
+
+    // POST + normalize. `accept` gates the demographics overwrite server-side: without it, gated
+    // fields come back as a `preview` (chart-vs-form diff) and nothing is written. The endpoint
+    // answers 200 (saved / preview), 207 (partial), or 500 (none) with a {written, skipped, failed,
+    // preview} JSON body. A non-JSON reply (an expired session returns an HTML login page) is a
+    // transport failure: we saved nothing and cannot say what. Fire-and-forget — never rejects.
+    function postFacts(documentId, facts, accept) {
+        return fetch(config.persistFactsUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin', // session cookie authorizes the write; NEVER the SMART token
+            body: JSON.stringify({
+                csrf_token: config.csrfToken,
+                document: documentId,
+                accept: accept === true,
+                facts: facts // already in the endpoint's shape (see agent wire.py)
+            })
+        })
+            .then(function (response) {
+                return response.text().then(function (text) {
+                    var body;
+                    try {
+                        body = JSON.parse(text);
+                    } catch (parseErr) {
+                        return emptyOutcome(true); // non-JSON (expired session / proxy error page)
+                    }
+                    return {
+                        transportFailed: false,
+                        written: Array.isArray(body.written) ? body.written : [],
+                        skipped: Array.isArray(body.skipped) ? body.skipped : [],
+                        preview: Array.isArray(body.preview) ? body.preview : [],
+                        // A non-ok reply with no `failed` list still means the whole group failed.
+                        failed: Array.isArray(body.failed) ? body.failed : (response.ok ? [] : ['all'])
+                    };
+                });
+            })
+            .catch(function () {
+                return emptyOutcome(true); // network/timeout
+            });
+    }
+
+    function emptyOutcome(transportFailed) {
+        return { transportFailed: transportFailed, written: [], skipped: [], preview: [], failed: [] };
+    }
+
+    // ---- write-back confirmation card ------------------------------------
+    // A persistent transcript card (not the ephemeral status line) so the physician can always tell
+    // what reached the chart: added, already-present (deduped), or failed. Silence used to mean
+    // "saved nothing" AND "everything was already there" AND "the write failed" — three very
+    // different things. This makes each explicit.
+    function appendFactWriteback(written, skipped, failed, transportFailed) {
+        var card = document.createElement('div');
+        card.className = 'ai-copilot__writeback';
+        card.setAttribute('role', 'status');
+
+        if (written.length) {
+            card.appendChild(writebackLine('saved', labels.wbSaved.replace('{facts}', describeFacts(written))));
+            card.appendChild(writebackLine('note', labels.wbReview));
+        }
+        if (skipped.length) {
+            card.appendChild(writebackLine('skipped', labels.wbSkipped.replace('{facts}', describeFacts(skipped))));
+        }
+        if (failed.length || transportFailed) {
+            var families = failed
+                .filter(function (f) { return f !== 'all'; })
+                .map(friendlyFamily);
+            var who = families.length ? joinList(families) : labels.wbFailedGeneric;
+            card.appendChild(writebackLine('failed', labels.wbFailed.replace('{families}', who)));
+        }
+        // Everything deduped-and-empty is impossible (skipped implies content), but guard anyway:
+        // if the turn had facts yet produced no line, say so rather than render an empty card.
+        if (!card.childNodes.length) {
+            card.appendChild(writebackLine('skipped', labels.wbNone));
+        }
+        appendNode(card);
+    }
+
+    function writebackLine(kind, text) {
+        var line = document.createElement('div');
+        line.className = 'ai-copilot__writeback-line ai-copilot__writeback-line--' + kind;
+        line.textContent = text;
+        return line;
+    }
+
+    // Count fact identities by destination and render "28 lab results, 2 allergies and 1 medication".
+    // Identities are the endpoint's keys: prefixes `allergy:`/`medication:`/`family_history:`/
+    // `demographic:`, the exact key `chief_concern`, else a bare LOINC code.
+    function describeFacts(identities) {
+        var counts = { lab: 0, allergy: 0, medication: 0, famhx: 0, chief: 0, demographic: 0 };
+        identities.forEach(function (id) {
+            if (id.indexOf('allergy:') === 0) {
+                counts.allergy++;
+            } else if (id.indexOf('medication:') === 0) {
+                counts.medication++;
+            } else if (id.indexOf('family_history:') === 0) {
+                counts.famhx++;
+            } else if (id.indexOf('demographic:') === 0) {
+                counts.demographic++;
+            } else if (id === 'chief_concern') {
+                counts.chief++;
+            } else {
+                counts.lab++;
+            }
+        });
+        var parts = [];
+        if (counts.lab) {
+            parts.push(counts.lab + ' ' + (counts.lab === 1 ? labels.factLab : labels.factLabs));
+        }
+        if (counts.allergy) {
+            parts.push(counts.allergy + ' ' + (counts.allergy === 1 ? labels.factAllergy : labels.factAllergies));
+        }
+        if (counts.medication) {
+            parts.push(counts.medication + ' ' + (counts.medication === 1 ? labels.factMed : labels.factMeds));
+        }
+        if (counts.famhx) {
+            parts.push(counts.famhx + ' ' + (counts.famhx === 1 ? labels.factFamHx : labels.factFamHxs));
+        }
+        if (counts.chief) {
+            parts.push(counts.chief + ' ' + labels.factChiefConcern);
+        }
+        if (counts.demographic) {
+            parts.push(counts.demographic + ' ' + (counts.demographic === 1 ? labels.factDemographic : labels.factDemographics));
+        }
+        return joinList(parts);
+    }
+
+    function friendlyFamily(family) {
+        switch (family) {
+            case 'labs': return labels.factLabs;
+            case 'intake': return labels.factAllergies + ' / ' + labels.factMeds;
+            case 'family_history': return labels.factFamHxs;
+            case 'chief_concern': return labels.factChiefConcern;
+            case 'demographics': return labels.factDemographics;
+            default: return family;
+        }
+    }
+
+    // ---- demographics review card (accept gate) --------------------------
+    // Demographics overwrite clinician-entered identity data in place with no not-confirmed marker,
+    // so they never auto-write. This renders the endpoint's chart-vs-form diff as a per-field
+    // checklist; accepting posts only the chosen fields back with accept:true, which makes the
+    // clinician the author of the change.
+    function appendDemographicReview(group, preview) {
+        var card = document.createElement('div');
+        card.className = 'ai-copilot__writeback ai-copilot__demo-review';
+        card.setAttribute('role', 'group');
+
+        card.appendChild(writebackLine('note', labels.dxTitle));
+
+        var note = document.createElement('div');
+        note.className = 'ai-copilot__demo-note';
+        note.textContent = labels.dxNote;
+        card.appendChild(note);
+
+        var checkboxes = [];
+        preview.forEach(function (row) {
+            var wrap = document.createElement('label');
+            wrap.className = 'ai-copilot__demo-row';
+
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'ai-copilot__demo-check';
+            cb.value = row.field;
+            checkboxes.push(cb);
+            wrap.appendChild(cb);
+
+            var text = document.createElement('span');
+            text.className = 'ai-copilot__demo-text';
+
+            var name = document.createElement('strong');
+            name.textContent = fieldLabel(row.field);
+            text.appendChild(name);
+
+            var diff = document.createElement('span');
+            diff.className = 'ai-copilot__demo-diff';
+            diff.textContent = labels.dxChart + ': ' + (row.chart || labels.dxEmptyChart)
+                + '  →  ' + labels.dxForm + ': ' + row.extracted; // → = right arrow
+            text.appendChild(diff);
+
+            wrap.appendChild(text);
+            card.appendChild(wrap);
+        });
+
+        var actions = document.createElement('div');
+        actions.className = 'ai-copilot__demo-actions';
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-copilot__demo-accept';
+        button.textContent = labels.dxAccept;
+        actions.appendChild(button);
+        card.appendChild(actions);
+
+        button.addEventListener('click', function () {
+            var chosen = checkboxes
+                .filter(function (c) { return c.checked; })
+                .map(function (c) { return c.value; });
+            if (!chosen.length) {
+                button.textContent = labels.dxPick;
+                return;
+            }
+            var facts = group.facts.filter(function (f) {
+                return f.type === 'demographic' && chosen.indexOf(f.field) !== -1;
+            });
+            button.disabled = true;
+            postFacts(group.document_id, facts, true).then(function (o) {
+                card.classList.add('ai-copilot__demo-review--done');
+                if (o.written.length) {
+                    card.appendChild(writebackLine('saved', labels.dxAdded.replace('{facts}', describeFacts(o.written))));
+                    refreshChartDashboard();
+                } else if (o.failed.length || o.transportFailed) {
+                    card.appendChild(writebackLine('failed', labels.wbFailed.replace('{families}', labels.factDemographics)));
+                    button.disabled = false; // let them retry
+                } else {
+                    // Accepted, but the values matched the chart or could not be normalized safely.
+                    card.appendChild(writebackLine('skipped', labels.wbSkipped.replace('{facts}', describeFacts(o.skipped))));
+                }
+            });
+        });
+
+        appendNode(card);
+    }
+
+    function fieldLabel(field) {
+        switch (field) {
+            case 'full_name': return labels.dfFullName;
+            case 'date_of_birth': return labels.dfDateOfBirth;
+            case 'sex': return labels.dfSex;
+            case 'address': return labels.dfAddress;
+            case 'phone': return labels.dfPhone;
+            default: return field;
+        }
+    }
+
+    // "a", "a and b", "a, b and c".
+    function joinList(parts) {
+        if (parts.length <= 1) {
+            return parts.join('');
+        }
+        return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
     }
 
     // ---- conversation persistence (Phase 3 stubs) ------------------------
@@ -1719,6 +2321,10 @@
         labels = {
             authFailed: els.sidebar.dataset.labelAuthFailed,
             unavailable: els.sidebar.dataset.labelUnavailable,
+            // Shown when the turn's fetch hits CHAT_TIMEOUT_MS with no response (hung/offline agent).
+            // Defaulted so it works before the PHP island grows the data-label-timeout attribute.
+            timeout: els.sidebar.dataset.labelTimeout
+                || 'The assistant did not respond. It may be offline — please try again.',
             clearConfirm: els.sidebar.dataset.labelClearConfirm,
             thinking: els.sidebar.dataset.labelThinking,
             hasConversation: els.sidebar.dataset.labelHasConversation,
@@ -1745,7 +2351,43 @@
             tierDocumentsShort: els.sidebar.dataset.labelTierDocumentsShort || 'read from scan',
             docLabReport: els.sidebar.dataset.labelDocLabReport || 'Lab report',
             docIntakeForm: els.sidebar.dataset.labelDocIntakeForm || 'Intake form',
-            docGeneric: els.sidebar.dataset.labelDocGeneric || 'Uploaded document'
+            docMedicationList: els.sidebar.dataset.labelDocMedicationList || 'Medication list',
+            docGeneric: els.sidebar.dataset.labelDocGeneric || 'Uploaded document',
+            // Write-back confirmation card (JOS-81). {facts} and {families} are filled in JS.
+            // Defaulted here so the card works before the PHP island grows these data-label-* attrs.
+            wbSaved: els.sidebar.dataset.labelWbSaved || 'Added to chart: {facts}',
+            wbReview: els.sidebar.dataset.labelWbReview || 'Marked unconfirmed — review before relying on them.',
+            wbSkipped: els.sidebar.dataset.labelWbSkipped || 'Already in the chart: {facts}',
+            wbFailed: els.sidebar.dataset.labelWbFailed || 'Could not save {families} — nothing was added; try again.',
+            wbFailedGeneric: els.sidebar.dataset.labelWbFailedGeneric || 'some facts',
+            wbNone: els.sidebar.dataset.labelWbNone || 'No new chart facts in this answer.',
+            factLab: els.sidebar.dataset.labelFactLab || 'lab result',
+            factLabs: els.sidebar.dataset.labelFactLabs || 'lab results',
+            factAllergy: els.sidebar.dataset.labelFactAllergy || 'allergy',
+            factAllergies: els.sidebar.dataset.labelFactAllergies || 'allergies',
+            factMed: els.sidebar.dataset.labelFactMed || 'medication',
+            factMeds: els.sidebar.dataset.labelFactMeds || 'medications',
+            factFamHx: els.sidebar.dataset.labelFactFamHx || 'family history entry',
+            factFamHxs: els.sidebar.dataset.labelFactFamHxs || 'family history entries',
+            factChiefConcern: els.sidebar.dataset.labelFactChiefConcern || 'chief concern',
+            factDemographic: els.sidebar.dataset.labelFactDemographic || 'demographic',
+            factDemographics: els.sidebar.dataset.labelFactDemographics || 'demographics',
+            // Demographics review card (intake-write-back-completion). Demographics overwrite the
+            // chart in place with no marker, so they are never written until the clinician accepts.
+            dxTitle: els.sidebar.dataset.labelDxTitle || 'Demographics from the intake form',
+            dxNote: els.sidebar.dataset.labelDxNote
+                || 'These would overwrite the chart. Review each against the current value, then add only the ones you accept.',
+            dxChart: els.sidebar.dataset.labelDxChart || 'Chart',
+            dxForm: els.sidebar.dataset.labelDxForm || 'Form',
+            dxEmptyChart: els.sidebar.dataset.labelDxEmptyChart || '(blank)',
+            dxAccept: els.sidebar.dataset.labelDxAccept || 'Add selected to chart',
+            dxPick: els.sidebar.dataset.labelDxPick || 'Select at least one field to add.',
+            dxAdded: els.sidebar.dataset.labelDxAdded || 'Updated {facts} in the chart.',
+            dfFullName: els.sidebar.dataset.labelDfFullName || 'Full name',
+            dfDateOfBirth: els.sidebar.dataset.labelDfDateOfBirth || 'Date of birth',
+            dfSex: els.sidebar.dataset.labelDfSex || 'Sex',
+            dfAddress: els.sidebar.dataset.labelDfAddress || 'Address',
+            dfPhone: els.sidebar.dataset.labelDfPhone || 'Phone'
         };
 
         els.resizer = document.getElementById('ai-copilot-resizer');

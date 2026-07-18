@@ -227,9 +227,9 @@ def run_local() -> None:
     """Run the full golden set locally against the hosted dataset (paid; never fails the process).
 
     This is the **on-demand, approval-gated full-50 run** (~$2 on Haiku) — it makes real model
-    calls for every case in ``copilot-golden-v1``. The cheap 3-case CI gate uses the
-    ``copilot-golden-ci`` subset instead (see the evals workflow). A regression is reported but not
-    raised — this is for iterating on the suite, not gating.
+    calls for every case in ``copilot-week2-golden-v1``. The cheap 3-case CI gate uses the
+    ``copilot-week2-golden-ci`` subset instead (see the evals workflow). A regression is reported
+    but not raised — this is for iterating on the suite, not gating.
     """
     _enable_tracing()
     agent_model = resolve_eval_model_tier().value

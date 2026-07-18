@@ -1,0 +1,1093 @@
+{
+  "components": {
+    "schemas": {
+      "AbnormalFlag": {
+        "description": "Lab abnormal indicator.\n\nValues mirror OpenEMR ``procedure_result.abnormal`` so a derived result round-trips to the\nchart without remapping (W2_ARCHITECTURE \u00a76).",
+        "enum": [
+          "no",
+          "yes",
+          "high",
+          "low"
+        ],
+        "title": "AbnormalFlag",
+        "type": "string"
+      },
+      "Allergy": {
+        "description": "An allergy reported on an intake form.",
+        "properties": {
+          "citation": {
+            "$ref": "#/components/schemas/Citation",
+            "description": "Where on the form this allergy was read from."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "title": "Confidence"
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reaction as printed, e.g. 'hives'. Null if not given.",
+            "title": "Reaction"
+          },
+          "substance": {
+            "description": "Allergen/substance as printed, e.g. 'Penicillin'.",
+            "minLength": 1,
+            "title": "Substance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "substance",
+          "citation"
+        ],
+        "title": "Allergy",
+        "type": "object"
+      },
+      "BoundingBox": {
+        "description": "Box locating a value on a source page, in PDF points, emitted by the extractor.\n\nDrives the click-to-source overlay (W2_ARCHITECTURE \u00a73.3). Coordinates are PDF user-space points\n(72-DPI) with a top-left origin \u2014 the exact space the overlay renders in \u2014 so the overlay maps\nthem straight onto the rendered page with no conversion. Boxes come from the PDF text layer\nwhere present (already in points); the scanned fallback converts its native pixels upstream.",
+        "properties": {
+          "height": {
+            "description": "Box height in PDF points",
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "page": {
+            "description": "1-based page the box is on",
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "width": {
+            "description": "Box width in PDF points",
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "description": "Left edge in PDF points",
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "description": "Top edge in PDF points",
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "page",
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "BoundingBox",
+        "type": "object"
+      },
+      "ChatRequest": {
+        "description": "The inbound ``POST /chat`` payload for a single agent turn.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque id echoed from a prior turn's response; omit to start a new one",
+            "title": "Conversation Id"
+          },
+          "message": {
+            "description": "The physician's question",
+            "title": "Message",
+            "type": "string"
+          },
+          "patient_id": {
+            "description": "FHIR Patient logical id the turn is scoped to",
+            "title": "Patient Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "patient_id",
+          "message"
+        ],
+        "title": "ChatRequest",
+        "type": "object"
+      },
+      "Citation": {
+        "description": "Machine-readable citation for one extracted fact \u2014 the W2 citation contract (\u00a73.3).\n\nContract shape: ``{source_type, source_id, page_or_section, field_or_chunk_id,\nquote_or_value}`` plus a native ``bounding_box`` for lab_pdf facts. Split by who fills what,\nexactly as Week 1's ``SourceRef`` is: the **extractor** supplies only what it read from the\npage (``quote_or_value`` and ``bounding_box``); everything that *identifies* the source is\n**stamped by code**, so the model can never fabricate a provenance pointer.",
+        "properties": {
+          "bounding_box": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundingBox"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Box locating the value on the page (PDF points). Required for lab_pdf facts."
+          },
+          "field_or_chunk_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Leave empty \u2014 the system stamps the schema field path this fact populates.",
+            "title": "Field Or Chunk Id"
+          },
+          "page_or_section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Leave empty \u2014 the system fills the page number from the bounding box.",
+            "title": "Page Or Section"
+          },
+          "quote_or_value": {
+            "description": "The value/text EXACTLY as it appears on the source page, copied verbatim.",
+            "minLength": 1,
+            "title": "Quote Or Value",
+            "type": "string"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Leave empty \u2014 the system stamps the source document id.",
+            "title": "Source Id"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Leave empty \u2014 the system stamps this from the document's category."
+          }
+        },
+        "required": [
+          "quote_or_value"
+        ],
+        "title": "Citation",
+        "type": "object"
+      },
+      "CitedText": {
+        "description": "A single free-text intake value with its source citation.",
+        "properties": {
+          "citation": {
+            "$ref": "#/components/schemas/Citation",
+            "description": "Where on the form this value was read from."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "title": "Confidence"
+          },
+          "value": {
+            "description": "The value verbatim as printed on the form.",
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "citation"
+        ],
+        "title": "CitedText",
+        "type": "object"
+      },
+      "Demographics": {
+        "description": "Patient demographics captured from an intake form (PRD Core Req 2).\n\nEach field is captured verbatim; typed parsing (date of birth \u2192 date, sex \u2192 enum) happens at\nthe persistence boundary, not here. Any field absent or illegible on the scan is null \u2014 never\ninferred.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mailing address as printed."
+          },
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Date of birth as printed."
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Patient full name as printed."
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact phone as printed."
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sex/gender as printed."
+          }
+        },
+        "title": "Demographics",
+        "type": "object"
+      },
+      "DocType": {
+        "description": "The document types the ingestion flow supports (PRD Core Req 1).\n\nResolved deterministically from the OpenEMR document category, not classified by the model:\nthe ``Lab Report`` category maps to ``LAB_PDF``, ``Patient Information`` to ``INTAKE_FORM``,\n``Medication List`` to ``MEDICATION_LIST``. The category picks the schema; the model never\ndecides what kind of document it is.",
+        "enum": [
+          "lab_pdf",
+          "intake_form",
+          "medication_list"
+        ],
+        "title": "DocType",
+        "type": "string"
+      },
+      "DocumentsResponse": {
+        "description": "``GET /documents`` \u2014 the patient's uploaded, extractable documents (metadata only).",
+        "properties": {
+          "documents": {
+            "description": "Uploaded PDF/Binary documents whose category maps to an extraction schema",
+            "items": {
+              "$ref": "#/components/schemas/UploadedDocumentSummary"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "patient_id": {
+            "description": "FHIR Patient logical id the listing is scoped to",
+            "title": "Patient Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "patient_id",
+          "documents"
+        ],
+        "title": "DocumentsResponse",
+        "type": "object"
+      },
+      "EvidenceItem": {
+        "description": "One ranked guideline chunk in the flat evidence-snippet wire shape.\n\nA projection of the retriever's :class:`EvidenceSnippet` onto the minimal citation contract\n(source_id / section / chunk_id / text) plus the reranker ``score`` and presentation\n``topic``/``source_url`` \u2014 the fields the citation card and click-to-source consume.",
+        "properties": {
+          "chunk_id": {
+            "description": "Stable id of the retrieved chunk",
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "score": {
+            "description": "Reranker relevance score in [0, 1]; higher is more relevant",
+            "title": "Score",
+            "type": "number"
+          },
+          "section": {
+            "description": "Section heading the chunk was drawn from",
+            "title": "Section",
+            "type": "string"
+          },
+          "source_id": {
+            "description": "The source-guideline document id",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Public URL of the source guideline",
+            "title": "Source Url"
+          },
+          "text": {
+            "description": "The chunk text \u2014 the cited quote",
+            "title": "Text",
+            "type": "string"
+          },
+          "topic": {
+            "description": "Guideline topic slug, e.g. 'hypertension'",
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "section",
+          "chunk_id",
+          "text",
+          "score",
+          "topic"
+        ],
+        "title": "EvidenceItem",
+        "type": "object"
+      },
+      "EvidenceResponse": {
+        "description": "``GET /evidence`` \u2014 the ranked guideline chunks retrieved for a query.",
+        "properties": {
+          "evidence": {
+            "description": "Ranked guideline chunks, most relevant first",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "query": {
+            "description": "The retrieval query that was run",
+            "title": "Query",
+            "type": "string"
+          },
+          "top_n": {
+            "description": "The effective number of snippets requested",
+            "title": "Top N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query",
+          "top_n",
+          "evidence"
+        ],
+        "title": "EvidenceResponse",
+        "type": "object"
+      },
+      "ExtractionResponse": {
+        "description": "``GET /documents/{id}/extraction`` \u2014 one document's strict-schema facts.\n\n``report`` is the schema the document's TYPE selected \u2014 a ``LabReport`` for a ``lab_pdf``, an\n``IntakeForm`` for an ``intake_form``, a ``MedicationList`` for a ``medication_list`` \u2014 with\neach fact carrying its citation (bounding box + verbatim value) and per-value confidence.\n``doc_type`` is the human-readable discriminant, resolved server-side from the document's\nOpenEMR category (never a caller input).",
+        "properties": {
+          "doc_type": {
+            "$ref": "#/components/schemas/DocType",
+            "description": "Which schema the document's category selected"
+          },
+          "document_id": {
+            "description": "The extracted DocumentReference id",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LabReport"
+              },
+              {
+                "$ref": "#/components/schemas/IntakeForm"
+              },
+              {
+                "$ref": "#/components/schemas/MedicationList"
+              }
+            ],
+            "description": "LabReport for a lab_pdf, IntakeForm for an intake_form, MedicationList for a medication_list",
+            "title": "Report"
+          }
+        },
+        "required": [
+          "document_id",
+          "doc_type",
+          "report"
+        ],
+        "title": "ExtractionResponse",
+        "type": "object"
+      },
+      "FamilyHistoryItem": {
+        "description": "One family-history entry reported on an intake form.",
+        "properties": {
+          "citation": {
+            "$ref": "#/components/schemas/Citation",
+            "description": "Where on the form this entry was read from."
+          },
+          "condition": {
+            "description": "Condition as printed, e.g. 'Type 2 diabetes'.",
+            "minLength": 1,
+            "title": "Condition",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "title": "Confidence"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Affected relative, e.g. 'mother'. Null if not given.",
+            "title": "Relation"
+          }
+        },
+        "required": [
+          "condition",
+          "citation"
+        ],
+        "title": "FamilyHistoryItem",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IntakeForm": {
+        "description": "Strict-schema extraction of an ``intake_form`` document (PRD Core Req 2).\n\nThe canonical contract for intake extraction (W2_ARCHITECTURE \u00a73.1 step 3). List sections are\nalways present but may be empty when the form reports none; an empty list means 'none read\nfrom the form' \u2014 which the answer layer treats as missing-data, not as an affirmative 'none'.\n\nNo medications: :class:`MedicationList` owns them, so the two document types are mutually\nexclusive. Intake persists allergies only (demographics, chief concern, family history are\ndisplay-only).",
+        "properties": {
+          "allergies": {
+            "description": "Every allergy read from the form, each cited.",
+            "items": {
+              "$ref": "#/components/schemas/Allergy"
+            },
+            "title": "Allergies",
+            "type": "array"
+          },
+          "chief_concern": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Chief concern / reason for visit as printed. Null if absent."
+          },
+          "demographics": {
+            "$ref": "#/components/schemas/Demographics",
+            "description": "Patient demographics block."
+          },
+          "family_history": {
+            "description": "Every family-history entry read from the form, each cited.",
+            "items": {
+              "$ref": "#/components/schemas/FamilyHistoryItem"
+            },
+            "title": "Family History",
+            "type": "array"
+          }
+        },
+        "required": [
+          "demographics",
+          "allergies",
+          "family_history"
+        ],
+        "title": "IntakeForm",
+        "type": "object"
+      },
+      "LabReport": {
+        "description": "Strict-schema extraction of a ``lab_pdf`` document (PRD Core Req 2).\n\nThe canonical contract for lab extraction: raw extractor output is parsed into this model at\nthe ingestion boundary (W2_ARCHITECTURE \u00a73.1 step 3). Anything the extractor emits that is not\nin this schema is dropped; a required field it omits fails validation and triggers a bounded\nretry.",
+        "properties": {
+          "results": {
+            "description": "Every lab result read from the report, each individually cited.",
+            "items": {
+              "$ref": "#/components/schemas/LabResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "LabReport",
+        "type": "object"
+      },
+      "LabResult": {
+        "description": "One extracted lab analyte with its citation (PRD Core Req 2 \u2014 lab fields).\n\nValues are captured **verbatim as printed** \u2014 never rounded, converted, or inferred. Numeric\nparsing for the trend widget happens downstream at the persistence boundary, not here.\n\n``loinc`` is **optional, deliberately.** OpenEMR publishes ``procedure_result.result_code`` as a\nLOINC code unconditionally, so write-back needs one and refuses a result without it (JOS-81).\nBut a report that prints no codes must still yield usable facts \u2014 the value, the name and the\nbox are what answer the physician's question \u2014 so requiring it here would turn \"cannot persist\nthis\" into \"cannot read this at all\", which is a much worse failure. The two concerns are\nseparate: extraction takes what the page offers; persistence sets its own bar.\n\nA code that fails validation (:func:`copilot.ingestion.loinc.parse`) arrives here as None rather\nthan as a guess. A misread code silently mislabels *which test was run*, which is worse than no\ncode, because nothing downstream can tell it from a correct one.",
+        "properties": {
+          "abnormal_flag": {
+            "$ref": "#/components/schemas/AbnormalFlag",
+            "description": "Abnormal indicator; use 'no' if the report shows none."
+          },
+          "citation": {
+            "$ref": "#/components/schemas/Citation",
+            "description": "Where on the source page this value was read from."
+          },
+          "collection_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Specimen collection date if printed (ISO 8601). Null if absent \u2014 never infer.",
+            "title": "Collection Date"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "title": "Confidence"
+          },
+          "loinc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The LOINC code printed beside the analyte, e.g. '2823-3'. Null when the report prints none. Read it off the page \u2014 never supply a code from memory.",
+            "title": "Loinc"
+          },
+          "reference_range": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reference range verbatim, e.g. '4.0-5.6'. Null if not printed.",
+            "title": "Reference Range"
+          },
+          "test_name": {
+            "description": "Analyte/test name exactly as printed, e.g. 'Hemoglobin A1c'.",
+            "minLength": 1,
+            "title": "Test Name",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit as printed, e.g. '%'. Null if unitless/qualitative.",
+            "title": "Unit"
+          },
+          "value": {
+            "description": "Result value verbatim, e.g. '8.2' or 'Positive'. Never round or convert.",
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "test_name",
+          "value",
+          "abnormal_flag",
+          "citation"
+        ],
+        "title": "LabResult",
+        "type": "object"
+      },
+      "Medication": {
+        "description": "A medication read from a medication list \u2014 name plus verbatim dose and frequency.",
+        "properties": {
+          "citation": {
+            "$ref": "#/components/schemas/Citation",
+            "description": "Where on the document this medication was read from."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "title": "Confidence"
+          },
+          "dose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dose/strength as printed, e.g. '500 mg'. Null if not given.",
+            "title": "Dose"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Frequency as printed, e.g. 'twice daily'. Null if not given.",
+            "title": "Frequency"
+          },
+          "name": {
+            "description": "Medication name as printed, e.g. 'Metformin'.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "citation"
+        ],
+        "title": "Medication",
+        "type": "object"
+      },
+      "MedicationList": {
+        "description": "Strict-schema extraction of a ``medication_list`` document (PRD Core Req 1).\n\nThe third document type (W2_ARCHITECTURE \u00a73.1) \u2014 a pharmacy profile, discharge list, or\nreconciliation sheet. Owns medications, which ``intake_form`` no longer extracts. An empty\n``medications`` list means 'none read', treated as missing-data, not an affirmative 'none'.",
+        "properties": {
+          "medications": {
+            "description": "Every medication read from the list, each cited.",
+            "items": {
+              "$ref": "#/components/schemas/Medication"
+            },
+            "title": "Medications",
+            "type": "array"
+          }
+        },
+        "required": [
+          "medications"
+        ],
+        "title": "MedicationList",
+        "type": "object"
+      },
+      "SourceType": {
+        "description": "Citation source vocabulary (W2_ARCHITECTURE \u00a73.3).\n\nExtraction facts cite a document (``LAB_PDF`` / ``INTAKE_FORM``); the answer layer also cites\n``GUIDELINE`` (RAG) and ``OPENEMR_RECORD`` (baseline chart). All four live here so the\ncitation contract is one shared shape across the project.",
+        "enum": [
+          "lab_pdf",
+          "intake_form",
+          "guideline",
+          "openemr_record"
+        ],
+        "title": "SourceType",
+        "type": "string"
+      },
+      "UploadedDocumentSummary": {
+        "description": "A discovered uploaded document, and which extraction schema its category names.\n\nReturned by ``get_documents`` so the intake-extractor can find a patient's uploaded documents\nand hand one to ``attach_and_extract``. A document qualifies only when it has a binary\n(PDF/Binary) attachment AND its category resolves to a schema \u2014 so an advance directive or a\nreferral is never listed, and never read through a schema that does not describe it.\n\n``doc_type`` rides on the summary so the tool that extracts a document never has to be TOLD\nwhat kind it is: the type was resolved from the record's own category at discovery, which is\nwhat keeps the choice of schema out of the model's hands.\n\nMetadata only \u2014 the document is OCR'd from its bytes, not read from FHIR (the SMART token\ncannot read the Binary; see the seam spec), so no ``citation_identity`` is needed here.",
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "DocumentReference.date",
+            "title": "Date"
+          },
+          "doc_type": {
+            "$ref": "#/components/schemas/DocType",
+            "description": "Which schema this document is read through"
+          },
+          "resource_id": {
+            "description": "FHIR DocumentReference.id \u2014 pass to attach_and_extract",
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "resource_type": {
+            "default": "DocumentReference",
+            "description": "FHIR resource type, always 'DocumentReference'",
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Document title/filename, if any",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "resource_id",
+          "doc_type"
+        ],
+        "title": "UploadedDocumentSummary",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "AgentForge Clinical Co-Pilot",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/chat": {
+      "post": {
+        "description": "Answer one agent turn, grounded and traced (ARCHITECTURE.md \u00a76.2).\n\nThe agent run is wrapped in a Langfuse trace context; the instrumentation captures the\nmodel, tokens, cost, and tool spans automatically, and the verification outcome is\nrecorded as a score. Tracing failures never affect the response.",
+        "operationId": "chat_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat"
+      }
+    },
+    "/documents": {
+      "get": {
+        "description": "List the patient's uploaded, extractable documents (metadata only).\n\nBacks the ``list_documents`` tool: the same patient-scoped FHIR ``DocumentReference``\nsearch, filtered to uploaded PDFs whose category resolves to an extraction schema.",
+        "operationId": "documents_documents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "patient_id",
+            "required": true,
+            "schema": {
+              "title": "Patient Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Documents"
+      }
+    },
+    "/documents/{document_id}/extraction": {
+      "get": {
+        "description": "Extract one uploaded document into its strict-schema facts (synchronous; no LLM).\n\nBacks ``attach_and_extract`` via the shared ``resolve_and_extract`` core: the document's\n``doc_type`` is resolved server-side from its OpenEMR category (never a caller input), and\nan id that is not one of the patient's uploaded documents is a 404. The response IS the\nextraction result \u2014 there is no async job/status to poll.",
+        "operationId": "document_extraction_documents__document_id__extraction_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "patient_id",
+            "required": true,
+            "schema": {
+              "title": "Patient Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Document Extraction"
+      }
+    },
+    "/evidence": {
+      "get": {
+        "description": "Retrieve ranked guideline chunks for a query (the hybrid-RAG path; no LLM, no PHI).\n\nBacks ``search_guidelines``: runs the retriever (Qdrant + rerank, or the fixture fallback)\nover the non-PHI corpus. Gated by the bearer token for a uniform surface, though it reads no\npatient data. Corpus indexing stays a CLI dev op \u2014 this endpoint never mutates the corpus.",
+        "operationId": "evidence_evidence_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "top_n",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Top N"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evidence"
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Liveness probe \u2014 200 whenever the process is alive (ARCHITECTURE.md \u00a710).",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "Readiness probe \u2014 200 only when every probed dependency is reachable.\n\nSurfaces per-dependency status for FHIR, the LLM, Langfuse, document storage, the vector\nindex, and the reranker (W2_ARCHITECTURE.md \u00a710); 503 with the same body otherwise.",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready"
+      }
+    }
+  }
+}

@@ -15,8 +15,16 @@ from copilot.ingestion.schemas import (
     LabReport,
     LabResult,
     Medication,
+    MedicationList,
 )
-from copilot.schemas import Claim, FhirCitation, IntakeFormCitation, LabPdfCitation, SourceRef
+from copilot.schemas import (
+    Claim,
+    FhirCitation,
+    IntakeFormCitation,
+    LabPdfCitation,
+    MedicationListCitation,
+    SourceRef,
+)
 from copilot.verification import CompositeResolver, FetchLog, ground_claims
 
 # FHIR logical ids are uuids; document-fact ids are `<document_id>#<ordinal>`. The two namespaces
@@ -42,21 +50,27 @@ def _cited(value: str) -> CitedText:
 
 
 def _intake_form() -> IntakeForm:
-    """A minimal intake form stating one demographic, one medication and one allergy."""
+    """A minimal intake form stating one demographic and one allergy."""
     return IntakeForm(
         demographics=Demographics(full_name=_cited("Sergio Angulo")),
-        current_medications=[
+        allergies=[
+            Allergy(substance="Penicillin", reaction="hives", citation=_citation("Penicillin"))
+        ],
+        family_history=[],
+    )
+
+
+def _medication_list() -> MedicationList:
+    """A minimal medication list stating one cited medication."""
+    return MedicationList(
+        medications=[
             Medication(
                 name="Metformin",
                 dose="500 mg",
                 frequency="twice daily",
                 citation=_citation("Metformin"),
             )
-        ],
-        allergies=[
-            Allergy(substance="Penicillin", reaction="hives", citation=_citation("Penicillin"))
-        ],
-        family_history=[],
+        ]
     )
 
 
@@ -89,6 +103,13 @@ def _lab_document(document_id: str = "doc-lab") -> ExtractedDocument:
     )
 
 
+def _medication_list_document(document_id: str = "doc-meds") -> ExtractedDocument:
+    """One extracted medication list, ready to record."""
+    return ExtractedDocument(
+        document_id=document_id, doc_type=DocType.MEDICATION_LIST, report=_medication_list()
+    )
+
+
 def test_document_facts_and_fetched_records_ground_side_by_side_under_a_shared_tag() -> None:
     """A document fact and a FHIR record sharing a resource_type each ground to their own value.
 
@@ -107,8 +128,15 @@ def test_document_facts_and_fetched_records_ground_side_by_side_under_a_shared_t
     fetched.record_all(FhirAllergy(resource_id=_FHIR_ALLERGY_ID, substance="Latex"))
     fetched.record_all(FhirMedication(resource_id=_FHIR_MEDICATION_ID, name="Lisinopril"))
     documents = DocumentFactRegistry()
-    handles = documents.record(_intake_document())
-    by_kind = {handle.kind: handle for handle in handles}
+    # Demographics + allergies come from the intake form; medications from a medication list — the
+    # two document types are mutually exclusive in what they extract.
+    by_kind = {
+        handle.kind: handle
+        for handle in (
+            *documents.record(_intake_document()),
+            *documents.record(_medication_list_document())
+        )
+    }
     resolver = CompositeResolver((fetched, documents))
 
     fhir_cases = (
@@ -121,25 +149,26 @@ def test_document_facts_and_fetched_records_ground_side_by_side_under_a_shared_t
             SourceRef(resource_type=resource_type, resource_id=resource_id, field=field)
         )
         assert resolution is not None
-        assert resolution.value == expected  # the chart's value, not the form's
+        assert resolution.value == expected  # the chart's value, not the document's
         assert resolution.doc_type is None  # a fetched record has no document provenance
         assert resolution.document_id is None
 
     document_cases = (
-        (FactKind.DEMOGRAPHIC, "Patient", "Sergio Angulo"),
-        (FactKind.ALLERGY, "AllergyIntolerance", "Penicillin"),
-        (FactKind.MEDICATION, "MedicationRequest", "Metformin"),
+        (FactKind.DEMOGRAPHIC, "Patient", "Sergio Angulo", "doc-intake", DocType.INTAKE_FORM),
+        (FactKind.ALLERGY, "AllergyIntolerance", "Penicillin", "doc-intake", DocType.INTAKE_FORM),
+        (FactKind.MEDICATION, "MedicationRequest", "Metformin", "doc-meds",
+         DocType.MEDICATION_LIST),
     )
-    for kind, resource_type, expected in document_cases:
+    for kind, resource_type, expected, document_id, doc_type in document_cases:
         handle = by_kind[kind]
         assert handle.resource_type == resource_type  # tagged by write target, shared with FHIR
         resolution = resolver.resolve(
             SourceRef(resource_type=handle.resource_type, resource_id=handle.resource_id)
         )
         assert resolution is not None
-        assert resolution.value == expected  # the form's value, not the chart's
-        assert resolution.document_id == "doc-intake"
-        assert resolution.doc_type is DocType.INTAKE_FORM
+        assert resolution.value == expected  # the document's value, not the chart's
+        assert resolution.document_id == document_id
+        assert resolution.doc_type is doc_type
 
 
 def test_intake_fact_projects_to_an_intake_form_citation() -> None:
@@ -167,6 +196,32 @@ def test_intake_fact_projects_to_an_intake_form_citation() -> None:
     assert citation.model_dump(mode="json")["source_type"] == "intake_form"
     assert citation.source_id == "doc-intake"
     assert citation.quote_or_value == "Sergio Angulo"  # stamped by code from the recorded fact
+    assert citation.page == 1
+    assert citation.bounding_box == _box()
+
+
+def test_medication_list_fact_projects_to_a_medication_list_citation() -> None:
+    """A medication-list fact's grounded citation projects to MedicationListCitation.
+
+    Routing is by doc_type, so if it regressed a medication read off a medication list would
+    serialize as `source_type: "intake_form"` and the sidebar would mislabel the provenance of the
+    physician's evidence — the exact confusion the distinct source type exists to prevent.
+    """
+    documents = DocumentFactRegistry()
+    handle = documents.record(_medication_list_document())[0]
+    claim = Claim(
+        text="The medication list includes Metformin.",
+        source=SourceRef(resource_type=handle.resource_type, resource_id=handle.resource_id),
+    )
+
+    grounded, offenders = ground_claims([claim], documents)
+
+    assert not offenders
+    citation = grounded[0].source.to_citation()
+    assert isinstance(citation, MedicationListCitation)
+    assert citation.model_dump(mode="json")["source_type"] == "medication_list"
+    assert citation.source_id == "doc-meds"
+    assert citation.quote_or_value == "Metformin"  # stamped by code from the recorded fact
     assert citation.page == 1
     assert citation.bounding_box == _box()
 

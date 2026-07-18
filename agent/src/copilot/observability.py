@@ -171,6 +171,20 @@ class TurnTrace:
         """Record the grounding gate's outcome as a ``verification_grounding`` score."""
         self._apply(lambda s: s.score_trace(name="verification_grounding", value=float(passed)))
 
+    def limited(self) -> None:
+        """Record that the turn hit the tool-call ceiling before it could answer.
+
+        Emits a distinct ``tool_ceiling`` score instead of ``verification_grounding=0``: a turn
+        that spent its whole tool budget never reached the grounding gate, so scoring it as a
+        grounding failure would pollute the A4 grounding-refusal rate — a *trust* signal — with
+        resource-limit hits, which are a cost/runaway signal instead. The span level is set to
+        ``WARNING`` so the degraded turn is visible in the trace view without reading as an
+        infrastructure error (which ``errored`` reserves for 5xx failures). See
+        ``context/planning/alerting.md``.
+        """
+        self._apply(lambda s: s.score_trace(name="tool_ceiling", value=1.0))
+        self._apply(lambda s: s.update(level="WARNING"))
+
     def errored(self, *, tool_failure: bool) -> None:
         """Flag an infrastructure failure on this turn so the alert monitors can count it.
 

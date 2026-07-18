@@ -2,7 +2,7 @@ from datetime import date
 
 from copilot.fhir.models import Allergy, Encounter, NoteContent, PatientDemographics, Problem
 from copilot.schemas import ChatResponse, Claim, SourceRef
-from copilot.verification import FetchLog, resolve_claims
+from copilot.verification import FetchLog, quote_in_text, resolve_claims
 
 
 def _log_with_patient() -> FetchLog:
@@ -179,6 +179,60 @@ def test_note_quote_citation_is_stamped_with_the_note_identity() -> None:
     source = grounded.claims[0].source
     assert source.label == "Progress note"
     assert source.date == "2026-01-15"
+
+
+def test_quote_grounds_despite_leading_capitalization_of_a_lifted_span() -> None:
+    # Regression (JOS-89, prod trace d42c2738): the model lifted a clause from mid-sentence and
+    # capitalized its first letter as a standalone quote ("The diagnosis..." for the source's
+    # "...the diagnosis..."). The gate was case-sensitive, so it false-rejected a verbatim span,
+    # the model's retry then broke the schema, and the whole turn degraded to the "could not
+    # attribute to record" refusal. If this breaks, that intermittent prod refusal returns.
+    chunk = (
+        "An abnormal screening result should be confirmed with repeat testing: "
+        "the diagnosis of type 2 diabetes should be confirmed with repeat testing."
+    )
+    quote = "The diagnosis of type 2 diabetes should be confirmed with repeat testing"
+
+    assert quote_in_text(quote, chunk) == quote
+
+
+def test_quote_matching_still_rejects_a_paraphrase() -> None:
+    # Guards that case-folding only tolerates capitalization, not meaning: a reworded span that is
+    # not a verbatim substring must still fail, or the anti-hallucination gate stops doing its job.
+    chunk = "Kidney function tests should be repeated within 2 weeks of the initial finding."
+    paraphrase = "Repeat kidney tests after a fortnight."
+
+    assert quote_in_text(paraphrase, chunk) is None
+
+
+def test_capitalized_note_quote_grounds_end_to_end() -> None:
+    # Same regression as above, but through the full resolve_claims gate on a free-text note: a
+    # claim whose quote differs from the note only by a capitalized first letter must ground, not
+    # land in offenders.
+    log = FetchLog()
+    log.record(
+        "DocumentReference",
+        "d1",
+        NoteContent(
+            resource_id="d1",
+            type_display="Progress note",
+            date="2026-01-15",
+            text="the patient reports wheezing at night.",
+        ),
+    )
+    claim = Claim(
+        text="Patient reported nocturnal wheezing",
+        source=SourceRef(
+            resource_type="DocumentReference",
+            resource_id="d1",
+            quote="The patient reports wheezing at night",
+        ),
+    )
+
+    grounded, offenders = resolve_claims(ChatResponse(summary="...", claims=[claim]), log)
+
+    assert offenders == []
+    assert grounded.claims[0].source.label == "Progress note"
 
 
 def _encounter_and_condition_log() -> FetchLog:

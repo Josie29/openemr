@@ -169,6 +169,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("COPILOT_DOCUMENT_PDF_PATH_INTAKE_FORM"),
         description="Path to the demo intake form used as the extractor's byte-source.",
     )
+    document_pdf_path_medication_list: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("COPILOT_DOCUMENT_PDF_PATH_MEDICATION_LIST"),
+        description="Path to the demo medication list used as the extractor's byte-source.",
+    )
     # FIXTURE mode only: the recorded Mistral OCR response (`*.ocr.json`) the FixtureOcrBackend
     # replays instead of calling the live API, so extraction tests are deterministic and offline.
     # One per document type, since a recording is of a specific document read through a specific
@@ -190,6 +195,11 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("COPILOT_OCR_FIXTURE_PATH_INTAKE_FORM"),
         description="FIXTURE mode: the recorded OCR response replayed for an intake_form.",
+    )
+    ocr_fixture_path_medication_list: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("COPILOT_OCR_FIXTURE_PATH_MEDICATION_LIST"),
+        description="FIXTURE mode: the recorded OCR response replayed for a medication_list.",
     )
 
     # Hard ceiling on tool calls in a single agent turn. Bounds cost/latency: without it the agent

@@ -1,0 +1,1107 @@
+{
+  "document_annotation": "{\"medications\": [{\"name\": \"Budesonide (Pulmicort)\", \"dose\": \"0.5 mg\", \"frequency\": \"twice daily\"}, {\"name\": \"Albuterol (Ventolin HFA)\", \"dose\": \"90 mcg per actuation\", \"frequency\": \"as needed for wheezing\"}, {\"name\": \"Fexofenadine (Allegra)\", \"dose\": \"180 mg\", \"frequency\": \"once daily\"}, {\"name\": \"Epinephrine (EpiPen)\", \"dose\": \"0.3 mg\", \"frequency\": \"as needed for allergic reaction\"}, {\"name\": \"Ibuprofen (Advil)\", \"dose\": \"400 mg\", \"frequency\": \"three times daily as needed\"}, {\"name\": \"Naproxen (Aleve)\", \"dose\": \"220 mg\", \"frequency\": \"twice daily as needed\"}]}",
+  "model": "mistral-ocr-latest",
+  "pages": [
+    {
+      "blocks": [
+        {
+          "bottom_right_x": 675,
+          "bottom_right_y": 55,
+          "content": "SYNTHETIC DEMO DATA \u2013 FICTIONAL PATIENT & PHARMACY \u2013 NOT A REAL MEDICAL RECORD \u2013 AGENTFORGE CLINICAL CO-PILOT",
+          "top_left_x": 114,
+          "top_left_y": 43,
+          "type": "header"
+        },
+        {
+          "bottom_right_x": 238,
+          "bottom_right_y": 90,
+          "content": "# Wells Branch Pharmacy",
+          "top_left_x": 48,
+          "top_left_y": 70,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 351,
+          "bottom_right_y": 104,
+          "content": "12345 Wells Branch Pkwy, Austin, TX 78728 \u00b7 (512) 555-0140 \u00b7 fax (512) 555-0141",
+          "top_left_x": 48,
+          "top_left_y": 92,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 747,
+          "bottom_right_y": 98,
+          "content": "## PATIENT MEDICATION PROFILE",
+          "top_left_x": 597,
+          "top_left_y": 69,
+          "type": "title"
+        },
+        {
+          "bottom_right_x": 747,
+          "bottom_right_y": 113,
+          "content": "Current Medications \u00b7 Printed 07/15/2026",
+          "top_left_x": 589,
+          "top_left_y": 101,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 740,
+          "bottom_right_y": 196,
+          "content": "<table><tr><td>PATIENT NAME<br/><b>Sergio Angulo</b></td><td>DATE OF BIRTH<br/><b>03/14/1979</b></td><td>SEX<br/><b>Male</b></td></tr><tr><td>ADDRESS<br/>2117 Cypress Bend Dr, Austin, TX 78745</td><td>PHONE<br/>(512) 555-0192</td><td>MRN<br/>OE-000023</td></tr></table>",
+          "table_id": "tbl-0.html",
+          "top_left_x": 48,
+          "top_left_y": 128,
+          "type": "table"
+        },
+        {
+          "bottom_right_x": 740,
+          "bottom_right_y": 389,
+          "content": "<table><thead><tr><th colspan=\"4\">ACTIVE MEDICATION LIST \u2013 as dispensed / on file at this pharmacy</th></tr><tr><th>MEDICATION</th><th>DOSE / STRENGTH</th><th>FREQUENCY</th><th>STATUS</th></tr></thead><tr><td><b>Budesonide (Pulmicort)</b></td><td>0.5 mg</td><td>twice daily</td><td><b>ACTIVE</b></td></tr><tr><td><b>Albuterol (Ventolin HFA)</b></td><td>90 mcg per actuation</td><td>as needed for wheezing</td><td><b>ACTIVE</b></td></tr><tr><td><b>Fexofenadine (Allegra)</b></td><td>180 mg</td><td>once daily</td><td><b>ACTIVE</b></td></tr><tr><td><b>Epinephrine (EpiPen)</b></td><td>0.3 mg</td><td>as needed for allergic reaction</td><td><b>ACTIVE</b></td></tr><tr><td><b>Ibuprofen (Advil)</b></td><td>400 mg</td><td>three times daily as needed</td><td><b>ACTIVE</b></td></tr><tr><td><b>Naproxen (Aleve)</b></td><td>220 mg</td><td>twice daily as needed</td><td><b>ACTIVE</b></td></tr></table>",
+          "table_id": "tbl-1.html",
+          "top_left_x": 48,
+          "top_left_y": 207,
+          "type": "table"
+        },
+        {
+          "bottom_right_x": 735,
+          "bottom_right_y": 414,
+          "content": "Dose and frequency are printed verbatim as dispensed. This profile reflects medications on file at Wells Branch Pharmacy and may not include medications filled elsewhere. Reconcile against the patient's chart before prescribing.",
+          "top_left_x": 48,
+          "top_left_y": 393,
+          "type": "text"
+        },
+        {
+          "bottom_right_x": 218,
+          "bottom_right_y": 997,
+          "content": "Wells Branch Pharmacy \u00b7 Patient Medication Profile",
+          "top_left_x": 48,
+          "top_left_y": 984,
+          "type": "footer"
+        },
+        {
+          "bottom_right_x": 546,
+          "bottom_right_y": 997,
+          "content": "Angulo, Sergio \u00b7 DOB 03/14/1979 \u00b7 MRN OE-000023",
+          "top_left_x": 370,
+          "top_left_y": 984,
+          "type": "footer"
+        },
+        {
+          "bottom_right_x": 747,
+          "bottom_right_y": 997,
+          "content": "Page 1 of 1",
+          "top_left_x": 699,
+          "top_left_y": 984,
+          "type": "footer"
+        }
+      ],
+      "confidence_scores": {
+        "average_page_confidence_score": 0.9841812465436438,
+        "minimum_page_confidence_score": 0.49369326009217884,
+        "word_confidence_scores": [
+          {
+            "confidence": 0.9998586075902827,
+            "start_index": 0,
+            "text": "SYNTHETIC"
+          },
+          {
+            "confidence": 0.9998491104305811,
+            "start_index": 9,
+            "text": " DEMO"
+          },
+          {
+            "confidence": 0.9999986886995842,
+            "start_index": 14,
+            "text": " DATA"
+          },
+          {
+            "confidence": 0.49369326009217884,
+            "start_index": 19,
+            "text": " \u2013"
+          },
+          {
+            "confidence": 0.9805358696045824,
+            "start_index": 21,
+            "text": " FICTIONAL"
+          },
+          {
+            "confidence": 0.9999899269604675,
+            "start_index": 31,
+            "text": " PATIENT"
+          },
+          {
+            "confidence": 0.9999922514562126,
+            "start_index": 39,
+            "text": " &"
+          },
+          {
+            "confidence": 0.9999521615300184,
+            "start_index": 41,
+            "text": " PHARMACY"
+          },
+          {
+            "confidence": 0.9998581610609016,
+            "start_index": 50,
+            "text": " \u2013"
+          },
+          {
+            "confidence": 0.9999960661089133,
+            "start_index": 52,
+            "text": " NOT"
+          },
+          {
+            "confidence": 0.9999914170043662,
+            "start_index": 56,
+            "text": " A"
+          },
+          {
+            "confidence": 0.9999992847447459,
+            "start_index": 58,
+            "text": " REAL"
+          },
+          {
+            "confidence": 0.9999992847448311,
+            "start_index": 63,
+            "text": " MEDICAL"
+          },
+          {
+            "confidence": 0.9999969005680498,
+            "start_index": 71,
+            "text": " RECORD"
+          },
+          {
+            "confidence": 0.9999469546810004,
+            "start_index": 78,
+            "text": " \u2013"
+          },
+          {
+            "confidence": 0.9904562674549324,
+            "start_index": 80,
+            "text": " AGENTFORGE"
+          },
+          {
+            "confidence": 0.999998913872221,
+            "start_index": 91,
+            "text": " CLINICAL"
+          },
+          {
+            "confidence": 0.9998486228096327,
+            "start_index": 100,
+            "text": " CO-PILOT"
+          },
+          {
+            "confidence": 0.7310447219009728,
+            "start_index": 111,
+            "text": "#"
+          },
+          {
+            "confidence": 0.9530190456133429,
+            "start_index": 112,
+            "text": " Wells"
+          },
+          {
+            "confidence": 0.9999983310727032,
+            "start_index": 118,
+            "text": " Branch"
+          },
+          {
+            "confidence": 0.9999996423722521,
+            "start_index": 125,
+            "text": " Pharmacy"
+          },
+          {
+            "confidence": 0.9999118927778368,
+            "start_index": 136,
+            "text": "12345"
+          },
+          {
+            "confidence": 0.9999933243243502,
+            "start_index": 141,
+            "text": " Wells"
+          },
+          {
+            "confidence": 0.9999974966112362,
+            "start_index": 147,
+            "text": " Branch"
+          },
+          {
+            "confidence": 0.9987984440417812,
+            "start_index": 154,
+            "text": " Pkwy,"
+          },
+          {
+            "confidence": 0.999922356434365,
+            "start_index": 160,
+            "text": " Austin,"
+          },
+          {
+            "confidence": 0.9999979734461775,
+            "start_index": 168,
+            "text": " TX"
+          },
+          {
+            "confidence": 0.9998793222977587,
+            "start_index": 171,
+            "text": " 78728"
+          },
+          {
+            "confidence": 0.5959669784313112,
+            "start_index": 177,
+            "text": " \u00b7"
+          },
+          {
+            "confidence": 0.9999441563959811,
+            "start_index": 179,
+            "text": " (512)"
+          },
+          {
+            "confidence": 0.9999683446277825,
+            "start_index": 185,
+            "text": " 555-0140"
+          },
+          {
+            "confidence": 0.9981790621099221,
+            "start_index": 194,
+            "text": " \u00b7"
+          },
+          {
+            "confidence": 0.9998760377062386,
+            "start_index": 196,
+            "text": " fax"
+          },
+          {
+            "confidence": 0.9999693648554167,
+            "start_index": 200,
+            "text": " (512)"
+          },
+          {
+            "confidence": 0.9999732846929265,
+            "start_index": 206,
+            "text": " 555-0141"
+          },
+          {
+            "confidence": 0.9706461004311949,
+            "start_index": 217,
+            "text": "##"
+          },
+          {
+            "confidence": 0.9996103531458934,
+            "start_index": 219,
+            "text": " PATIENT"
+          },
+          {
+            "confidence": 0.9999242331373823,
+            "start_index": 227,
+            "text": " MEDICATION"
+          },
+          {
+            "confidence": 0.9943915702479804,
+            "start_index": 238,
+            "text": " PROFILE"
+          },
+          {
+            "confidence": 0.9963391821647448,
+            "start_index": 248,
+            "text": "Current"
+          },
+          {
+            "confidence": 0.9993611850754138,
+            "start_index": 255,
+            "text": " Medications"
+          },
+          {
+            "confidence": 0.9439618947333552,
+            "start_index": 267,
+            "text": " \u00b7"
+          },
+          {
+            "confidence": 0.999510170640444,
+            "start_index": 269,
+            "text": " Printed"
+          },
+          {
+            "confidence": 0.9960919712660189,
+            "start_index": 277,
+            "text": " 07/15/2026"
+          },
+          {
+            "confidence": 0.9882614327821867,
+            "start_index": 290,
+            "text": "[tbl-0.html](tbl-0.html)"
+          },
+          {
+            "confidence": 0.9974282484576358,
+            "start_index": 316,
+            "text": "[tbl-1.html](tbl-1.html)"
+          },
+          {
+            "confidence": 0.999837457359884,
+            "start_index": 342,
+            "text": "Dose"
+          },
+          {
+            "confidence": 0.9999940395710211,
+            "start_index": 346,
+            "text": " and"
+          },
+          {
+            "confidence": 0.9999909401759619,
+            "start_index": 350,
+            "text": " frequency"
+          },
+          {
+            "confidence": 0.9999971389852362,
+            "start_index": 360,
+            "text": " are"
+          },
+          {
+            "confidence": 0.9999980926550052,
+            "start_index": 364,
+            "text": " printed"
+          },
+          {
+            "confidence": 0.999862988340848,
+            "start_index": 372,
+            "text": " verbatim"
+          },
+          {
+            "confidence": 0.9999984502816872,
+            "start_index": 381,
+            "text": " as"
+          },
+          {
+            "confidence": 0.9999582902798659,
+            "start_index": 384,
+            "text": " dispensed."
+          },
+          {
+            "confidence": 0.9999974966112362,
+            "start_index": 395,
+            "text": " This"
+          },
+          {
+            "confidence": 0.9999881984200047,
+            "start_index": 400,
+            "text": " profile"
+          },
+          {
+            "confidence": 0.9999992847447459,
+            "start_index": 408,
+            "text": " reflects"
+          },
+          {
+            "confidence": 0.9999958276922101,
+            "start_index": 417,
+            "text": " medications"
+          },
+          {
+            "confidence": 0.9999994039539004,
+            "start_index": 429,
+            "text": " on"
+          },
+          {
+            "confidence": 0.9999980926550052,
+            "start_index": 432,
+            "text": " file"
+          },
+          {
+            "confidence": 0.9999976158197796,
+            "start_index": 437,
+            "text": " at"
+          },
+          {
+            "confidence": 0.9999966621509202,
+            "start_index": 440,
+            "text": " Wells"
+          },
+          {
+            "confidence": 0.9999991655356624,
+            "start_index": 446,
+            "text": " Branch"
+          },
+          {
+            "confidence": 0.9999997615814777,
+            "start_index": 453,
+            "text": " Pharmacy"
+          },
+          {
+            "confidence": 0.9999988079084972,
+            "start_index": 462,
+            "text": " and"
+          },
+          {
+            "confidence": 0.9999998807907247,
+            "start_index": 466,
+            "text": " may"
+          },
+          {
+            "confidence": 0.999998927117538,
+            "start_index": 470,
+            "text": " not"
+          },
+          {
+            "confidence": 0.9999977350285647,
+            "start_index": 474,
+            "text": " include"
+          },
+          {
+            "confidence": 0.9999953508594287,
+            "start_index": 482,
+            "text": " medications"
+          },
+          {
+            "confidence": 0.9875217282099473,
+            "start_index": 494,
+            "text": " filled"
+          },
+          {
+            "confidence": 0.999998266064737,
+            "start_index": 501,
+            "text": " elsewhere."
+          },
+          {
+            "confidence": 0.9995374442282374,
+            "start_index": 512,
+            "text": " Reconcile"
+          },
+          {
+            "confidence": 0.9999982118638471,
+            "start_index": 522,
+            "text": " against"
+          },
+          {
+            "confidence": 0.9999705561718785,
+            "start_index": 530,
+            "text": " the"
+          },
+          {
+            "confidence": 0.9174859451971433,
+            "start_index": 534,
+            "text": " patient's"
+          },
+          {
+            "confidence": 0.9999988079084972,
+            "start_index": 544,
+            "text": " chart"
+          },
+          {
+            "confidence": 0.9999974966112362,
+            "start_index": 550,
+            "text": " before"
+          },
+          {
+            "confidence": 0.9999513853182767,
+            "start_index": 557,
+            "text": " prescribing."
+          },
+          {
+            "confidence": 0.9999886993165613,
+            "start_index": 572,
+            "text": "Wells"
+          },
+          {
+            "confidence": 0.9999992847447459,
+            "start_index": 577,
+            "text": " Branch"
+          },
+          {
+            "confidence": 0.9999907017622996,
+            "start_index": 584,
+            "text": " Pharmacy"
+          },
+          {
+            "confidence": 0.9309305815661709,
+            "start_index": 593,
+            "text": " \u00b7"
+          },
+          {
+            "confidence": 0.9999939203633587,
+            "start_index": 595,
+            "text": " Patient"
+          },
+          {
+            "confidence": 0.9999755954138843,
+            "start_index": 603,
+            "text": " Medication"
+          },
+          {
+            "confidence": 0.9999969005680498,
+            "start_index": 614,
+            "text": " Profile"
+          },
+          {
+            "confidence": 0.9994202704113551,
+            "start_index": 624,
+            "text": "Angulo,"
+          },
+          {
+            "confidence": 0.9999953508594287,
+            "start_index": 631,
+            "text": " Sergio"
+          },
+          {
+            "confidence": 0.9965636016622765,
+            "start_index": 638,
+            "text": " \u00b7"
+          },
+          {
+            "confidence": 0.9967097149075119,
+            "start_index": 640,
+            "text": " DOB"
+          },
+          {
+            "confidence": 0.9998738261562029,
+            "start_index": 644,
+            "text": " 03/14/1979"
+          },
+          {
+            "confidence": 0.9991350509316581,
+            "start_index": 655,
+            "text": " \u00b7"
+          },
+          {
+            "confidence": 0.9996767052844693,
+            "start_index": 657,
+            "text": " MRN"
+          },
+          {
+            "confidence": 0.9975902590871759,
+            "start_index": 661,
+            "text": " OE-000023"
+          },
+          {
+            "confidence": 0.9999990463265931,
+            "start_index": 673,
+            "text": "Page"
+          },
+          {
+            "confidence": 0.999974788095599,
+            "start_index": 677,
+            "text": " 1"
+          },
+          {
+            "confidence": 0.9999809268774651,
+            "start_index": 679,
+            "text": " of"
+          },
+          {
+            "confidence": 0.9999796156411674,
+            "start_index": 682,
+            "text": " 1"
+          }
+        ]
+      },
+      "dimensions": {
+        "dpi": 93,
+        "height": 1023,
+        "width": 791
+      },
+      "footer": null,
+      "header": null,
+      "hyperlinks": [],
+      "images": [],
+      "index": 0,
+      "markdown": "SYNTHETIC DEMO DATA \u2013 FICTIONAL PATIENT & PHARMACY \u2013 NOT A REAL MEDICAL RECORD \u2013 AGENTFORGE CLINICAL CO-PILOT\n\n# Wells Branch Pharmacy\n\n12345 Wells Branch Pkwy, Austin, TX 78728 \u00b7 (512) 555-0140 \u00b7 fax (512) 555-0141\n\n## PATIENT MEDICATION PROFILE\n\nCurrent Medications \u00b7 Printed 07/15/2026\n\n[tbl-0.html](tbl-0.html)\n\n[tbl-1.html](tbl-1.html)\n\nDose and frequency are printed verbatim as dispensed. This profile reflects medications on file at Wells Branch Pharmacy and may not include medications filled elsewhere. Reconcile against the patient's chart before prescribing.\n\nWells Branch Pharmacy \u00b7 Patient Medication Profile\n\nAngulo, Sergio \u00b7 DOB 03/14/1979 \u00b7 MRN OE-000023\n\nPage 1 of 1",
+      "tables": [
+        {
+          "content": "<table><tr><td>PATIENT NAME<br/><b>Sergio Angulo</b></td><td>DATE OF BIRTH<br/><b>03/14/1979</b></td><td>SEX<br/><b>Male</b></td></tr><tr><td>ADDRESS<br/>2117 Cypress Bend Dr, Austin, TX 78745</td><td>PHONE<br/>(512) 555-0192</td><td>MRN<br/>OE-000023</td></tr></table>",
+          "format": "html",
+          "id": "tbl-0.html",
+          "word_confidence_scores": [
+            {
+              "confidence": 0.9928543254810083,
+              "start_index": 15,
+              "text": "PATIENT"
+            },
+            {
+              "confidence": 0.9511374189182625,
+              "start_index": 22,
+              "text": " NAME"
+            },
+            {
+              "confidence": 0.9511374189182625,
+              "start_index": 35,
+              "text": "Sergio"
+            },
+            {
+              "confidence": 0.9886697686876265,
+              "start_index": 41,
+              "text": " Angulo"
+            },
+            {
+              "confidence": 0.9886697686876265,
+              "start_index": 61,
+              "text": "DATE"
+            },
+            {
+              "confidence": 0.9999972581939645,
+              "start_index": 65,
+              "text": " OF"
+            },
+            {
+              "confidence": 0.9922224585259964,
+              "start_index": 68,
+              "text": " BIRTH"
+            },
+            {
+              "confidence": 0.9922224585259964,
+              "start_index": 82,
+              "text": "03/14/1979"
+            },
+            {
+              "confidence": 0.9922224585259964,
+              "start_index": 105,
+              "text": "SEX"
+            },
+            {
+              "confidence": 0.9922224585259964,
+              "start_index": 116,
+              "text": "Male"
+            },
+            {
+              "confidence": 0.9922224585259964,
+              "start_index": 142,
+              "text": "ADDRESS"
+            },
+            {
+              "confidence": 0.9922224585259964,
+              "start_index": 154,
+              "text": "2117"
+            },
+            {
+              "confidence": 0.9999632402081202,
+              "start_index": 158,
+              "text": " Cypress"
+            },
+            {
+              "confidence": 0.9999860527077029,
+              "start_index": 166,
+              "text": " Bend"
+            },
+            {
+              "confidence": 0.9997896897142148,
+              "start_index": 171,
+              "text": " Dr,"
+            },
+            {
+              "confidence": 0.9999848010601361,
+              "start_index": 175,
+              "text": " Austin,"
+            },
+            {
+              "confidence": 0.9999991655356624,
+              "start_index": 183,
+              "text": " TX"
+            },
+            {
+              "confidence": 0.9770091819049052,
+              "start_index": 186,
+              "text": " 78745"
+            },
+            {
+              "confidence": 0.9770091819049052,
+              "start_index": 201,
+              "text": "PHONE"
+            },
+            {
+              "confidence": 0.9770091819049052,
+              "start_index": 211,
+              "text": "(512)"
+            },
+            {
+              "confidence": 0.9922808585218658,
+              "start_index": 216,
+              "text": " 555-0192"
+            },
+            {
+              "confidence": 0.9922808585218658,
+              "start_index": 234,
+              "text": "MRN"
+            },
+            {
+              "confidence": 0.9922808585218658,
+              "start_index": 242,
+              "text": "OE-000023"
+            }
+          ]
+        },
+        {
+          "content": "<table><thead><tr><th colspan=\"4\">ACTIVE MEDICATION LIST \u2013 as dispensed / on file at this pharmacy</th></tr><tr><th>MEDICATION</th><th>DOSE / STRENGTH</th><th>FREQUENCY</th><th>STATUS</th></tr></thead><tr><td><b>Budesonide (Pulmicort)</b></td><td>0.5 mg</td><td>twice daily</td><td><b>ACTIVE</b></td></tr><tr><td><b>Albuterol (Ventolin HFA)</b></td><td>90 mcg per actuation</td><td>as needed for wheezing</td><td><b>ACTIVE</b></td></tr><tr><td><b>Fexofenadine (Allegra)</b></td><td>180 mg</td><td>once daily</td><td><b>ACTIVE</b></td></tr><tr><td><b>Epinephrine (EpiPen)</b></td><td>0.3 mg</td><td>as needed for allergic reaction</td><td><b>ACTIVE</b></td></tr><tr><td><b>Ibuprofen (Advil)</b></td><td>400 mg</td><td>three times daily as needed</td><td><b>ACTIVE</b></td></tr><tr><td><b>Naproxen (Aleve)</b></td><td>220 mg</td><td>twice daily as needed</td><td><b>ACTIVE</b></td></tr></table>",
+          "format": "html",
+          "id": "tbl-1.html",
+          "word_confidence_scores": [
+            {
+              "confidence": 0.9789756218536365,
+              "start_index": 34,
+              "text": "ACTIVE"
+            },
+            {
+              "confidence": 0.9999878733441743,
+              "start_index": 40,
+              "text": " MEDICATION"
+            },
+            {
+              "confidence": 0.9999976158197796,
+              "start_index": 51,
+              "text": " LIST"
+            },
+            {
+              "confidence": 0.9651451180938602,
+              "start_index": 56,
+              "text": " \u2013"
+            },
+            {
+              "confidence": 0.8771663939850421,
+              "start_index": 58,
+              "text": " as"
+            },
+            {
+              "confidence": 0.9998644269158684,
+              "start_index": 61,
+              "text": " dispensed"
+            },
+            {
+              "confidence": 0.9997492465599263,
+              "start_index": 71,
+              "text": " /"
+            },
+            {
+              "confidence": 0.9999342008052653,
+              "start_index": 73,
+              "text": " on"
+            },
+            {
+              "confidence": 0.9999995231630692,
+              "start_index": 76,
+              "text": " file"
+            },
+            {
+              "confidence": 0.9999526761523544,
+              "start_index": 81,
+              "text": " at"
+            },
+            {
+              "confidence": 0.999957920890168,
+              "start_index": 84,
+              "text": " this"
+            },
+            {
+              "confidence": 0.9992500560417568,
+              "start_index": 89,
+              "text": " pharmacy"
+            },
+            {
+              "confidence": 0.9992500560417568,
+              "start_index": 116,
+              "text": "MEDICATION"
+            },
+            {
+              "confidence": 0.9992500560417568,
+              "start_index": 135,
+              "text": "DOSE"
+            },
+            {
+              "confidence": 0.9999996423722521,
+              "start_index": 139,
+              "text": " /"
+            },
+            {
+              "confidence": 0.9987739353992928,
+              "start_index": 141,
+              "text": " STRENGTH"
+            },
+            {
+              "confidence": 0.9987739353992928,
+              "start_index": 159,
+              "text": "FREQUENCY"
+            },
+            {
+              "confidence": 0.9987739353992928,
+              "start_index": 177,
+              "text": "STATUS"
+            },
+            {
+              "confidence": 0.9987739353992928,
+              "start_index": 212,
+              "text": "Budesonide"
+            },
+            {
+              "confidence": 0.9999816425440683,
+              "start_index": 222,
+              "text": " (Pulmicort)"
+            },
+            {
+              "confidence": 0.9999816425440683,
+              "start_index": 247,
+              "text": "0.5"
+            },
+            {
+              "confidence": 0.9999975947970806,
+              "start_index": 250,
+              "text": " mg"
+            },
+            {
+              "confidence": 0.9999975947970806,
+              "start_index": 262,
+              "text": "twice"
+            },
+            {
+              "confidence": 0.9784135325548368,
+              "start_index": 267,
+              "text": " daily"
+            },
+            {
+              "confidence": 0.9784135325548368,
+              "start_index": 285,
+              "text": "ACTIVE"
+            },
+            {
+              "confidence": 0.9784135325548368,
+              "start_index": 316,
+              "text": "Albuterol"
+            },
+            {
+              "confidence": 0.9999440945251381,
+              "start_index": 325,
+              "text": " (Ventolin"
+            },
+            {
+              "confidence": 0.9999964416420213,
+              "start_index": 335,
+              "text": " HFA)"
+            },
+            {
+              "confidence": 0.9999964416420213,
+              "start_index": 353,
+              "text": "90"
+            },
+            {
+              "confidence": 0.9999312514377976,
+              "start_index": 355,
+              "text": " mcg"
+            },
+            {
+              "confidence": 0.9999957084838798,
+              "start_index": 359,
+              "text": " per"
+            },
+            {
+              "confidence": 0.9997395238094681,
+              "start_index": 363,
+              "text": " actuation"
+            },
+            {
+              "confidence": 0.9997395238094681,
+              "start_index": 382,
+              "text": "as"
+            },
+            {
+              "confidence": 0.9999991655356624,
+              "start_index": 384,
+              "text": " needed"
+            },
+            {
+              "confidence": 0.9999998807907247,
+              "start_index": 391,
+              "text": " for"
+            },
+            {
+              "confidence": 0.9998868865344781,
+              "start_index": 395,
+              "text": " wheezing"
+            },
+            {
+              "confidence": 0.9998868865344781,
+              "start_index": 416,
+              "text": "ACTIVE"
+            },
+            {
+              "confidence": 0.9998868865344781,
+              "start_index": 447,
+              "text": "Fexofenadine"
+            },
+            {
+              "confidence": 0.9998819349472307,
+              "start_index": 459,
+              "text": " (Allegra)"
+            },
+            {
+              "confidence": 0.9998819349472307,
+              "start_index": 482,
+              "text": "180"
+            },
+            {
+              "confidence": 0.9999891224353674,
+              "start_index": 485,
+              "text": " mg"
+            },
+            {
+              "confidence": 0.9999891224353674,
+              "start_index": 497,
+              "text": "once"
+            },
+            {
+              "confidence": 0.9999837609902583,
+              "start_index": 501,
+              "text": " daily"
+            },
+            {
+              "confidence": 0.9999837609902583,
+              "start_index": 519,
+              "text": "ACTIVE"
+            },
+            {
+              "confidence": 0.9999837609902583,
+              "start_index": 550,
+              "text": "Epinephrine"
+            },
+            {
+              "confidence": 0.9999929239050404,
+              "start_index": 561,
+              "text": " (EpiPen)"
+            },
+            {
+              "confidence": 0.9999929239050404,
+              "start_index": 583,
+              "text": "0.3"
+            },
+            {
+              "confidence": 0.9999995146483357,
+              "start_index": 586,
+              "text": " mg"
+            },
+            {
+              "confidence": 0.9999995146483357,
+              "start_index": 598,
+              "text": "as"
+            },
+            {
+              "confidence": 0.9999988079084972,
+              "start_index": 600,
+              "text": " needed"
+            },
+            {
+              "confidence": 0.9999996423722521,
+              "start_index": 607,
+              "text": " for"
+            },
+            {
+              "confidence": 0.9999992847447459,
+              "start_index": 611,
+              "text": " allergic"
+            },
+            {
+              "confidence": 0.9999690361683682,
+              "start_index": 620,
+              "text": " reaction"
+            },
+            {
+              "confidence": 0.9999690361683682,
+              "start_index": 641,
+              "text": "ACTIVE"
+            },
+            {
+              "confidence": 0.9999690361683682,
+              "start_index": 672,
+              "text": "Ibuprofen"
+            },
+            {
+              "confidence": 0.9999838636160866,
+              "start_index": 681,
+              "text": " (Advil)"
+            },
+            {
+              "confidence": 0.9999838636160866,
+              "start_index": 702,
+              "text": "400"
+            },
+            {
+              "confidence": 0.9999924337961473,
+              "start_index": 705,
+              "text": " mg"
+            },
+            {
+              "confidence": 0.9999924337961473,
+              "start_index": 717,
+              "text": "three"
+            },
+            {
+              "confidence": 0.9999983310727032,
+              "start_index": 722,
+              "text": " times"
+            },
+            {
+              "confidence": 0.9999997615814777,
+              "start_index": 728,
+              "text": " daily"
+            },
+            {
+              "confidence": 0.9999992847447459,
+              "start_index": 734,
+              "text": " as"
+            },
+            {
+              "confidence": 0.9999827913038105,
+              "start_index": 737,
+              "text": " needed"
+            },
+            {
+              "confidence": 0.9999827913038105,
+              "start_index": 756,
+              "text": "ACTIVE"
+            },
+            {
+              "confidence": 0.9999827913038105,
+              "start_index": 787,
+              "text": "Naproxen"
+            },
+            {
+              "confidence": 0.999871644555112,
+              "start_index": 795,
+              "text": " (Aleve)"
+            },
+            {
+              "confidence": 0.999871644555112,
+              "start_index": 816,
+              "text": "220"
+            },
+            {
+              "confidence": 0.9999983661371047,
+              "start_index": 819,
+              "text": " mg"
+            },
+            {
+              "confidence": 0.9999983661371047,
+              "start_index": 831,
+              "text": "twice"
+            },
+            {
+              "confidence": 0.9999995231630692,
+              "start_index": 836,
+              "text": " daily"
+            },
+            {
+              "confidence": 0.9999986886995842,
+              "start_index": 842,
+              "text": " as"
+            },
+            {
+              "confidence": 0.9999994699025443,
+              "start_index": 845,
+              "text": " needed"
+            },
+            {
+              "confidence": 0.9999994699025443,
+              "start_index": 864,
+              "text": "ACTIVE"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "usage_info": {
+    "doc_size_bytes": 120405,
+    "pages_processed": 1
+  }
+}

@@ -1,0 +1,35 @@
+meta {
+  name: 10 Evidence - Search
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{base_url}}/evidence?query=What do guidelines recommend for blood-pressure targets in hypertension?
+  body: none
+  auth: bearer
+}
+
+params:query {
+  query: What do guidelines recommend for blood-pressure targets in hypertension?
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+docs {
+  Week-2 evidence retrieval. Runs the hybrid-RAG pipeline (Qdrant dense+sparse -> Cohere rerank)
+  over the curated guideline corpus and returns the ranked chunks directly — the read-only
+  /evidence endpoint, so a grader can exercise retrieval alone without a full /chat turn. Each item
+  carries `source_id`, `section`, `chunk_id`, the cited `text`, a rerank `score`, and the `topic`.
+
+  Reads no patient data (the corpus is non-PHI) but still requires the bearer token, so the surface
+  is uniform. `top_n` is an optional query param to cap the result count. Needs only 04 (token).
+}
+
+assert {
+  res.status: eq 200
+  res.body.query: isDefined
+  res.body.evidence: isDefined
+}

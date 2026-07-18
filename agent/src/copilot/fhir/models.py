@@ -417,6 +417,108 @@ class Encounter(BaseModel):
         )
 
 
+def _quantity_value(quantity: Any) -> float | None:
+    """Pull the numeric value out of a FHIR ``Quantity``.
+
+    Args:
+        quantity: A FHIR ``Quantity`` (dict), or anything.
+
+    Returns:
+        The value as a float, or None when absent or non-numeric. ``bool`` is rejected
+        explicitly — it is an ``int`` subclass in Python and would otherwise coerce to 1.0.
+    """
+    if not isinstance(quantity, dict):
+        return None
+    value = quantity.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+class LabObservation(BaseModel):
+    """Typed projection of a FHIR R4 laboratory ``Observation`` — one analyte at one point in time.
+
+    A series of these for a single ``code`` is a lab trend. OpenEMR serves them from
+    ``procedure_result`` via ``FhirObservationLaboratoryService``, which is also where
+    agent-derived lab facts are written — so history and derived facts arrive through this
+    one shape, distinguished by ``status``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    resource_type: str = Field(
+        default="Observation", description="FHIR resource type, always 'Observation'"
+    )
+    resource_id: str = Field(description="FHIR Observation.id")
+    display: str | None = Field(
+        default=None, description="Analyte name (code.text or coding.display)"
+    )
+    code: str | None = Field(default=None, description="LOINC (or other) code for the analyte")
+    code_system: str | None = Field(default=None, description="Coding system URI for `code`")
+    value: float | None = Field(
+        default=None,
+        description=(
+            "Numeric result from valueQuantity. None when the result is not a quantity — "
+            "OpenEMR emits questionnaire scores (GAD-7, PHQ-9) with no value[x] at all, so a "
+            "lab Observation having no plottable value is normal, not an error."
+        ),
+    )
+    unit: str | None = Field(default=None, description="Human-readable unit, e.g. 'fL'")
+    unit_code: str | None = Field(
+        default=None, description="UCUM unit code from valueQuantity.code, e.g. '10*3/uL'"
+    )
+    effective_date: str | None = Field(
+        default=None, description="Specimen collection time (effectiveDateTime)"
+    )
+    status: str | None = Field(
+        default=None,
+        description=(
+            "FHIR Observation.status — 'final' for a clinician-ordered result, 'preliminary' "
+            "for one derived from a document and not yet confirmed."
+        ),
+    )
+
+    @classmethod
+    def from_fhir(cls, resource: dict[str, Any]) -> "LabObservation":
+        """Parse a FHIR ``Observation`` resource into a typed lab result.
+
+        Args:
+            resource: A FHIR ``Observation`` resource (parsed JSON).
+
+        Returns:
+            The typed ``LabObservation``.
+
+        Raises:
+            ValueError: If ``resource`` is not an ``Observation`` or lacks an ``id``.
+        """
+        resource_id = _require_id(resource, "Observation")
+        code, system = _first_coding(resource.get("code"))
+        quantity = resource.get("valueQuantity")
+        unit = quantity.get("unit") if isinstance(quantity, dict) else None
+        unit_code = quantity.get("code") if isinstance(quantity, dict) else None
+        effective = resource.get("effectiveDateTime")
+        status = resource.get("status")
+        return cls(
+            resource_id=resource_id,
+            display=_codeable_text(resource.get("code")),
+            code=code,
+            code_system=system,
+            value=_quantity_value(quantity),
+            unit=unit if isinstance(unit, str) else None,
+            unit_code=unit_code if isinstance(unit_code, str) else None,
+            effective_date=effective if isinstance(effective, str) else None,
+            status=status if isinstance(status, str) else None,
+        )
+
+    @property
+    def citation_identity(self) -> ResourceIdentity:
+        """The analyte's name and the date it was collected — what distinguishes one point in a
+        trend from the next, so a proof card cites a specific draw rather than the series."""
+        return ResourceIdentity(
+            label=self.display, date=self.effective_date, date_label="Collected"
+        )
+
+
 def _encounter_ref_id(resource: dict[str, Any]) -> str | None:
     """Extract the referenced encounter id from a DocumentReference's ``context.encounter``.
 
@@ -470,6 +572,32 @@ def _decode_note_text(content: Any) -> str | None:
             # binascii.Error (malformed base64) subclasses ValueError.
             return None
     return None
+
+
+class PatientSummary(BaseModel):
+    """The open patient's structured picture in one payload: demographics + the four core lists.
+
+    Returned by the ``get_patient_summary`` tool so a broad "who is this / give me the picture" turn
+    reads the whole orientation in ONE tool call — one model generation — instead of five separate
+    reads. This is the structural relief for the per-turn tool-call ceiling (JOS-89 Mode A): a broad
+    turn that used to spend ~5 of its budget here now spends one.
+
+    It is a read-only container the model orients from, **never itself a citable record** — it
+    carries no ``resource_type``/``resource_id``/``citation_identity``. Each claim still cites the
+    individual ``Patient``/``Condition``/``MedicationRequest``/``AllergyIntolerance``/``Encounter``
+    it draws from, and the tool records each of those into the ``FetchLog`` exactly as the per-list
+    tools do, so grounding is unchanged.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    patient: PatientDemographics = Field(description="The patient's demographics.")
+    problems: list[Problem] = Field(description="Active and inactive problem-list Conditions.")
+    medications: list[Medication] = Field(description="Current medications (deduplicated).")
+    allergies: list[Allergy] = Field(description="Allergies (AllergyIntolerance resources).")
+    recent_encounters: list[Encounter] = Field(
+        description="Recent encounters, metadata only (dates, type, reason)."
+    )
 
 
 class NoteContent(BaseModel):
@@ -569,8 +697,15 @@ def _uploaded_document_attachment(resource: dict[str, Any]) -> dict[str, Any] | 
 # locate, and the precision floor drops them, so the agent reports no facts. Adding a purpose-built
 # intake category would remove the ambiguity; until then, this set is the seam (add a name here, not
 # code, to support another deployment's naming).
+#
+# `Medication List` is a purpose-built seeded category (no OpenEMR default names it), matched
+# EXACTLY like intake. `Medical Record` is a DEMO fallback: the seeded category does not reliably
+# surface in OpenEMR's cached Documents tree, so the med list is uploaded under the always-present
+# `Medical Record` category. TRADEOFF — any Medical Record upload then extracts as a medication
+# list; acceptable for the demo, gate or drop before prod. Neither name contains "lab".
 _LAB_CATEGORY_SUBSTRING = "lab"
 _INTAKE_CATEGORY_NAMES = frozenset({"patient information"})
+_MEDICATION_LIST_CATEGORY_NAMES = frozenset({"medication list", "medical record"})
 
 
 def resolve_doc_type(resource: dict[str, Any]) -> DocType | None:
@@ -594,6 +729,8 @@ def resolve_doc_type(resource: dict[str, Any]) -> DocType | None:
             return DocType.LAB_PDF
         if text in _INTAKE_CATEGORY_NAMES:
             return DocType.INTAKE_FORM
+        if text in _MEDICATION_LIST_CATEGORY_NAMES:
+            return DocType.MEDICATION_LIST
     return None
 
 

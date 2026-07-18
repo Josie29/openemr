@@ -1,10 +1,13 @@
+import logging
+
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from copilot.config import Settings
 from copilot.graph.outputs import ExtractorOutput
 from copilot.graph.routing import Route
-from copilot.main import create_app
+from copilot.main import ChatFailureReason, create_app
 from copilot.schemas import ChatResponse, Claim, SourceRef
 from graph_script import (
     looping_tool_model,
@@ -41,7 +44,7 @@ def test_grounded_answer_reaches_the_physician(settings: Settings) -> None:
         app.state.graph,
         router=route_model([Route.EXTRACT_INTAKE, Route.ANSWER]),
         extractor=worker_model(
-            [("get_patient", {})], ExtractorOutput(summary="68F", claims=[_BIRTH_CLAIM])
+            [("get_patient_summary", {})], ExtractorOutput(summary="68F", claims=[_BIRTH_CLAIM])
         ),
         answerer=worker_model(
             [], ChatResponse(summary="Marisol Reyes, 68F.", claims=[_BIRTH_CLAIM])
@@ -92,7 +95,7 @@ def test_runaway_tool_loop_is_capped_and_refused(settings: Settings) -> None:
     with override_graph(
         app.state.graph,
         router=route_model([Route.EXTRACT_INTAKE]),
-        extractor=looping_tool_model("get_encounters"),
+        extractor=looping_tool_model("get_patient_summary"),
     ):
         response = _post(app)
 
@@ -117,6 +120,61 @@ def test_unexpected_error_is_caught_not_leaked(settings: Settings) -> None:
     body = response.json()
     assert "could not be completed" in body["error"]
     assert "internal detail" not in str(body)  # the exception message never reaches the client
+
+
+def _failure_reason(caplog: pytest.LogCaptureFixture) -> ChatFailureReason:
+    """Return the ``reason`` code from the single WARNING record the refusal path logged."""
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and hasattr(r, "reason")]
+    assert len(warnings) == 1, f"expected one reason-tagged WARNING, got {len(warnings)}"
+    return warnings[0].reason  # type: ignore[no-any-return]
+
+
+def test_grounding_and_tool_ceiling_refusals_log_distinct_reasons(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Both a grounding-gate miss and a tool-call-ceiling hit degrade to the same 200 refusal, so
+    # the user-facing behavior is identical — but they are different failures an operator must be
+    # able to tell apart and alert on separately. If this test is removed, the two modes could
+    # silently collapse back to one indistinguishable log line (the pre-split regression) with no
+    # test catching it: the refusal body would still pass, but the observability signal operators
+    # grep on would be gone. Assert each mode emits its own WARNING with its own reason code.
+    grounding_miss = ExtractorOutput(
+        summary="A1c was 9.2%.",
+        claims=[
+            Claim(
+                text="A1c was 9.2% last week.",
+                source=SourceRef(resource_type="Observation", resource_id="999"),  # never fetched
+            )
+        ],
+    )
+    app = create_app(settings)
+    with caplog.at_level(logging.WARNING, logger="copilot"):
+        with override_graph(
+            app.state.graph,
+            router=route_model([Route.EXTRACT_INTAKE]),
+            extractor=worker_model([], grounding_miss),
+        ):
+            grounding_response = _post(app)
+        grounding_reason = _failure_reason(caplog)
+
+        caplog.clear()
+
+        capped = settings.model_copy(update={"agent_tool_calls_limit": 3})
+        capped_app = create_app(capped)
+        with override_graph(
+            capped_app.state.graph,
+            router=route_model([Route.EXTRACT_INTAKE]),
+            extractor=looping_tool_model("get_patient_summary"),
+        ):
+            ceiling_response = _post(capped_app)
+        ceiling_reason = _failure_reason(caplog)
+
+    # Both are still the same user-facing 200 refusal — the split changes nothing there.
+    assert grounding_response.status_code == 200
+    assert ceiling_response.status_code == 200
+    # ...but the two failure modes now carry distinct, greppable reason codes.
+    assert grounding_reason == ChatFailureReason.GROUNDING_EXHAUSTED
+    assert ceiling_reason == ChatFailureReason.TOOL_CEILING
 
 
 def test_refusal_still_returns_a_conversation_id(settings: Settings) -> None:

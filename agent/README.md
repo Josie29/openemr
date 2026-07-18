@@ -12,9 +12,10 @@ agent survives only as the eval-harness target** (migration under JOS-50); it is
 
 The graph has three roles. The **supervisor/router** runs a *procedural* loop, emitting a typed
 `RouteDecision` per hop that dispatches the next worker (each decision logged as a structured
-event / Langfuse child span). The **intake-extractor** owns the six FHIR read tools — `get_patient`
+event / Langfuse child span). The **intake-extractor** owns the seven FHIR read tools — `get_patient`
 (`Patient`), `get_problems` (`Condition`), `get_medications` (`MedicationRequest`, deduplicated),
-`get_allergies` (`AllergyIntolerance`), `get_encounters` (`Encounter`, metadata), and
+`get_allergies` (`AllergyIntolerance`), `get_encounters` (`Encounter`, metadata),
+`get_lab_observations` (`Observation`, laboratory category, LOINC-filterable), and
 `get_encounter_note` (`DocumentReference` — the free-text clinical note for one visit,
 base64-decoded) — covering UC-1 orientation, UC-4 cross-referencing, and UC-3 note drill-down. The
 **evidence-retriever** runs **hybrid RAG** over a 55-chunk in-repo clinical-guideline corpus (see
@@ -84,7 +85,7 @@ src/copilot/
   main.py          FastAPI app, routes, middleware wiring
   config.py        pydantic-settings; all config/secrets from env (COPILOT_ prefix)
   schemas.py       ChatRequest / ChatResponse / Claim / SourceRef contracts (+ follow_ups)
-  agent.py         Pydantic AI agents: supervisor/router + workers (six FHIR tools) + grounding gate
+  agent.py         Pydantic AI agents: supervisor/router + workers (seven FHIR tools) + grounding gate
   retrieval.py     ChunkRegistry: resolves evidence SourceRefs so the gate can ground guideline claims
   verification.py  FetchLog + field-level grounding & value stamping (ARCHITECTURE.md §7)
   conversation.py  in-memory multi-turn ConversationStore (per user+patient; TTL + LRU bounded)
@@ -206,6 +207,39 @@ Content-Type: application/json
   so local dev needs no token.
 - Response: `200` with `{summary, claims[], follow_ups[], conversation_id}` (each claim carries a
   code-stamped `source`), or a refusal / `401` / `403` / `404` / `502` per ARCHITECTURE.md §8.
+
+## Read-only subsystem endpoints
+
+Beyond `/chat`, three **GET** endpoints call the Week-2 subsystem services directly — **bypassing
+the LLM/graph** — so each capability is exercisable in isolation (a runnable API collection, a
+contract test) without a full agent turn. All are read-only and gated by the same SMART
+patient-scoped token as `/chat` (fixture mode ignores it).
+
+```
+GET /documents?patient_id=<id>                       # list uploaded (extractable) documents
+GET /documents/{document_id}/extraction?patient_id=  # strict-schema extraction of one document
+GET /evidence?query=<text>&top_n=<n?>                # ranked guideline chunks (hybrid RAG)
+```
+
+- `/documents` + `/documents/{id}/extraction` need `patient/DocumentReference.read` +
+  `patient/Binary.read`; `doc_type` is resolved server-side (never a caller input); extraction is
+  synchronous (no async status endpoint). `/evidence` reads the non-PHI corpus but is still
+  token-gated. None write; corpus indexing stays a CLI dev op.
+- There is **no upload endpoint** — documents are uploaded in the OpenEMR UI (the token is
+  read-only).
+- The OpenAPI 3.1 spec for all HTTP endpoints is committed as [`openapi.json`](openapi.json),
+  generated from the endpoints' Pydantic models; regenerate with `python scripts/dump_openapi.py`.
+  A contract test (`tests/test_openapi_contract.py`) fails on drift.
+
+```bash
+# fixture mode (seed patient "23" has the demo lab + intake uploads), tokenless:
+curl "localhost:8000/documents?patient_id=23"
+curl "localhost:8000/evidence?query=hypertension%20blood%20pressure%20target"
+# extraction additionally needs the extractor wired (COPILOT_EXTRACTOR_MODE=fixture +
+# COPILOT_OCR_FIXTURE_PATH_* / COPILOT_DOCUMENT_PDF_PATH_* pointing at tests/fixtures/documents/);
+# see tests/test_read_endpoints.py for the exact fixture wiring. Then:
+curl "localhost:8000/documents/labreport-2026-07/extraction?patient_id=23"
+```
 
 ## Demo without the module (fixture toggle)
 

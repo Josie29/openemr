@@ -313,6 +313,110 @@ body.ai-copilot-resizing {
     color: var(--copilot-error);
 }
 
+/* ---- Write-back confirmation card (JOS-81) ----
+ *
+ * A persistent transcript card summarizing what the agent's extracted facts did to the chart:
+ * added, already-present (deduped), or failed. Persistent (not the ephemeral status line) so the
+ * physician can always tell what happened, and left-rail-coded by outcome so it reads at a glance.
+ */
+.ai-copilot__writeback {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-1);
+    margin-left: 1.75rem; /* align under the answer bubble, clear of the avatar rail */
+    padding: var(--copilot-space-2) var(--copilot-space-3);
+    background: var(--copilot-surface-alt);
+    border: 1px solid var(--copilot-border);
+    border-left-width: 3px;
+    border-radius: var(--copilot-radius);
+    font-size: var(--copilot-font-sm);
+}
+
+.ai-copilot__writeback-line {
+    margin: 0;
+    color: var(--copilot-text);
+}
+
+/* Saved -> the "in the record" green already used by the record tier. */
+.ai-copilot__writeback-line--saved {
+    color: var(--copilot-tier-record);
+    font-weight: 600;
+}
+
+.ai-copilot__writeback-line--note,
+.ai-copilot__writeback-line--skipped {
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__writeback-line--failed {
+    color: var(--copilot-error);
+    font-weight: 600;
+}
+
+/* ---- Demographics review card (accept gate) ----
+ *
+ * Demographics overwrite clinician-entered identity data in place with no not-confirmed marker, so
+ * they are never auto-written. This card (sharing the writeback shell) shows the endpoint's
+ * chart-vs-form diff as a per-field checklist; accepting posts only the chosen fields back.
+ */
+.ai-copilot__demo-note {
+    margin: 0;
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__demo-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--copilot-space-2);
+    padding: var(--copilot-space-1) 0;
+    cursor: pointer;
+}
+
+.ai-copilot__demo-check {
+    margin-top: 0.2rem; /* nudge the box onto the first line of text */
+    flex: none;
+}
+
+.ai-copilot__demo-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-1);
+}
+
+.ai-copilot__demo-diff {
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__demo-actions {
+    margin-top: var(--copilot-space-1);
+}
+
+.ai-copilot__demo-accept {
+    padding: var(--copilot-space-1) var(--copilot-space-3);
+    border: 1px solid var(--copilot-accent);
+    border-radius: var(--copilot-radius);
+    background: var(--copilot-accent);
+    color: #fff;
+    font-size: var(--copilot-font-sm);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ai-copilot__demo-accept:hover {
+    background: var(--copilot-accent-strong);
+    border-color: var(--copilot-accent-strong);
+}
+
+.ai-copilot__demo-accept:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.ai-copilot__demo-review--done .ai-copilot__demo-row,
+.ai-copilot__demo-review--done .ai-copilot__demo-actions {
+    opacity: 0.6;
+}
+
 /* ---- In-flight indicator: shown between question and answer (spec §5.3.1) ----
  *
  * A distinct "assistant is working" bubble so the pause between question and answer (which can run
@@ -402,6 +506,102 @@ body.ai-copilot-resizing {
 
 .ai-copilot__summary {
     margin: 0;
+}
+
+/* Lab trend charts (JOS-83). One static SVG line chart per analyte the agent read this turn.
+   Colours come entirely from existing tokens — the JOS-88 trust gradient distinguishes a coded
+   'final' result from an agent-derived 'preliminary' one, the same semantics the evidence tiers use. */
+.ai-copilot__labcharts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+}
+
+.ai-copilot__labchart {
+    margin: 0;
+    border: 1px solid var(--copilot-border);
+    border-radius: var(--copilot-radius);
+    background: var(--copilot-surface);
+    overflow: hidden;
+}
+
+.ai-copilot__labchart-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--copilot-space-1);
+    padding: var(--copilot-space-2) var(--copilot-space-2) var(--copilot-space-1);
+}
+
+.ai-copilot__labchart-name {
+    font-weight: 600;
+    font-size: var(--copilot-font-sm);
+}
+
+.ai-copilot__labchart-unit {
+    font-size: 0.72rem;
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__labchart-loinc {
+    margin-left: auto;
+    font-size: 0.66rem;
+    color: var(--copilot-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.ai-copilot__labchart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    padding: 0 var(--copilot-space-2) var(--copilot-space-2);
+}
+
+.ai-copilot__labchart-axis {
+    stroke: var(--copilot-border);
+    stroke-width: 1;
+}
+
+.ai-copilot__labchart-area {
+    fill: var(--copilot-accent);
+    opacity: 0.07;
+}
+
+.ai-copilot__labchart-line {
+    fill: none;
+    stroke: var(--copilot-accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.ai-copilot__labchart-pt {
+    stroke: var(--copilot-surface);
+    stroke-width: 1.5;
+}
+
+.ai-copilot__labchart-pt--final {
+    fill: var(--copilot-tier-record);
+}
+
+.ai-copilot__labchart-pt--prelim {
+    fill: var(--copilot-tier-document);
+}
+
+.ai-copilot__labchart-tick {
+    fill: var(--copilot-muted);
+    font-size: 8.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ai-copilot__labchart-val {
+    fill: var(--copilot-text);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ai-copilot__labchart-val--end {
+    font-weight: 700;
+    font-size: 10px;
 }
 
 .ai-copilot__claims {

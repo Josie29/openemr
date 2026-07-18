@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wells Branch Pharmacy — Patient Medication Profile</title>
+<style>
+  @page { size: Letter; margin: 0; }
+  :root {
+    --ink: #1a1a1a;
+    --muted: #555;
+    --line: #9a9a9a;
+    --hair: #cfcfcf;
+    --band: #eef1f4;
+    --accent: #1f5c4d;      /* pharmacy green */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+    color: var(--ink);
+    font-size: 10px;
+    line-height: 1.3;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page { width: 8.5in; height: 11in; padding: 0.45in 0.55in 0.3in; margin: 0 auto; position: relative; overflow: hidden; }
+
+  .synthetic {
+    border: 1px dashed #a33; color: #a33; background: #fdf3f3; text-align: center;
+    font-size: 8px; letter-spacing: 0.05em; font-weight: 700; text-transform: uppercase;
+    padding: 3px 6px; margin-bottom: 10px;
+  }
+
+  header.rx { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+  .rx .name { font-size: 17px; font-weight: 800; color: var(--accent); }
+  .rx .sub { font-size: 8.5px; color: var(--muted); margin-top: 2px; }
+  .rx .doc { text-align: right; }
+  .rx .doc .t { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .rx .doc .i { font-size: 8px; color: var(--muted); margin-top: 2px; }
+
+  .patient { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border: 1px solid var(--hair); margin-top: 10px; }
+  .patient .cell { border-right: 1px solid var(--hair); padding: 4px 8px 5px; }
+  .patient .cell:nth-child(3n) { border-right: none; }
+  .patient .k { font-size: 7px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .patient .v { margin-top: 2px; font-size: 10px; font-weight: 600; }
+
+  h3.sec {
+    background: var(--accent); color: #fff; font-size: 8.5px; text-transform: uppercase;
+    letter-spacing: 0.06em; margin: 12px 0 0; padding: 4px 8px; font-weight: 700;
+  }
+  .note { font-size: 7.5px; color: #cfe6df; font-style: italic; text-transform: none; letter-spacing: 0; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { background: var(--band); font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.04em; text-align: left; padding: 4px 8px; border: 1px solid var(--hair); }
+  td { border: 1px solid var(--hair); padding: 5px 8px; vertical-align: top; }
+  td .drug { font-weight: 700; font-size: 10.5px; }
+  td .generic { color: var(--muted); font-size: 8.5px; }
+  td .sig { color: var(--muted); font-size: 8px; margin-top: 2px; }
+  .status { font-size: 8px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .legend { font-size: 7.5px; color: var(--muted); margin-top: 6px; }
+
+  footer { position: absolute; left: 0.55in; right: 0.55in; bottom: 0.25in; border-top: 1px solid var(--line); padding-top: 4px; font-size: 7.5px; color: var(--muted); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="synthetic">Synthetic demo data — fictional patient &amp; pharmacy — not a real medical record — AgentForge Clinical Co-Pilot</div>
+
+  <header class="rx">
+    <div>
+      <div class="name">Wells Branch Pharmacy</div>
+      <div class="sub">12345 Wells Branch Pkwy, Austin, TX 78728 &middot; (512) 555-0140 &middot; fax (512) 555-0141</div>
+    </div>
+    <div class="doc">
+      <div class="t">Patient Medication<br />Profile</div>
+      <div class="i">Current Medications &middot; Printed 07/15/2026</div>
+    </div>
+  </header>
+
+  <div class="patient">
+    <div class="cell"><div class="k">Patient Name</div><div class="v">Sergio Angulo</div></div>
+    <div class="cell"><div class="k">Date of Birth</div><div class="v">03/14/1979</div></div>
+    <div class="cell"><div class="k">Sex</div><div class="v">Male</div></div>
+    <div class="cell"><div class="k">Address</div><div class="v" style="font-weight:500;font-size:9px">2117 Cypress Bend Dr, Austin, TX 78745</div></div>
+    <div class="cell"><div class="k">Phone</div><div class="v" style="font-weight:500">(512) 555-0192</div></div>
+    <div class="cell"><div class="k">MRN</div><div class="v" style="font-weight:500">OE-000023</div></div>
+  </div>
+
+  <h3 class="sec">Active Medication List <span class="note">— as dispensed / on file at this pharmacy</span></h3>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:40%">Medication</th>
+        <th style="width:18%">Dose / Strength</th>
+        <th style="width:30%">Frequency</th>
+        <th style="width:12%">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="drug">Budesonide (Pulmicort)</span></td>
+        <td>0.5 mg</td>
+        <td>twice daily</td>
+        <td><span class="status">Active</span></td>
+      </tr>
+      <tr>
+        <td><span class="drug">Albuterol (Ventolin HFA)</span></td>
+        <td>90 mcg per actuation</td>
+        <td>as needed for wheezing</td>
+        <td><span class="status">Active</span></td>
+      </tr>
+      <tr>
+        <td><span class="drug">Fexofenadine (Allegra)</span></td>
+        <td>180 mg</td>
+        <td>once daily</td>
+        <td><span class="status">Active</span></td>
+      </tr>
+      <tr>
+        <td><span class="drug">Epinephrine (EpiPen)</span></td>
+        <td>0.3 mg</td>
+        <td>as needed for allergic reaction</td>
+        <td><span class="status">Active</span></td>
+      </tr>
+      <tr>
+        <td><span class="drug">Ibuprofen (Advil)</span></td>
+        <td>400 mg</td>
+        <td>three times daily as needed</td>
+        <td><span class="status">Active</span></td>
+      </tr>
+      <tr>
+        <td><span class="drug">Naproxen (Aleve)</span></td>
+        <td>220 mg</td>
+        <td>twice daily as needed</td>
+        <td><span class="status">Active</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="legend">
+    Dose and frequency are printed verbatim as dispensed. This profile reflects medications on file at
+    Wells Branch Pharmacy and may not include medications filled elsewhere. Reconcile against the
+    patient's chart before prescribing.
+  </div>
+
+  <footer>
+    <span>Wells Branch Pharmacy &middot; Patient Medication Profile</span>
+    <span>Angulo, Sergio &middot; DOB 03/14/1979 &middot; MRN OE-000023</span>
+    <span>Page 1 of 1</span>
+  </footer>
+
+</div>
+</body>
+</html>

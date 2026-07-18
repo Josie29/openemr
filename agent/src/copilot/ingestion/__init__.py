@@ -11,6 +11,7 @@ from copilot.ingestion.schemas import (
     LabReport,
     LabResult,
     Medication,
+    MedicationList,
     SourceType,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "LabReport",
     "LabResult",
     "Medication",
+    "MedicationList",
     "SourceType",
 ]

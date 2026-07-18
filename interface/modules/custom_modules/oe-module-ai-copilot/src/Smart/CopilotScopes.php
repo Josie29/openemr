@@ -29,6 +29,12 @@ namespace OpenEMR\Modules\AiCopilot\Smart;
  * And because `AuthorizationController::processAuthorizeFlowForLaunch()` overrides the request's
  * scopes with whatever is registered on the `oauth_clients` row, this list must match the client
  * registration exactly. See the module README's admin prerequisites.
+ *
+ * **Editing this list is not enough on its own** — the granted token comes from the registered row,
+ * so each environment's `oauth_clients.scope` must be re-synced or a new scope stays inert (this
+ * 502'd prod once, JOS-82). Local worktrees: `scripts/bootstrap-worktree-copilot.sh` (it reads this
+ * list and re-syncs on every run). Prod: `scripts/sync-copilot-scopes.sh --prod`, run as the last
+ * step of the qa→main promotion (see the project CLAUDE.md "Branching & integration workflow").
  */
 final readonly class CopilotScopes
 {
@@ -45,6 +51,11 @@ final readonly class CopilotScopes
         'patient/MedicationRequest.read',
         'patient/AllergyIntolerance.read',
         'patient/Encounter.read',
+        // Observation read backs the lab-history tools: it resolves through
+        // FhirObservationLaboratoryService to `procedure_result`, which is also where
+        // agent-derived lab facts are written — so history and derived facts read back
+        // through this one scope.
+        'patient/Observation.read',
         'patient/DocumentReference.read',
         // Binary read lets the agent fetch an uploaded lab PDF's bytes by document UUID
         // (GET /fhir/Binary/{id}) for OCR — the production doc-bytes fetch, keyed on the same UUID

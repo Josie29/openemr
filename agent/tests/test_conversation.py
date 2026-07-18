@@ -27,7 +27,7 @@ def test_followup_can_cite_a_resource_fetched_in_an_earlier_turn(settings: Setti
         app.state.graph,
         router=route_model([Route.EXTRACT_INTAKE, Route.ANSWER]),
         extractor=worker_model(
-            [("get_problems", {})], ExtractorOutput(summary="DM", claims=[_DM_CLAIM])
+            [("get_patient_summary", {})], ExtractorOutput(summary="DM", claims=[_DM_CLAIM])
         ),
         answerer=worker_model([], ChatResponse(summary="She has diabetes.", claims=[_DM_CLAIM])),
     ):

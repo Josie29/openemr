@@ -162,7 +162,9 @@ def main() -> int:
     Returns:
         Process exit code: 0 on success, 1 on any handled failure.
     """
-    parser = argparse.ArgumentParser(description="Mint a 1-hour SMART access token for the load test.")
+    parser = argparse.ArgumentParser(
+        description="Mint a 1-hour SMART access token for the load test."
+    )
     parser.add_argument(
         "--no-write",
         action="store_true",

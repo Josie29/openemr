@@ -12,10 +12,11 @@
 
 declare(strict_types=1);
 
-// Consumed by the Module Manager (InstallerController::getModuleVersionFromFile). The module
-// ships no SQL or ACL install scripts, so $v_database stays at 0.
+// Consumed by the Module Manager (InstallerController::getModuleVersionFromFile). $v_database is
+// the install/upgrade revision of sql/table.sql (the extraction sidecar); bump it whenever that
+// schema changes so the Module Manager re-runs the script.
 $v_major = 0;
-$v_minor = 1;
+$v_minor = 2;
 $v_patch = 0;
-$v_database = 0;
+$v_database = 1;
 $v_tag = '';

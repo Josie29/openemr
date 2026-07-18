@@ -7,6 +7,18 @@ live OpenEMR + real Mistral OCR on 2026-07-16. This document is the design contr
 Tracks: [JOS-80](https://linear.app/josiemachalek/issue/JOS-80/complete-intake-form-extraction-the-unshipped-half-of-jos-54).
 Related: [JOS-81](https://linear.app/josiemachalek/issue/JOS-81/write-back-of-agent-derived-facts-no-patient-scoped-write-surface) (write-back — **separate track**), JOS-54 (lab half), JOS-55 (schemas).
 
+> **Superseded in part (JOS-91): medications moved out of `intake_form`.** When this spec was
+> built, the intake form owned both allergies **and** medications. A later increment added a **third
+> document type, `medication_list`**, and moved medication extraction there — see
+> [`medication-list-extraction.md`](medication-list-extraction.md). The two document types are now
+> **mutually exclusive in what they own**: `intake_form` owns **allergies** (plus display-only
+> demographics, chief concern, family history) and **no longer extracts or persists medications**;
+> `medication_list` owns medications. `IntakeForm.current_medications` was removed from the schema.
+> The medication *locator* (`FieldId.CURRENT_MEDICATIONS`) and the medication *write path*
+> (`type='medication'` → `IntakeFactWriter::writeMedication`) were reused unchanged by the new type,
+> so the geometry and write-back discussion below still holds for medications — it just now fires for
+> a `medication_list`, not an intake form.
+
 ## 1. Why
 
 PRD-week-2 Core Req 1 requires `attach_and_extract` to support **both** `lab_pdf` and
@@ -70,7 +82,7 @@ later:
 | Lab result | `Observation` (unchanged) | `procedure_result` reads back as a FHIR Observation |
 | Demographics | `Patient` | `PUT /fhir/Patient` / `PatientService::update` |
 | Allergies | `AllergyIntolerance` | `lists` type=allergy, `verification='unconfirmed'` |
-| Medications | `MedicationRequest` | `lists` type=medication. **Not** `MedicationStatement` — absent from this fork |
+| ~~Medications~~ | ~~`MedicationRequest`~~ | **Moved to `medication_list` (JOS-91)** — intake no longer extracts medications. The tag/write path (`lists` type=medication) is unchanged; it now fires for a med-list document |
 | Family history | `FamilyMemberHistory` | Aspirational; see below |
 
 **Accepted limitation:** `FamilyMemberHistory` has no route, controller, service, or structured

@@ -105,7 +105,7 @@ def test_uc3_answer_from_a_note_grounds_on_a_verbatim_quote(settings: Settings) 
         app.state.graph,
         router=route_model([Route.EXTRACT_INTAKE, Route.ANSWER]),
         extractor=worker_model(
-            [("get_encounters", {}), ("get_encounter_note", {"encounter_id": "enc-2025-11"})],
+            [("get_patient_summary", {}), ("get_encounter_note", {"encounter_id": "enc-2025-11"})],
             ExtractorOutput(summary="Metformin continued.", claims=[note_claim]),
         ),
         answerer=worker_model(

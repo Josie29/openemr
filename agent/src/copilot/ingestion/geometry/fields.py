@@ -151,12 +151,6 @@ INTAKE_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             chain=_chain(SectionSpanLocator(max_span_words=90), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
-        FieldId.CURRENT_MEDICATIONS: FieldSpec(
-            field=FieldId.CURRENT_MEDICATIONS,
-            labels=("current medications", "medications", "medication"),
-            chain=_chain(SectionSpanLocator(), LineBandLocator()),
-            floor=_INTAKE_FLOOR,
-        ),
         FieldId.ALLERGIES: FieldSpec(
             field=FieldId.ALLERGIES,
             labels=("allergies", "allergy / substance", "allergy", "known allergies"),
@@ -174,10 +168,33 @@ INTAKE_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
     }
 )
 
+# Floor is LINE_BAND like intake: a printed medication row is always locatable, a whole-page box is
+# not click-to-source. Reuses the section+line chain the intake medication table used (each drug on
+# its own row under a medication heading).
+_MEDICATION_LIST_FLOOR = BoxPrecision.LINE_BAND
+
+MEDICATION_LIST_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
+    {
+        FieldId.CURRENT_MEDICATIONS: FieldSpec(
+            field=FieldId.CURRENT_MEDICATIONS,
+            labels=(
+                "active medication list",
+                "medication list",
+                "current medications",
+                "medications",
+                "medication",
+            ),
+            chain=_chain(SectionSpanLocator(), LineBandLocator()),
+            floor=_MEDICATION_LIST_FLOOR,
+        ),
+    }
+)
+
 _SPECS_BY_DOC_TYPE: Mapping[DocType, Mapping[FieldId, FieldSpec]] = MappingProxyType(
     {
         DocType.LAB_PDF: LAB_SPECS,
         DocType.INTAKE_FORM: INTAKE_SPECS,
+        DocType.MEDICATION_LIST: MEDICATION_LIST_SPECS,
     }
 )
 

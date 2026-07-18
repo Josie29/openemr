@@ -52,28 +52,31 @@ class Checkbox:
     ticked: bool
 
 
-def extract_checkboxes(pdf_bytes: bytes) -> list[Checkbox]:
+def extract_checkboxes(pdf_bytes: bytes) -> list[Checkbox] | None:
     """Find every tick box in a digital PDF and decide whether each is marked.
 
     A box is a small near-square rect; it is ticked when a mark glyph's centre falls inside it.
     Testing containment rather than merely looking for the glyph is what keeps an unrelated "X"
     (in "TX 78745", say) from reading as a tick.
 
-    Returns an empty list when the document has no vector rects (a scan), when ``pdfplumber`` is
-    unavailable, or when the bytes cannot be parsed — the caller then has no checkbox evidence and
-    treats checkbox-backed facts as unprovable rather than guessing.
+    Returns ``None`` when the detector could not RUN — ``pdfplumber`` missing, or bytes that will
+    not parse — versus ``[]`` when it ran and the document genuinely has no tick boxes. The two must
+    not be conflated: "this form has no checkboxes" lets a value be read as printed text, while
+    "we could not tell" must make checkbox-backed facts unprovable rather than fall through to a
+    text match on a preprinted option (see :class:`~copilot.ingestion.schemas.BoxEvidence`).
 
     Args:
         pdf_bytes: The raw PDF bytes.
 
     Returns:
-        Every checkbox found, in reading order, or ``[]``.
+        Every checkbox found in reading order, ``[]`` when the document has none, or ``None`` when
+        checkbox evidence is unavailable.
     """
     try:
         import pdfplumber
     except ImportError:
         logger.warning("pdfplumber not installed; no checkbox evidence available")
-        return []
+        return None
     boxes: list[Checkbox] = []
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -106,9 +109,10 @@ def extract_checkboxes(pdf_bytes: bytes) -> list[Checkbox]:
                         )
                     )
     except Exception:
-        # pdfplumber/pdfminer raise a variety of parse errors; treat any as "no checkbox evidence".
+        # pdfplumber/pdfminer raise a variety of parse errors; any of them means we could not tell
+        # whether this form has tick boxes — which is NOT the same as it having none.
         logger.warning("pdfplumber checkbox extraction failed", exc_info=True)
-        return []
+        return None
     return sorted(boxes, key=lambda box: (box.page, box.top, box.x0))
 
 

@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from copilot.ingestion.schemas import BoundingBox
+# BoxEvidence lives beside BoundingBox in schemas because it travels with a box onto Citation.
+# Re-exported here (and via geometry/__init__) so locators keep importing it from the geometry
+# package — the dependency runs geometry -> schemas, never the reverse.
+from copilot.ingestion.schemas import BoundingBox, BoxEvidence
 
 
 class BoxPrecision(StrEnum):
@@ -42,23 +45,6 @@ class BoxPrecision(StrEnum):
         return self.rank >= floor.rank
 
 
-class BoxEvidence(StrEnum):
-    """What a located box PROVES — not where it is.
-
-    The distinction that stops a box laundering a hallucination. On a form, an option's text is
-    *preprinted*: "Male" and "Female" are both on the page, and "Asthma" is printed whether or not
-    it is ticked. Boxing that text proves only that the form offers the option — the fact is
-    asserted by the tick. A box over preprinted text therefore cannot support a checkbox-derived
-    claim, even though the value provably "appears on the page".
-
-    Named ``BoxEvidence``, not ``Evidence``: :class:`copilot.schemas.Evidence` is the sidebar's
-    guideline source card.
-    """
-
-    PRINTED_VALUE = "printed_value"  # the value itself is written on the page
-    CHECKED_MARK = "checked_mark"  # a mark in a box asserts this option
-
-
 class LocatorName(StrEnum):
     """Which strategy produced a box. Recorded on the box and logged, for traces and debugging."""
 
@@ -73,18 +59,20 @@ class LocatorName(StrEnum):
 
 
 class LocateOutcome(StrEnum):
-    """The three things a locator can conclude — the middle one is why this is not ``| None``.
+    """What a locator can conclude — three of these are "no box", and they must not behave alike.
 
-    ``NOT_APPLICABLE`` and ``REFUTED`` are both "no box", but they must not behave alike:
-    ``NOT_APPLICABLE`` means "this is not my layout, ask the next locator", while ``REFUTED`` means
-    "I own this field and the page says NO". Collapsing them into None lets a refusal fall through
-    to a coarser locator that text-matches the preprinted option and hands back a box — laundering
-    the claim the refusal existed to stop.
+    ``NOT_APPLICABLE`` means "this is not my layout, ask the next locator". ``REFUTED`` means "I own
+    this field and the page says NO". ``UNDETERMINED`` means "I own this field and cannot tell" —
+    the evidence a verdict needs was unavailable (e.g. the checkbox detector could not run). Only
+    ``NOT_APPLICABLE`` may fall through: letting a refusal or a non-verdict continue to a coarser
+    locator gets the preprinted option text-matched and boxed, laundering the very claim the
+    non-answer existed to stop.
     """
 
     LOCATED = "located"
     NOT_APPLICABLE = "not_applicable"
     REFUTED = "refuted"
+    UNDETERMINED = "undetermined"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,3 +111,12 @@ class LocateResult:
             reason: Why the page refutes it, for the drop log.
         """
         return cls(outcome=LocateOutcome.REFUTED, reason=reason)
+
+    @classmethod
+    def undetermined(cls, reason: str) -> "LocateResult":
+        """This locator owns the field but the evidence to judge it was unavailable — stop.
+
+        Args:
+            reason: Why no verdict was possible, for the drop log.
+        """
+        return cls(outcome=LocateOutcome.UNDETERMINED, reason=reason)

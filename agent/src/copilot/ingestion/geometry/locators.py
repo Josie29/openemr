@@ -4,7 +4,6 @@ from enum import StrEnum
 from typing import Protocol
 
 from copilot.ingestion.geometry.boxes import (
-    BoxEvidence,
     BoxPrecision,
     LocatedBox,
     LocateOutcome,
@@ -14,7 +13,7 @@ from copilot.ingestion.geometry.boxes import (
 from copilot.ingestion.geometry.document import DocumentGeometry
 from copilot.ingestion.geometry.spans import first_token, match_span, merge_and_pad, norm
 from copilot.ingestion.geometry.words import Checkbox, Word
-from copilot.ingestion.schemas import BoundingBox
+from copilot.ingestion.schemas import BoundingBox, BoxEvidence
 
 logger = logging.getLogger("copilot")
 
@@ -116,10 +115,20 @@ class RowSpanLocator:
     anchor_region: tuple[float, float] = (0.0, 200.0)
     row_tolerance: float = _ROW_TOLERANCE
     max_span_words: int = 1
+    # Cursors are keyed so independent walks do not strand each other (see LocatorState). Two fields
+    # read from the SAME table — a medication's dose and its frequency — are two such walks: sharing
+    # one key would leave the second scanning from past the row the first consumed. Defaults to the
+    # locator name, so the single-field lab walk is unchanged.
+    cursor_key: str | None = None
 
     @property
     def name(self) -> LocatorName:
         return LocatorName.ROW_SPAN
+
+    @property
+    def _key(self) -> str:
+        """The cursor key this instance walks."""
+        return self.cursor_key or self.name.value
 
     def locate(
         self, request: LocateRequest, doc: DocumentGeometry, state: LocatorState
@@ -129,7 +138,7 @@ class RowSpanLocator:
         if not anchor_key or not norm(request.value) or not doc.words:
             return LocateResult.not_applicable()
         left, right = self.anchor_region
-        cursor = state.cursor(self.name.value)
+        cursor = state.cursor(self._key)
         for index in range(cursor, len(doc.words)):
             anchor = doc.words[index]
             if not (left <= anchor.x0 <= right) or norm(anchor.text) != anchor_key:
@@ -138,7 +147,7 @@ class RowSpanLocator:
             span = match_span(row, request.value, self.max_span_words)
             if span is None:
                 continue  # anchor matched but its value is not on this row — keep scanning
-            state.advance(self.name.value, index + 1)
+            state.advance(self._key, index + 1)
             return LocateResult.located_at(
                 LocatedBox(
                     box=merge_and_pad(span),
@@ -336,6 +345,10 @@ class CheckboxLocator:
         self, request: LocateRequest, doc: DocumentGeometry, state: LocatorState
     ) -> LocateResult:
         """Match the value against each box's option label; the mark decides the outcome."""
+        if not doc.checkboxes_available:
+            # The detector could not run, so we cannot tell whether this form ticks its options.
+            # Deferring here is what let the chain text-match the PREPRINTED option and box it.
+            return LocateResult.undetermined("checkbox evidence unavailable for this document")
         if not doc.checkboxes or not norm(request.value):
             return LocateResult.not_applicable()
         for checkbox in doc.checkboxes:
@@ -424,6 +437,13 @@ class LocatorChain:
                 case LocateOutcome.REFUTED:
                     logger.warning(
                         "locator refuted a value; dropping the fact",
+                        extra={"locator": locator.name.value, "reason": result.reason},
+                    )
+                    return None
+                case LocateOutcome.UNDETERMINED:
+                    logger.warning(
+                        "locator could not judge a value; dropping the fact rather than "
+                        "falling through to a coarser box",
                         extra={"locator": locator.name.value, "reason": result.reason},
                     )
                     return None

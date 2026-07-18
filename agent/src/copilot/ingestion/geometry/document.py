@@ -64,6 +64,10 @@ class DocumentGeometry:
     tables: tuple[OcrTable, ...]
     pages: tuple[PageDims, ...]
     checkboxes: tuple[Checkbox, ...] = ()
+    # False when the checkbox detector could not RUN (pdfplumber missing, or unparseable bytes) —
+    # distinct from running and finding none. A locator that owns a checkbox-gated field must refuse
+    # rather than defer to a text match when this is False, or it boxes the preprinted option.
+    checkboxes_available: bool = True
 
     def page(self, page: int) -> PageDims | None:
         """The dims for a 1-based page number, or None when the document has no such page."""
@@ -90,8 +94,12 @@ class DocumentGeometry:
         Raises:
             ExtractionError: If the response carries no usable page.
         """
+        detected = extract_checkboxes(pdf_bytes)
         return cls.from_parts(
-            ocr, extract_word_boxes(pdf_bytes), checkboxes=extract_checkboxes(pdf_bytes)
+            ocr,
+            extract_word_boxes(pdf_bytes),
+            checkboxes=detected if detected is not None else [],
+            checkboxes_available=detected is not None,
         )
 
     @classmethod
@@ -100,6 +108,7 @@ class DocumentGeometry:
         ocr: dict[str, Any],
         words: list[Word],
         checkboxes: list[Checkbox] | None = None,
+        checkboxes_available: bool = True,
     ) -> "DocumentGeometry":
         """Build the geometry from a raw OCR response plus already-extracted text-layer evidence.
 
@@ -108,6 +117,8 @@ class DocumentGeometry:
             words: The text-layer words in points; empty for a scanned/image-only PDF, in which
                 case only the OCR's coarse table/page geometry is available.
             checkboxes: The page's tick boxes, when the document has any.
+            checkboxes_available: False when the checkbox detector could not run, so a
+                checkbox-gated field must refuse rather than fall back to a text match.
 
         Returns:
             The normalized :class:`DocumentGeometry`, every box in PDF points.
@@ -141,6 +152,7 @@ class DocumentGeometry:
             tables=tuple(tables),
             pages=tuple(pages),
             checkboxes=tuple(checkboxes or ()),
+            checkboxes_available=checkboxes_available,
         )
 
 

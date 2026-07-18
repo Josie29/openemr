@@ -97,8 +97,11 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
     fact: dict[str, Any] = {
         "type": "medication",
         "name": medication.name,
-        "dose": medication.dose,
-        "frequency": medication.frequency,
+        # Flattened to the printed text: the persist endpoint writes these into
+        # `drug_dosage_instructions`, so the wire contract with PHP is unchanged by the model
+        # gaining per-field geometry.
+        "dose": medication.dose.value if medication.dose is not None else None,
+        "frequency": medication.frequency.value if medication.frequency is not None else None,
         "confidence": medication.confidence,
     }
     _attach_optional_box(fact, medication.citation.bounding_box)

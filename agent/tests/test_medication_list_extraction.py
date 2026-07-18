@@ -51,8 +51,33 @@ def test_extracts_every_medication_with_name_dose_and_frequency() -> None:
         assert med.frequency, f"{med.name} lost its frequency"
 
     budesonide = by_name["Budesonide (Pulmicort)"]
-    assert budesonide.dose == "0.5 mg"
-    assert budesonide.frequency == "twice daily"
+    assert budesonide.dose is not None and budesonide.dose.value == "0.5 mg"
+    assert budesonide.frequency is not None and budesonide.frequency.value == "twice daily"
+
+
+def test_dose_and_frequency_are_independently_locatable() -> None:
+    """Each qualifier carries its OWN box, in its own column — not a copy of the name's box.
+
+    Dose and frequency are the values a transcription error is most dangerous in ("500 mg" vs
+    "5000 mg"), yet they used to ship as unlocatable text beneath a UI implying everything shown was
+    read off the page. Boxing them per-field is what makes each one checkable. They must also be
+    DISTINCT boxes on the medication's own row: reusing the name's box would point the overlay at
+    the wrong cell, and matching another drug's row would attribute the wrong dose.
+    """
+    by_name = {med.name: med for med in _extract(_NAME).medications}
+    budesonide = by_name["Budesonide (Pulmicort)"]
+    assert budesonide.dose is not None and budesonide.frequency is not None
+
+    name_box = budesonide.citation.bounding_box
+    dose_box = budesonide.dose.citation.bounding_box
+    frequency_box = budesonide.frequency.citation.bounding_box
+    assert name_box is not None and dose_box is not None and frequency_box is not None
+
+    # The fixture's columns run Medication | Dose / Strength | Frequency, left to right.
+    assert name_box.x < dose_box.x < frequency_box.x
+    # ...and all three sit on one row, so the dose belongs to THIS drug.
+    assert abs(dose_box.y - name_box.y) < 12
+    assert abs(frequency_box.y - name_box.y) < 12
 
 
 def test_every_medication_carries_a_box() -> None:

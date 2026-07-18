@@ -1,5 +1,4 @@
 from copilot.ingestion.geometry.boxes import (
-    BoxEvidence,
     BoxPrecision,
     LocatedBox,
     LocateOutcome,
@@ -8,6 +7,7 @@ from copilot.ingestion.geometry.boxes import (
 )
 from copilot.ingestion.geometry.spans import first_token, match_span, merge_and_pad, norm
 from copilot.ingestion.geometry.words import Word, extract_word_boxes
+from copilot.ingestion.schemas import BoxEvidence
 
 __all__ = [
     "BoxEvidence",

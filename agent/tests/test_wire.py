@@ -74,8 +74,8 @@ def _medication_list_document(document_id: str = "doc-meds") -> ExtractedDocumen
             medications=[
                 Medication(
                     name="Metformin",
-                    dose="500 mg",
-                    frequency="twice daily",
+                    dose=CitedText(value="500 mg", citation=_citation("500 mg")),
+                    frequency=CitedText(value="twice daily", citation=_citation("twice daily")),
                     citation=_citation("Metformin"),
                 )
             ],

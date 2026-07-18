@@ -120,6 +120,26 @@ class LabDetail(BaseModel):
     )
 
 
+class BoxEvidence(StrEnum):
+    """What a located box PROVES — not where it is.
+
+    The distinction that stops a box laundering a hallucination. On a form an option's text is
+    *preprinted*: "Male" and "Female" are both on the page, and "Asthma" is printed whether or
+    not it is ticked. Boxing that text proves only that the form offers the option — the fact is
+    asserted by the tick. So a box over preprinted text cannot support a checkbox-derived claim,
+    even though the value provably "appears on the page".
+
+    Lives here, beside :class:`BoundingBox`, because a box's evidence travels with it onto
+    :class:`Citation`; the geometry package imports it from here (never the reverse).
+
+    Named ``BoxEvidence``, not ``Evidence``: :class:`copilot.schemas.Evidence` is the sidebar's
+    guideline source card.
+    """
+
+    PRINTED_VALUE = "printed_value"  # the value itself is written on the page
+    CHECKED_MARK = "checked_mark"  # a mark in a box asserts this option
+
+
 class Citation(BaseModel):
     """Machine-readable citation for one extracted fact — the W2 citation contract (§3.3).
 
@@ -139,6 +159,13 @@ class Citation(BaseModel):
     bounding_box: BoundingBox | None = Field(
         default=None,
         description="Box locating the value on the page (PDF points). Required for lab_pdf facts.",
+    )
+    evidence: BoxEvidence | None = Field(
+        default=None,
+        description=(
+            "What the box PROVES — a printed value, or a tick asserting a checkbox option. "
+            "Recorded by code from the locator that found it; never model-authored."
+        ),
     )
     source_type: SourceType | None = Field(
         default=None,
@@ -211,16 +238,22 @@ class LabResult(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
     @model_validator(mode="after")
     def _require_bounding_box(self) -> "LabResult":
         """Enforce that every lab_pdf fact resolves to a pixel location on the source.
 
-        A lab value with no bounding box cannot back the required click-to-source overlay, so it
-        is a schema violation — surfaced upstream as a low-confidence refusal, never shipped with
-        a fabricated rectangle (PRD Core Req 5; W2_ARCHITECTURE §3.3).
+        A lab value with no bounding box cannot back the required click-to-source overlay (PRD Core
+        Req 5; W2_ARCHITECTURE §3.3), so it must not exist.
+
+        A backstop, not the live path: ``map_lab_report`` already drops an unlocatable row (and one
+        below the precision floor) before it ever reaches this constructor, logging a warning. That
+        drop is silent to the physician — there is no "low-confidence refusal" surfaced upstream,
+        and no confidence threshold anywhere; the shipping decision is the
+        :class:`~copilot.ingestion.geometry.boxes.BoxPrecision` floor. This validator only
+        guarantees the invariant cannot be broken by a future caller.
 
         Raises:
             ValueError: If the citation carries no bounding box.
@@ -257,7 +290,7 @@ class CitedText(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 
@@ -284,10 +317,14 @@ class Medication(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1, description="Medication name as printed, e.g. 'Metformin'.")
-    dose: str | None = Field(
+    # Cited, not bare strings: a dose is the value a transcription error is most dangerous in
+    # ("500 mg" vs "5000 mg"), so it carries its own box and is checkable against the page. A dose
+    # the locator could not place still ships — with a boxless citation, so the UI can mark it
+    # unverified rather than imply it was read off the page (see extractor._secondary).
+    dose: CitedText | None = Field(
         default=None, description="Dose/strength as printed, e.g. '500 mg'. Null if not given."
     )
-    frequency: str | None = Field(
+    frequency: CitedText | None = Field(
         default=None, description="Frequency as printed, e.g. 'twice daily'. Null if not given."
     )
     citation: Citation = Field(description="Where on the document this medication was read from.")
@@ -295,7 +332,7 @@ class Medication(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 
@@ -315,7 +352,7 @@ class Allergy(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 
@@ -335,7 +372,7 @@ class FamilyHistoryItem(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 

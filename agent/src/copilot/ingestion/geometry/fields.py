@@ -34,6 +34,8 @@ class FieldId(StrEnum):
     DEMOGRAPHICS_PHONE = "demographics.phone"
     CHIEF_CONCERN = "chief_concern"
     CURRENT_MEDICATIONS = "current_medications[]"
+    CURRENT_MEDICATIONS_DOSE = "current_medications[].dose"
+    CURRENT_MEDICATIONS_FREQUENCY = "current_medications[].frequency"
     ALLERGIES = "allergies[]"
     FAMILY_HISTORY = "family_history[]"
 
@@ -185,6 +187,33 @@ MEDICATION_LIST_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
                 "medication",
             ),
             chain=_chain(SectionSpanLocator(), LineBandLocator()),
+            floor=_MEDICATION_LIST_FLOOR,
+        ),
+        # Dose and frequency are SECONDARY: each qualifies a medication whose name is already
+        # located, so both are anchored on that name and searched within its row — the same
+        # anchor-then-match shape the lab value uses against its test name. They are the values a
+        # transcription error is most dangerous in ("500 mg" vs "5000 mg"), so they must be
+        # checkable on the page rather than transported as unlocatable text.
+        FieldId.CURRENT_MEDICATIONS_DOSE: FieldSpec(
+            field=FieldId.CURRENT_MEDICATIONS_DOSE,
+            labels=("dose / strength", "dose", "strength", "sig"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=6, cursor_key="medication.dose"
+                ),
+                LineBandLocator(),
+            ),
+            floor=_MEDICATION_LIST_FLOOR,
+        ),
+        FieldId.CURRENT_MEDICATIONS_FREQUENCY: FieldSpec(
+            field=FieldId.CURRENT_MEDICATIONS_FREQUENCY,
+            labels=("frequency", "how often", "directions"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=8, cursor_key="medication.frequency"
+                ),
+                LineBandLocator(),
+            ),
             floor=_MEDICATION_LIST_FLOOR,
         ),
     }

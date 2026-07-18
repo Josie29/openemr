@@ -405,8 +405,11 @@ class DocumentFactRegistry:
                     resource_type=resource_type_for(FactKind.MEDICATION),
                     resource_id=resource_id,
                     name=medication.name,
-                    dose=medication.dose,
-                    frequency=medication.frequency,
+                    # The model states the printed text; the box stays server-side for the overlay.
+                    dose=medication.dose.value if medication.dose is not None else None,
+                    frequency=(
+                        medication.frequency.value if medication.frequency is not None else None
+                    ),
                 )
             )
         return handles

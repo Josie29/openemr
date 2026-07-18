@@ -30,7 +30,7 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "reaction": {
@@ -103,6 +103,15 @@
         "title": "BoundingBox",
         "type": "object"
       },
+      "BoxEvidence": {
+        "description": "What a located box PROVES \u2014 not where it is.\n\nThe distinction that stops a box laundering a hallucination. On a form an option's text is\n*preprinted*: \"Male\" and \"Female\" are both on the page, and \"Asthma\" is printed whether or\nnot it is ticked. Boxing that text proves only that the form offers the option \u2014 the fact is\nasserted by the tick. So a box over preprinted text cannot support a checkbox-derived claim,\neven though the value provably \"appears on the page\".\n\nLives here, beside :class:`BoundingBox`, because a box's evidence travels with it onto\n:class:`Citation`; the geometry package imports it from here (never the reverse).\n\nNamed ``BoxEvidence``, not ``Evidence``: :class:`copilot.schemas.Evidence` is the sidebar's\nguideline source card.",
+        "enum": [
+          "printed_value",
+          "checked_mark"
+        ],
+        "title": "BoxEvidence",
+        "type": "string"
+      },
       "ChatRequest": {
         "description": "The inbound ``POST /chat`` payload for a single agent turn.",
         "properties": {
@@ -149,6 +158,17 @@
               }
             ],
             "description": "Box locating the value on the page (PDF points). Required for lab_pdf facts."
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoxEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the box PROVES \u2014 a printed value, or a tick asserting a checkbox option. Recorded by code from the locator that found it; never model-authored."
           },
           "field_or_chunk_id": {
             "anyOf": [
@@ -228,7 +248,7 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "value": {
@@ -488,7 +508,7 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "relation": {
@@ -620,7 +640,7 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "loinc": {

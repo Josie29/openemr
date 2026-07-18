@@ -15,13 +15,13 @@ from copilot.fhir.client import FhirClient, FhirError
 from copilot.fhir.models import UploadedDocumentSummary
 from copilot.ingestion import loinc
 from copilot.ingestion.errors import ExtractionError
+from copilot.ingestion.geometry.boxes import LocatedBox
 from copilot.ingestion.geometry.document import DocumentGeometry
 from copilot.ingestion.geometry.fields import FieldId, spec_for
 from copilot.ingestion.geometry.locators import LocateRequest, LocatorState
 from copilot.ingestion.schemas import (
     AbnormalFlag,
     Allergy,
-    BoundingBox,
     Citation,
     CitedText,
     Demographics,
@@ -625,7 +625,7 @@ def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport
             # No text-layer word, no table geometry, no page box — drop rather than fabricate.
             logger.warning("dropping lab result with no locatable box", extra={"test": test_name})
             continue
-        results.append(_build_lab_result(raw, located.box, page, geometry))
+        results.append(_build_lab_result(raw, located, page, geometry))
     return LabReport(results=results)
 
 
@@ -745,7 +745,56 @@ def _locate(
             },
         )
         return None
-    return Citation(quote_or_value=value, bounding_box=located.box)
+    return Citation(
+        quote_or_value=value, bounding_box=located.box, evidence=located.evidence
+    )
+
+
+def _secondary(
+    field: FieldId,
+    value: str | None,
+    anchors: tuple[str, ...],
+    geometry: DocumentGeometry,
+    state: LocatorState,
+    doc_type: DocType,
+) -> CitedText | None:
+    """Cite a SECONDARY field, keeping the parent fact even when the value cannot be placed.
+
+    A secondary field qualifies a fact its parent already proved — a dose qualifies a medication, a
+    reference range qualifies a lab value. Failing to locate one must NOT drop the parent: the value
+    is still what the document says. So it ships with a BOXLESS citation, which the sidebar can show
+    as transported-but-unverified instead of implying it was read off the page. That is the one way
+    a secondary field differs from a primary one, which is dropped outright when unlocatable.
+
+    Args:
+        field: The secondary field's semantic id, selecting its locator chain.
+        value: The extracted text, or None when the document does not state it.
+        anchors: What scopes the search — the parent fact's own value, e.g. a medication name.
+        geometry: The document's normalized geometry.
+        state: Per-document cursors.
+        doc_type: The document type whose per-field spec applies.
+
+    Returns:
+        The cited value (boxed when locatable), or None when the document states no value.
+    """
+    if value is None:
+        return None
+    spec = spec_for(doc_type, field)
+    located = spec.chain.locate(LocateRequest(value=value, anchors=anchors), geometry, state)
+    box = located.box if located is not None and located.precision.meets(spec.floor) else None
+    if box is None:
+        logger.info(
+            "secondary field not located; citing it without a box",
+            extra={"field": field.value, "doc_type": doc_type.value},
+        )
+    return CitedText(
+        value=value,
+        citation=Citation(
+            quote_or_value=value,
+            bounding_box=box,
+            evidence=located.evidence if box is not None and located is not None else None,
+        ),
+    )
 
 
 def _map_medications(
@@ -772,8 +821,24 @@ def _map_medications(
         items.append(
             Medication(
                 name=name,
-                dose=_clean(raw.get("dose")),
-                frequency=_clean(raw.get("frequency")),
+                # Anchored on the medication's own name, so each qualifier is searched within that
+                # drug's row rather than matching an identical dose printed against another drug.
+                dose=_secondary(
+                    FieldId.CURRENT_MEDICATIONS_DOSE,
+                    _clean(raw.get("dose")),
+                    (name,),
+                    geometry,
+                    state,
+                    doc_type,
+                ),
+                frequency=_secondary(
+                    FieldId.CURRENT_MEDICATIONS_FREQUENCY,
+                    _clean(raw.get("frequency")),
+                    (name,),
+                    geometry,
+                    state,
+                    doc_type,
+                ),
                 citation=citation,
             )
         )
@@ -887,7 +952,7 @@ def _ground_loinc(raw: dict[str, Any], geometry: DocumentGeometry) -> str | None
 
 
 def _build_lab_result(
-    raw: dict[str, Any], box: BoundingBox, page: dict[str, Any], geometry: DocumentGeometry
+    raw: dict[str, Any], located: LocatedBox, page: dict[str, Any], geometry: DocumentGeometry
 ) -> LabResult:
     """Build one cited ``LabResult`` from a document_annotation row and its located box.
 
@@ -905,7 +970,9 @@ def _build_lab_result(
         reference_range=_clean(raw.get("reference_range")),
         collection_date=_parse_date(raw.get("collection_date")),
         abnormal_flag=_map_abnormal(raw.get("abnormal_flag")),
-        citation=Citation(quote_or_value=value, bounding_box=box),
+        citation=Citation(
+            quote_or_value=value, bounding_box=located.box, evidence=located.evidence
+        ),
         confidence=_value_confidence(value, page),
     )
 

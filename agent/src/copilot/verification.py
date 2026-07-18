@@ -129,6 +129,20 @@ class FetchLog:
         for resource in items:
             self.record(resource.resource_type, resource.resource_id, resource)
 
+    def records_of_type(self, resource_type: str) -> list[Any]:
+        """Return every recorded resource of one FHIR type, in insertion order.
+
+        Lets a payload projection (e.g. the lab trend chart) read what a turn fetched without
+        reaching into the private store or knowing the ids.
+
+        Args:
+            resource_type: FHIR resource type to filter by, e.g. ``"Observation"``.
+
+        Returns:
+            The recorded objects whose key type matches; empty when none were fetched.
+        """
+        return [obj for (rtype, _), obj in self._objects.items() if rtype == resource_type]
+
     def resolve(self, ref: SourceRef) -> Resolution | None:
         """Resolve a citation to the real value and identity of the fetched resource.
 

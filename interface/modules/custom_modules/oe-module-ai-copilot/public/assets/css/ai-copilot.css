@@ -444,6 +444,102 @@ body.ai-copilot-resizing {
     margin: 0;
 }
 
+/* Lab trend charts (JOS-83). One static SVG line chart per analyte the agent read this turn.
+   Colours come entirely from existing tokens — the JOS-88 trust gradient distinguishes a coded
+   'final' result from an agent-derived 'preliminary' one, the same semantics the evidence tiers use. */
+.ai-copilot__labcharts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--copilot-space-2);
+}
+
+.ai-copilot__labchart {
+    margin: 0;
+    border: 1px solid var(--copilot-border);
+    border-radius: var(--copilot-radius);
+    background: var(--copilot-surface);
+    overflow: hidden;
+}
+
+.ai-copilot__labchart-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--copilot-space-1);
+    padding: var(--copilot-space-2) var(--copilot-space-2) var(--copilot-space-1);
+}
+
+.ai-copilot__labchart-name {
+    font-weight: 600;
+    font-size: var(--copilot-font-sm);
+}
+
+.ai-copilot__labchart-unit {
+    font-size: 0.72rem;
+    color: var(--copilot-muted);
+}
+
+.ai-copilot__labchart-loinc {
+    margin-left: auto;
+    font-size: 0.66rem;
+    color: var(--copilot-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.ai-copilot__labchart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    padding: 0 var(--copilot-space-2) var(--copilot-space-2);
+}
+
+.ai-copilot__labchart-axis {
+    stroke: var(--copilot-border);
+    stroke-width: 1;
+}
+
+.ai-copilot__labchart-area {
+    fill: var(--copilot-accent);
+    opacity: 0.07;
+}
+
+.ai-copilot__labchart-line {
+    fill: none;
+    stroke: var(--copilot-accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.ai-copilot__labchart-pt {
+    stroke: var(--copilot-surface);
+    stroke-width: 1.5;
+}
+
+.ai-copilot__labchart-pt--final {
+    fill: var(--copilot-tier-record);
+}
+
+.ai-copilot__labchart-pt--prelim {
+    fill: var(--copilot-tier-document);
+}
+
+.ai-copilot__labchart-tick {
+    fill: var(--copilot-muted);
+    font-size: 8.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ai-copilot__labchart-val {
+    fill: var(--copilot-text);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ai-copilot__labchart-val--end {
+    font-weight: 700;
+    font-size: 10px;
+}
+
 .ai-copilot__claims {
     display: flex;
     flex-direction: column;

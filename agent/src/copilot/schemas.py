@@ -244,6 +244,45 @@ class Evidence(BaseModel):
     )
 
 
+class LabPoint(BaseModel):
+    """One plotted draw in a lab trend: a value at a point in time, with its trust status.
+
+    ``status`` mirrors FHIR ``Observation.status`` — ``final`` for a clinician-ordered result,
+    ``preliminary`` for one the agent extracted from a document and persisted (JOS-81) but a
+    clinician has not confirmed. The sidebar colours the point by it (the JOS-88 trust gradient).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    date: str = Field(description="Specimen collection date (ISO), the point's x-position")
+    value: float = Field(description="Numeric result; the point's y-position")
+    status: str = Field(description="FHIR Observation.status, e.g. 'final' | 'preliminary'")
+    observation_id: str = Field(description="Source Observation id — the point's stable identity")
+
+
+class LabSeries(BaseModel):
+    """One analyte's trend — a sidebar line chart, one per LOINC code.
+
+    Built by code in ``_build_lab_series`` from the :class:`~copilot.fhir.models.LabObservation`
+    resources the agent fetched this turn (never the model), so it appears only when a lab was read.
+    Grouping by ``code`` (not display name) keeps distinct analytes with similar names apart and
+    guarantees one unit per axis. Only series with two or more points are emitted — one draw is not
+    a trend. Added to the response body in ``_answer_payload``, off the LLM-facing ``ChatResponse``
+    (mirrors ``Evidence`` and the per-claim ``citations`` projection).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    code: str = Field(
+        description="LOINC code — the analyte identity and grouping key, e.g. '718-7'"
+    )
+    display: str = Field(description="Analyte name for the chart title, e.g. 'Hemoglobin'")
+    unit: str = Field(description="Measurement unit for the axis label, e.g. 'g/dL'")
+    points: list[LabPoint] = Field(
+        description="Draws oldest-first; at least two (a one-point series is never emitted)"
+    )
+
+
 class ChatRequest(BaseModel):
     """The inbound ``POST /chat`` payload for a single agent turn."""
 

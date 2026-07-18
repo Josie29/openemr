@@ -429,7 +429,7 @@
         "type": "object"
       },
       "ExtractionResponse": {
-        "description": "``GET /documents/{id}/extraction`` \u2014 one document's strict-schema facts.\n\n``report`` is the schema the document's TYPE selected \u2014 a ``LabReport`` for a ``lab_pdf``, an\n``IntakeForm`` for an ``intake_form`` \u2014 with each fact carrying its citation (bounding box +\nverbatim value) and per-value confidence. ``doc_type`` is the human-readable discriminant,\nresolved server-side from the document's OpenEMR category (never a caller input).",
+        "description": "``GET /documents/{id}/extraction`` \u2014 one document's strict-schema facts.\n\n``report`` is the schema the document's TYPE selected \u2014 a ``LabReport`` for a ``lab_pdf``, an\n``IntakeForm`` for an ``intake_form``, a ``MedicationList`` for a ``medication_list`` \u2014 with each\nfact carrying its citation (bounding box + verbatim value) and per-value confidence. ``doc_type``\nis the human-readable discriminant, resolved server-side from the document's OpenEMR category\n(never a caller input).",
         "properties": {
           "doc_type": {
             "$ref": "#/components/schemas/DocType",
@@ -447,9 +447,12 @@
               },
               {
                 "$ref": "#/components/schemas/IntakeForm"
+              },
+              {
+                "$ref": "#/components/schemas/MedicationList"
               }
             ],
-            "description": "LabReport for a lab_pdf, IntakeForm for an intake_form",
+            "description": "LabReport for a lab_pdf, IntakeForm for an intake_form, MedicationList for a medication_list",
             "title": "Report"
           }
         },
@@ -676,6 +679,83 @@
           "citation"
         ],
         "title": "LabResult",
+        "type": "object"
+      },
+      "Medication": {
+        "description": "A medication read from a medication list \u2014 name plus verbatim dose and frequency.",
+        "properties": {
+          "citation": {
+            "$ref": "#/components/schemas/Citation",
+            "description": "Where on the document this medication was read from."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "title": "Confidence"
+          },
+          "dose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dose/strength as printed, e.g. '500 mg'. Null if not given.",
+            "title": "Dose"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Frequency as printed, e.g. 'twice daily'. Null if not given.",
+            "title": "Frequency"
+          },
+          "name": {
+            "description": "Medication name as printed, e.g. 'Metformin'.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "citation"
+        ],
+        "title": "Medication",
+        "type": "object"
+      },
+      "MedicationList": {
+        "description": "Strict-schema extraction of a ``medication_list`` document (PRD Core Req 1).\n\nThe third document type (W2_ARCHITECTURE \u00a73.1) \u2014 a pharmacy profile, discharge list, or\nreconciliation sheet. Owns medications, which ``intake_form`` no longer extracts. An empty\n``medications`` list means 'none read', treated as missing-data, not an affirmative 'none'.",
+        "properties": {
+          "medications": {
+            "description": "Every medication read from the list, each cited.",
+            "items": {
+              "$ref": "#/components/schemas/Medication"
+            },
+            "title": "Medications",
+            "type": "array"
+          }
+        },
+        "required": [
+          "medications"
+        ],
+        "title": "MedicationList",
         "type": "object"
       },
       "SourceType": {

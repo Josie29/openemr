@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 from copilot.fhir.models import UploadedDocumentSummary
 from copilot.ingestion.extractor import ExtractedDocument
-from copilot.ingestion.schemas import DocType, IntakeForm, LabReport
+from copilot.ingestion.schemas import DocType, IntakeForm, LabReport, MedicationList
 from copilot.rag.models import EvidenceSnippet
 
 # Response models for the read-only Week-2 HTTP endpoints (JOS-63 / JOS-67).
@@ -28,15 +28,17 @@ class ExtractionResponse(BaseModel):
     """``GET /documents/{id}/extraction`` — one document's strict-schema facts.
 
     ``report`` is the schema the document's TYPE selected — a ``LabReport`` for a ``lab_pdf``, an
-    ``IntakeForm`` for an ``intake_form`` — with each fact carrying its citation (bounding box +
-    verbatim value) and per-value confidence. ``doc_type`` is the human-readable discriminant,
-    resolved server-side from the document's OpenEMR category (never a caller input).
+    ``IntakeForm`` for an ``intake_form``, a ``MedicationList`` for a ``medication_list`` — with each
+    fact carrying its citation (bounding box + verbatim value) and per-value confidence. ``doc_type``
+    is the human-readable discriminant, resolved server-side from the document's OpenEMR category
+    (never a caller input).
     """
 
     document_id: str = Field(description="The extracted DocumentReference id")
     doc_type: DocType = Field(description="Which schema the document's category selected")
-    report: LabReport | IntakeForm = Field(
-        description="LabReport for a lab_pdf, IntakeForm for an intake_form"
+    report: LabReport | IntakeForm | MedicationList = Field(
+        description="LabReport for a lab_pdf, IntakeForm for an intake_form, "
+        "MedicationList for a medication_list"
     )
 
     @classmethod

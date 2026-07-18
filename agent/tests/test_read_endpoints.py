@@ -32,6 +32,7 @@ _MEDLIST_OCR = str(_DOCS / "extractions" / "sergio-angulo-medication-list.ocr.js
 _PATIENT = "23"
 _LAB_DOC_ID = "labreport-2026-07"
 _INTAKE_DOC_ID = "intakeform-2026-07"
+_MEDLIST_DOC_ID = "medicationlist-2026-07"
 
 
 def _fixture_settings(*, lab: bool = True, intake: bool = True, meds: bool = True) -> Settings:
@@ -118,6 +119,20 @@ def test_extraction_returns_strict_facts_with_boxes_and_confidence() -> None:
     first = results[0]
     assert first["citation"]["bounding_box"] is not None
     assert first["confidence"] is not None
+
+
+def test_extraction_of_a_medication_list_returns_boxed_medications() -> None:
+    # Breaks if the third doc type 500s at the read endpoint: ExtractionResponse.report must accept
+    # a MedicationList, not just LabReport/IntakeForm. Regression guard for the JOS-91 gap where a
+    # med-list extraction blew up on response validation (the browser answered from the chart).
+    client = TestClient(create_app(_fixture_settings()))
+    resp = client.get(f"/documents/{_MEDLIST_DOC_ID}/extraction", params={"patient_id": _PATIENT})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["doc_type"] == "medication_list"  # resolved server-side from the category
+    meds = body["report"]["medications"]
+    assert meds, "expected the medication list to yield medications"
+    assert meds[0]["citation"]["bounding_box"] is not None
 
 
 def test_extraction_of_an_unknown_document_is_a_404() -> None:

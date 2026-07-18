@@ -5,18 +5,22 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DocType(StrEnum):
-    """The two document types the ingestion flow supports (PRD Core Req 1).
+    """The document types the ingestion flow supports (PRD Core Req 1).
 
     Resolved deterministically from the OpenEMR document category, not classified by the model:
-    the ``Lab Report`` category maps to ``LAB_PDF``, ``Patient Information`` to ``INTAKE_FORM``.
-    The category picks the schema; the model never decides what kind of document it is.
+    the ``Lab Report`` category maps to ``LAB_PDF``, ``Patient Information`` to ``INTAKE_FORM``,
+    ``Medication List`` to ``MEDICATION_LIST``. The category picks the schema; the model never
+    decides what kind of document it is.
     """
 
     LAB_PDF = "lab_pdf"
     INTAKE_FORM = "intake_form"
+    MEDICATION_LIST = "medication_list"
 
 
-def paths_by_doc_type(*, lab_pdf: str | None, intake_form: str | None) -> dict[DocType, str]:
+def paths_by_doc_type(
+    *, lab_pdf: str | None, intake_form: str | None, medication_list: str | None
+) -> dict[DocType, str]:
     """Pair each document type with its configured file path, dropping the unconfigured ones.
 
     Settings carry one flat scalar per document type (a `dict` field would be JSON-decoded inside
@@ -28,11 +32,16 @@ def paths_by_doc_type(*, lab_pdf: str | None, intake_form: str | None) -> dict[D
     Args:
         lab_pdf: Path configured for a lab report, if any.
         intake_form: Path configured for an intake form, if any.
+        medication_list: Path configured for a medication list, if any.
 
     Returns:
-        The configured paths by document type; empty when neither is set.
+        The configured paths by document type; empty when none is set.
     """
-    configured = {DocType.LAB_PDF: lab_pdf, DocType.INTAKE_FORM: intake_form}
+    configured = {
+        DocType.LAB_PDF: lab_pdf,
+        DocType.INTAKE_FORM: intake_form,
+        DocType.MEDICATION_LIST: medication_list,
+    }
     return {doc_type: path for doc_type, path in configured.items() if path}
 
 
@@ -270,7 +279,7 @@ class Demographics(BaseModel):
 
 
 class Medication(BaseModel):
-    """A current medication reported on an intake form."""
+    """A medication read from a medication list — name plus verbatim dose and frequency."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -281,7 +290,7 @@ class Medication(BaseModel):
     frequency: str | None = Field(
         default=None, description="Frequency as printed, e.g. 'twice daily'. Null if not given."
     )
-    citation: Citation = Field(description="Where on the form this medication was read from.")
+    citation: Citation = Field(description="Where on the document this medication was read from.")
     confidence: float | None = Field(
         default=None,
         ge=0,
@@ -336,6 +345,10 @@ class IntakeForm(BaseModel):
     The canonical contract for intake extraction (W2_ARCHITECTURE §3.1 step 3). List sections are
     always present but may be empty when the form reports none; an empty list means 'none read
     from the form' — which the answer layer treats as missing-data, not as an affirmative 'none'.
+
+    No medications: :class:`MedicationList` owns them, so the two document types are mutually
+    exclusive. Intake persists allergies only (demographics, chief concern, family history are
+    display-only).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -344,10 +357,22 @@ class IntakeForm(BaseModel):
     chief_concern: CitedText | None = Field(
         default=None, description="Chief concern / reason for visit as printed. Null if absent."
     )
-    current_medications: list[Medication] = Field(
-        description="Every current medication read from the form, each cited."
-    )
     allergies: list[Allergy] = Field(description="Every allergy read from the form, each cited.")
     family_history: list[FamilyHistoryItem] = Field(
         description="Every family-history entry read from the form, each cited."
+    )
+
+
+class MedicationList(BaseModel):
+    """Strict-schema extraction of a ``medication_list`` document (PRD Core Req 1).
+
+    The third document type (W2_ARCHITECTURE §3.1) — a pharmacy profile, discharge list, or
+    reconciliation sheet. Owns medications, which ``intake_form`` no longer extracts. An empty
+    ``medications`` list means 'none read', treated as missing-data, not an affirmative 'none'.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    medications: list[Medication] = Field(
+        description="Every medication read from the list, each cited."
     )

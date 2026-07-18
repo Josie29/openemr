@@ -697,8 +697,12 @@ def _uploaded_document_attachment(resource: dict[str, Any]) -> dict[str, Any] | 
 # locate, and the precision floor drops them, so the agent reports no facts. Adding a purpose-built
 # intake category would remove the ambiguity; until then, this set is the seam (add a name here, not
 # code, to support another deployment's naming).
+#
+# `Medication List` is a purpose-built seeded category (no OpenEMR default names it), matched EXACTLY
+# like intake. It carries no "lab" substring, so the lab test above never claims it first.
 _LAB_CATEGORY_SUBSTRING = "lab"
 _INTAKE_CATEGORY_NAMES = frozenset({"patient information"})
+_MEDICATION_LIST_CATEGORY_NAMES = frozenset({"medication list"})
 
 
 def resolve_doc_type(resource: dict[str, Any]) -> DocType | None:
@@ -722,6 +726,8 @@ def resolve_doc_type(resource: dict[str, Any]) -> DocType | None:
             return DocType.LAB_PDF
         if text in _INTAKE_CATEGORY_NAMES:
             return DocType.INTAKE_FORM
+        if text in _MEDICATION_LIST_CATEGORY_NAMES:
+            return DocType.MEDICATION_LIST
     return None
 
 

@@ -13,9 +13,15 @@ from copilot.ingestion.extractor import (  # noqa: E402
     MistralOcrBackend,
     map_intake_form,
     map_lab_report,
+    map_medication_list,
 )
 from copilot.ingestion.geometry.document import DocumentGeometry  # noqa: E402
-from copilot.ingestion.schemas import DocType, IntakeForm, LabReport  # noqa: E402
+from copilot.ingestion.schemas import (  # noqa: E402
+    DocType,
+    IntakeForm,
+    LabReport,
+    MedicationList,
+)
 
 _AGENT_ROOT = Path(__file__).resolve().parents[1]
 _DOCUMENTS_DIR = _AGENT_ROOT / "tests" / "fixtures" / "documents"
@@ -89,7 +95,7 @@ def _check_source(pdf: Path, allow_external: bool) -> None:
         print("WARNING: its text will be written into a file intended for git.", file=sys.stderr)
 
 
-def _report_rows(report: LabReport | IntakeForm) -> list[tuple[str, str, str]]:
+def _report_rows(report: LabReport | IntakeForm | MedicationList) -> list[tuple[str, str, str]]:
     """Flatten a mapped report into (field, value, box) rows for the replay table."""
     rows: list[tuple[str, str, str]] = []
 
@@ -114,12 +120,13 @@ def _report_rows(report: LabReport | IntakeForm) -> list[tuple[str, str, str]]:
             ):
                 if cited is not None:
                     rows.append((name, cited.value, _box(cited.citation)))
-            for medication in report.current_medications:
-                rows.append(("current_medications[]", medication.name, _box(medication.citation)))
             for allergy in report.allergies:
                 rows.append(("allergies[]", allergy.substance, _box(allergy.citation)))
             for item in report.family_history:
                 rows.append(("family_history[]", item.condition, _box(item.citation)))
+        case MedicationList():
+            for medication in report.medications:
+                rows.append(("current_medications[]", medication.name, _box(medication.citation)))
     return rows
 
 
@@ -141,9 +148,11 @@ def _replay(raw: dict[str, Any], pdf_bytes: bytes, doc_type: DocType) -> list[tu
         geometry = DocumentGeometry.from_document(pdf_bytes, raw)
         match doc_type:
             case DocType.LAB_PDF:
-                report: LabReport | IntakeForm = map_lab_report(raw, geometry)
+                report: LabReport | IntakeForm | MedicationList = map_lab_report(raw, geometry)
             case DocType.INTAKE_FORM:
                 report = map_intake_form(raw, geometry)
+            case DocType.MEDICATION_LIST:
+                report = map_medication_list(raw, geometry)
     except ExtractionError as exc:
         raise SystemExit(f"the recording does not map: {exc}") from exc
     rows = _report_rows(report)

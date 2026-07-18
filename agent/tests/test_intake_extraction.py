@@ -40,7 +40,6 @@ def _all_citations(form: IntakeForm) -> list[Citation]:
     return [
         *(cited.citation for cited in demographics if cited is not None),
         *(allergy.citation for allergy in form.allergies),
-        *(medication.citation for medication in form.current_medications),
         *(item.citation for item in form.family_history),
     ]
 
@@ -82,7 +81,6 @@ def test_one_spec_set_extracts_both_layouts(name: str) -> None:
     assert form.chief_concern is not None
     assert "check-up" in form.chief_concern.value
 
-    assert len(form.current_medications) >= 4
     assert len(form.allergies) >= 4
     assert len(form.family_history) >= 5
 

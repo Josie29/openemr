@@ -54,6 +54,20 @@ def test_intake_form_is_discovered_as_an_intake_form() -> None:
     assert summary.doc_type is DocType.INTAKE_FORM
 
 
+def test_medication_list_is_discovered_as_a_medication_list() -> None:
+    """A PDF filed under 'Medication List' resolves to the medication-list schema.
+
+    This is the third document type's discovery seam. If it breaks, an uploaded medication list is
+    invisible to the agent and its medications never reach the chart — the physician is told there
+    is nothing to extract.
+    """
+    summary = UploadedDocumentSummary.try_from_fhir(
+        _uploaded_pdf(resource_id="meds-1", category_text="Medication List")
+    )
+    assert summary is not None
+    assert summary.doc_type is DocType.MEDICATION_LIST
+
+
 def test_intake_category_is_matched_exactly_not_by_substring() -> None:
     """'Patient Information' matches exactly; its identity CHILDREN do not.
 

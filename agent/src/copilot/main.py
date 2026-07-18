@@ -252,6 +252,7 @@ def _build_readiness_client(settings: Settings) -> HttpFhirClient | FixtureFhirC
             paths_by_doc_type(
                 lab_pdf=settings.document_pdf_path_lab_pdf,
                 intake_form=settings.document_pdf_path_intake_form,
+                medication_list=settings.document_pdf_path_medication_list,
             )
         )
     # HTTP mode. A missing base URL is a misconfiguration, but we do not raise at startup —

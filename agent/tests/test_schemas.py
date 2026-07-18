@@ -13,6 +13,7 @@ from copilot.ingestion.schemas import (
     LabReport,
     LabResult,
     Medication,
+    MedicationList,
     SourceType,
 )
 
@@ -166,9 +167,6 @@ def test_intake_form_happy_path() -> None:
     form = IntakeForm(
         demographics=Demographics(full_name=_cited("Sergio Angulo")),
         chief_concern=_cited("chest pain"),
-        current_medications=[
-            Medication(name="Metformin", dose="500 mg", citation=_valid_citation(box=False))
-        ],
         allergies=[Allergy(substance="Penicillin", citation=_valid_citation(box=False))],
         family_history=[
             FamilyHistoryItem(condition="Type 2 diabetes", citation=_valid_citation(box=False))
@@ -176,7 +174,6 @@ def test_intake_form_happy_path() -> None:
     )
     assert form.demographics.full_name is not None
     assert form.demographics.full_name.value == "Sergio Angulo"
-    assert form.current_medications[0].name == "Metformin"
     assert form.allergies[0].substance == "Penicillin"
     assert form.family_history[0].condition == "Type 2 diabetes"
 
@@ -234,28 +231,46 @@ def test_intake_form_accepts_empty_sections() -> None:
     """Empty list sections are valid — they mean 'none read from the form' (missing-data)."""
     form = IntakeForm(
         demographics=Demographics(),
-        current_medications=[],
         allergies=[],
         family_history=[],
     )
-    assert form.current_medications == []
+    assert form.allergies == []
     assert form.chief_concern is None
 
 
-@pytest.mark.parametrize(
-    "missing", ["demographics", "current_medications", "allergies", "family_history"]
-)
+@pytest.mark.parametrize("missing", ["demographics", "allergies", "family_history"])
 def test_intake_form_requires_core_sections(missing: str) -> None:
     """Omitting demographics or any list section is rejected — the shape is always fully present."""
     fields: dict[str, object] = {
         "demographics": Demographics(),
-        "current_medications": [],
         "allergies": [],
         "family_history": [],
     }
     del fields[missing]
     with pytest.raises(ValidationError):
         IntakeForm(**fields)
+
+
+def test_medication_list_happy_path_and_empty_section() -> None:
+    """The medication-list schema constructs with rows and accepts an empty list.
+
+    First construction coverage for the third document type's contract; if it breaks, a medication
+    list cannot be represented and the medications never reach the write path. An empty list means
+    'none read from the document', not an affirmative 'no medications'.
+    """
+    filled = MedicationList(
+        medications=[
+            Medication(name="Metformin", dose="500 mg", citation=_valid_citation(box=False))
+        ]
+    )
+    assert filled.medications[0].name == "Metformin"
+    assert MedicationList(medications=[]).medications == []
+
+
+def test_medication_list_requires_its_medications_section() -> None:
+    """Omitting the medications list is rejected — the shape is always fully present."""
+    with pytest.raises(ValidationError):
+        MedicationList()  # type: ignore[call-arg]
 
 
 @pytest.mark.parametrize(

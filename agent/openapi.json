@@ -308,10 +308,11 @@
         "type": "object"
       },
       "DocType": {
-        "description": "The two document types the ingestion flow supports (PRD Core Req 1).\n\nResolved deterministically from the OpenEMR document category, not classified by the model:\nthe ``Lab Report`` category maps to ``LAB_PDF``, ``Patient Information`` to ``INTAKE_FORM``.\nThe category picks the schema; the model never decides what kind of document it is.",
+        "description": "The document types the ingestion flow supports (PRD Core Req 1).\n\nResolved deterministically from the OpenEMR document category, not classified by the model:\nthe ``Lab Report`` category maps to ``LAB_PDF``, ``Patient Information`` to ``INTAKE_FORM``,\n``Medication List`` to ``MEDICATION_LIST``. The category picks the schema; the model never\ndecides what kind of document it is.",
         "enum": [
           "lab_pdf",
-          "intake_form"
+          "intake_form",
+          "medication_list"
         ],
         "title": "DocType",
         "type": "string"
@@ -521,7 +522,7 @@
         "type": "object"
       },
       "IntakeForm": {
-        "description": "Strict-schema extraction of an ``intake_form`` document (PRD Core Req 2).\n\nThe canonical contract for intake extraction (W2_ARCHITECTURE \u00a73.1 step 3). List sections are\nalways present but may be empty when the form reports none; an empty list means 'none read\nfrom the form' \u2014 which the answer layer treats as missing-data, not as an affirmative 'none'.",
+        "description": "Strict-schema extraction of an ``intake_form`` document (PRD Core Req 2).\n\nThe canonical contract for intake extraction (W2_ARCHITECTURE \u00a73.1 step 3). List sections are\nalways present but may be empty when the form reports none; an empty list means 'none read\nfrom the form' \u2014 which the answer layer treats as missing-data, not as an affirmative 'none'.\n\nNo medications: :class:`MedicationList` owns them, so the two document types are mutually\nexclusive. Intake persists allergies only (demographics, chief concern, family history are\ndisplay-only).",
         "properties": {
           "allergies": {
             "description": "Every allergy read from the form, each cited.",
@@ -542,14 +543,6 @@
             ],
             "description": "Chief concern / reason for visit as printed. Null if absent."
           },
-          "current_medications": {
-            "description": "Every current medication read from the form, each cited.",
-            "items": {
-              "$ref": "#/components/schemas/Medication"
-            },
-            "title": "Current Medications",
-            "type": "array"
-          },
           "demographics": {
             "$ref": "#/components/schemas/Demographics",
             "description": "Patient demographics block."
@@ -565,7 +558,6 @@
         },
         "required": [
           "demographics",
-          "current_medications",
           "allergies",
           "family_history"
         ],
@@ -684,65 +676,6 @@
           "citation"
         ],
         "title": "LabResult",
-        "type": "object"
-      },
-      "Medication": {
-        "description": "A current medication reported on an intake form.",
-        "properties": {
-          "citation": {
-            "$ref": "#/components/schemas/Citation",
-            "description": "Where on the form this medication was read from."
-          },
-          "confidence": {
-            "anyOf": [
-              {
-                "maximum": 1.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
-            "title": "Confidence"
-          },
-          "dose": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Dose/strength as printed, e.g. '500 mg'. Null if not given.",
-            "title": "Dose"
-          },
-          "frequency": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Frequency as printed, e.g. 'twice daily'. Null if not given.",
-            "title": "Frequency"
-          },
-          "name": {
-            "description": "Medication name as printed, e.g. 'Metformin'.",
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "citation"
-        ],
-        "title": "Medication",
         "type": "object"
       },
       "SourceType": {

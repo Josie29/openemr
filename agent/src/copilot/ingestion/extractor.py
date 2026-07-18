@@ -31,6 +31,7 @@ from copilot.ingestion.schemas import (
     LabReport,
     LabResult,
     Medication,
+    MedicationList,
     paths_by_doc_type,
 )
 
@@ -49,6 +50,7 @@ __all__ = [
     "build_extractor",
     "map_intake_form",
     "map_lab_report",
+    "map_medication_list",
     "resolve_and_extract",
 ]
 
@@ -162,15 +164,21 @@ class _IntakeFormProbe(BaseModel):
     address: str | None = Field(description=f"Mailing address {_VERBATIM}")
     phone: str | None = Field(description=f"Contact phone {_VERBATIM}")
     chief_concern: str | None = Field(description=f"Reason for the visit {_VERBATIM}")
-    current_medications: list[_IntakeMedicationProbe] = Field(
-        description="Every current medication listed. Empty if none."
-    )
     allergies: list[_IntakeAllergyProbe] = Field(
         description="Every allergy listed. Empty if none."
     )
     family_history: list[_IntakeFamilyHistoryProbe] = Field(
         description="ONLY family-history conditions that are TICKED/marked. Never list an "
         "unmarked condition, even though it is printed on the form. Empty if none are marked.",
+    )
+
+
+class _MedicationListProbe(BaseModel):
+    """Medications to read off a medication list. Reuses :class:`_IntakeMedicationProbe` per row;
+    the list is required (never defaulted) so Mistral cannot silently omit it."""
+
+    medications: list[_IntakeMedicationProbe] = Field(
+        description="Every medication listed. Empty if none."
     )
 
 
@@ -188,6 +196,8 @@ def _probe_for(doc_type: DocType) -> type[BaseModel]:
             return _LabReportProbe
         case DocType.INTAKE_FORM:
             return _IntakeFormProbe
+        case DocType.MEDICATION_LIST:
+            return _MedicationListProbe
 
 
 # --- OCR backends ------------------------------------------------------------------------------
@@ -382,16 +392,16 @@ class ExtractedDocument:
 
     document_id: str
     doc_type: DocType
-    report: LabReport | IntakeForm
+    report: LabReport | IntakeForm | MedicationList
 
 
 def _map_report(
     doc_type: DocType, raw: dict[str, Any], pdf_bytes: bytes
-) -> LabReport | IntakeForm:
+) -> LabReport | IntakeForm | MedicationList:
     """Map a raw OCR response into the strict schema the document's type names.
 
     The single place a document type selects its schema. Exhaustive over ``DocType`` with no default
-    branch, so adding a third document type is a type error here rather than a silent fallthrough.
+    branch, so adding a fourth document type is a type error here rather than a silent fallthrough.
 
     Args:
         doc_type: The schema to map into, resolved from the document's category.
@@ -410,6 +420,8 @@ def _map_report(
             return map_lab_report(raw, geometry)
         case DocType.INTAKE_FORM:
             return map_intake_form(raw, geometry)
+        case DocType.MEDICATION_LIST:
+            return map_medication_list(raw, geometry)
 
 
 class DocumentExtractor:
@@ -502,6 +514,7 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
         paths = paths_by_doc_type(
             lab_pdf=settings.ocr_fixture_path_lab_pdf,
             intake_form=settings.ocr_fixture_path_intake_form,
+            medication_list=settings.ocr_fixture_path_medication_list,
         )
         if not paths:
             logger.warning("extractor FIXTURE mode without an OCR fixture; extraction disabled")
@@ -639,7 +652,7 @@ def map_intake_form(ocr: dict[str, Any], geometry: DocumentGeometry) -> IntakeFo
         text = _clean(value)
         if text is None:
             return None
-        citation = _locate(field, text, geometry, state)
+        citation = _locate(field, text, geometry, state, DocType.INTAKE_FORM)
         return CitedText(value=text, citation=citation) if citation is not None else None
 
     demographics = Demographics(
@@ -652,16 +665,44 @@ def map_intake_form(ocr: dict[str, Any], geometry: DocumentGeometry) -> IntakeFo
     return IntakeForm(
         demographics=demographics,
         chief_concern=cited(FieldId.CHIEF_CONCERN, annotation.get("chief_concern")),
-        current_medications=_map_medications(annotation, geometry, state),
         allergies=_map_allergies(annotation, geometry, state),
         family_history=_map_family_history(annotation, geometry, state),
     )
 
 
+def map_medication_list(ocr: dict[str, Any], geometry: DocumentGeometry) -> MedicationList:
+    """Map a Mistral OCR response + document geometry into a strict ``MedicationList``.
+
+    Mirrors :func:`map_intake_form`: schema mode gives the values, the locator chain boxes each; a
+    medication whose name cannot be placed to the precision floor is dropped, never cited with a
+    wrong box.
+
+    Args:
+        ocr: The raw OCR response dict.
+        geometry: The document's normalized evidence (:meth:`DocumentGeometry.from_document`).
+
+    Returns:
+        The strict :class:`MedicationList`; every emitted citation's box is in PDF points.
+
+    Raises:
+        ExtractionError: If the response has no usable page, or ``document_annotation`` is not valid
+            JSON.
+    """
+    annotation = _annotation_dict(ocr)
+    state = LocatorState()
+    return MedicationList(
+        medications=_map_medications(annotation, geometry, state, DocType.MEDICATION_LIST)
+    )
+
+
 def _locate(
-    field: FieldId, value: str, geometry: DocumentGeometry, state: LocatorState
+    field: FieldId,
+    value: str,
+    geometry: DocumentGeometry,
+    state: LocatorState,
+    doc_type: DocType,
 ) -> Citation | None:
-    """Place one intake value on the page and build its citation, or None when it cannot be proven.
+    """Place one extracted value on the page and build its citation, or None when unprovable.
 
     The one place a field selects its locator chain. Returns None — so the caller drops the field —
     when no locator applies, when the page refutes the value, or when the best box misses the
@@ -672,41 +713,53 @@ def _locate(
         value: The verbatim value to box.
         geometry: The document's normalized geometry.
         state: Per-document cursors.
+        doc_type: The document type whose per-field locator spec applies.
 
     Returns:
         The fact's :class:`Citation`, or None when it should not be emitted.
     """
-    spec = spec_for(DocType.INTAKE_FORM, field)
+    spec = spec_for(doc_type, field)
     located = spec.chain.locate(
         LocateRequest(value=value, anchors=spec.labels), geometry, state
     )
     if located is None:
         logger.warning(
-            "dropping intake fact the page does not support",
-            extra={"field": field.value},
+            "dropping extracted fact the page does not support",
+            extra={"field": field.value, "doc_type": doc_type.value},
         )
         return None
     if not located.precision.meets(spec.floor):
         logger.warning(
-            "dropping intake fact below the precision floor",
-            extra={"field": field.value, "precision": located.precision.value},
+            "dropping extracted fact below the precision floor",
+            extra={
+                "field": field.value,
+                "doc_type": doc_type.value,
+                "precision": located.precision.value,
+            },
         )
         return None
     return Citation(quote_or_value=value, bounding_box=located.box)
 
 
 def _map_medications(
-    annotation: dict[str, Any], geometry: DocumentGeometry, state: LocatorState
+    annotation: dict[str, Any],
+    geometry: DocumentGeometry,
+    state: LocatorState,
+    doc_type: DocType,
 ) -> list[Medication]:
-    """Map the medication rows, dropping any whose name cannot be located on the form."""
+    """Map the medication rows, dropping any whose name cannot be located on the document.
+
+    Owned by the ``medication_list`` document type — ``intake_form`` no longer extracts medications
+    (they are mutually exclusive). The probe emits the rows under the ``medications`` key.
+    """
     items: list[Medication] = []
-    for raw in annotation.get("current_medications") or []:
+    for raw in annotation.get("medications") or []:
         if not isinstance(raw, dict):
             continue
         name = _clean(raw.get("name"))
         if name is None:
             continue
-        citation = _locate(FieldId.CURRENT_MEDICATIONS, name, geometry, state)
+        citation = _locate(FieldId.CURRENT_MEDICATIONS, name, geometry, state, doc_type)
         if citation is None:
             continue
         items.append(
@@ -731,7 +784,7 @@ def _map_allergies(
         substance = _clean(raw.get("substance"))
         if substance is None:
             continue
-        citation = _locate(FieldId.ALLERGIES, substance, geometry, state)
+        citation = _locate(FieldId.ALLERGIES, substance, geometry, state, DocType.INTAKE_FORM)
         if citation is None:
             continue
         items.append(
@@ -755,7 +808,7 @@ def _map_family_history(
         condition = _clean(raw.get("condition"))
         if condition is None:
             continue
-        citation = _locate(FieldId.FAMILY_HISTORY, condition, geometry, state)
+        citation = _locate(FieldId.FAMILY_HISTORY, condition, geometry, state, DocType.INTAKE_FORM)
         if citation is None:
             continue
         items.append(

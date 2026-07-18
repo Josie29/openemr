@@ -20,6 +20,10 @@ use OpenEMR\Services\PatientIssuesService;
 /**
  * Persists agent-derived allergies and medications into OpenEMR's `lists` table.
  *
+ * The name is historical: allergies come from an intake form, medications now from a
+ * `medication_list` document. The endpoint routes on fact `type`, not document category, so both
+ * still land here regardless of source.
+ *
  * Both become `lists` rows, but they are **not symmetric** in how honestly they can be flagged as
  * agent-derived, because the two FHIR projections expose different fields:
  *

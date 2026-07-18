@@ -146,6 +146,15 @@ class SourceRef(BaseModel):
                         page=self.page,
                         bounding_box=self.bounding_box,
                     )
+                case DocType.MEDICATION_LIST:
+                    return MedicationListCitation(
+                        source_id=source_id,
+                        page_or_section=page_or_section,
+                        field_or_chunk_id=field_or_chunk_id,
+                        quote_or_value=quote_or_value,
+                        page=self.page,
+                        bounding_box=self.bounding_box,
+                    )
         if self.resource_type == CitationSourceType.GUIDELINE.value:
             return GuidelineCitation(
                 source_id=self.label or self.resource_id,
@@ -303,10 +312,11 @@ class ChatRequest(BaseModel):
 # We model it as a discriminated (tagged) union so each source kind is a typed variant and
 # adding a new one (document extraction) is additive, not a rewrite.
 #
-# All four arms are produced today: the supervisor graph's final answer emits ``GuidelineCitation``
+# All arms are produced today: the supervisor graph's final answer emits ``GuidelineCitation``
 # (guideline evidence) and ``FhirCitation`` (the converged projection of the Week-1 FHIR
 # ``SourceRef``), and ``SourceRef.to_citation`` routes a document-extraction fact to
-# ``LabPdfCitation`` or ``IntakeFormCitation`` on its stamped ``doc_type``.
+# ``LabPdfCitation``, ``IntakeFormCitation``, or ``MedicationListCitation`` on its stamped
+# ``doc_type``.
 # Routing the grounding gate by ``source_type`` is still a tracked follow-up (see
 # context/specs/hybrid-rag-pipeline.md §3.3).
 # ---------------------------------------------------------------------------
@@ -316,13 +326,14 @@ class CitationSourceType(StrEnum):
     """The kind of source a :class:`Citation` points at (W2_ARCHITECTURE.md §3.3).
 
     ``GUIDELINE`` (evidence) and ``FHIR`` (patient-record claims) come from the supervisor graph's
-    final answer; ``LAB_PDF`` / ``INTAKE_FORM`` come from a document-extraction fact, selected by
-    the ``doc_type`` the grounding gate stamps onto its citation.
+    final answer; ``LAB_PDF`` / ``INTAKE_FORM`` / ``MEDICATION_LIST`` come from a document-extraction
+    fact, selected by the ``doc_type`` the grounding gate stamps onto its citation.
     """
 
     GUIDELINE = "guideline"
     LAB_PDF = "lab_pdf"
     INTAKE_FORM = "intake_form"
+    MEDICATION_LIST = "medication_list"
     FHIR = "fhir"
 
 
@@ -420,6 +431,18 @@ class IntakeFormCitation(DocumentCitationBase):
     source_type: Literal[CitationSourceType.INTAKE_FORM] = CitationSourceType.INTAKE_FORM
 
 
+class MedicationListCitation(DocumentCitationBase):
+    """A citation to an extracted medication-list field, with click-to-source overlay geometry.
+
+    Produced by :meth:`SourceRef.to_citation` for a ``MEDICATION_LIST`` fact. Like
+    :class:`IntakeFormCitation` (a boxed value, no analyte metadata) but a distinct ``source_type``
+    so the sidebar labels it "Medication List"; reachable only via ``doc_type``, since its
+    ``MedicationRequest`` tag is a type a FHIR read also returns.
+    """
+
+    source_type: Literal[CitationSourceType.MEDICATION_LIST] = CitationSourceType.MEDICATION_LIST
+
+
 class FhirCitation(CitationBase):
     """A citation to a patient-record claim read from a FHIR resource (the Week-1 read path).
 
@@ -438,6 +461,10 @@ class FhirCitation(CitationBase):
 # The general citation-contract type. Today the retriever narrows to GuidelineCitation and the
 # final-answer response emits GuidelineCitation (evidence) + FhirCitation (record) per claim.
 Citation = Annotated[
-    GuidelineCitation | LabPdfCitation | IntakeFormCitation | FhirCitation,
+    GuidelineCitation
+    | LabPdfCitation
+    | IntakeFormCitation
+    | MedicationListCitation
+    | FhirCitation,
     Field(discriminator="source_type"),
 ]

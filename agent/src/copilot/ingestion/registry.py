@@ -15,6 +15,7 @@ from copilot.ingestion.schemas import (
     IntakeForm,
     LabDetail,
     LabReport,
+    MedicationList,
 )
 from copilot.schemas import SourceRef
 from copilot.verification import Resolution
@@ -37,8 +38,9 @@ from copilot.verification import Resolution
 class FactKind(StrEnum):
     """The kind of fact a document extraction yields — the :data:`DocumentFactHandle` discriminator.
 
-    One member per section the two strict schemas can produce: a ``LabReport``'s results, and an
-    ``IntakeForm``'s demographics, medications, allergies, and family history.
+    One member per section the strict schemas can produce: a ``LabReport``'s results, an
+    ``IntakeForm``'s demographics, allergies, and family history, and a ``MedicationList``'s
+    medications.
     """
 
     LAB_RESULT = "lab_result"
@@ -209,15 +211,17 @@ class DocumentFactRegistry:
     def record(self, extracted: ExtractedDocument) -> list[DocumentFactHandle]:
         """Record an extracted document's facts and return their citable handles.
 
-        Exhaustive over the two strict schemas with no default branch, so a third document type is
-        a type error here rather than a document that silently records nothing.
+        Exhaustive over the strict schemas with no default branch, so a new document type is a type
+        error here rather than a document that silently records nothing.
 
         Args:
-            extracted: One document's strict extraction (a cited ``LabReport`` or ``IntakeForm``).
+            extracted: One document's strict extraction (a cited ``LabReport``, ``IntakeForm``, or
+                ``MedicationList``).
 
         Returns:
-            One handle per fact — in report order for a lab, in the fixed section order documented
-            on :meth:`_record_intake` for a form — for the model to state and cite.
+            One handle per fact — in report order for a lab or a medication list, in the fixed
+            section order documented on :meth:`_record_intake` for a form — for the model to state
+            and cite.
         """
         ordinals = count()
         report = extracted.report
@@ -226,6 +230,8 @@ class DocumentFactRegistry:
                 return self._record_lab(extracted, report, ordinals)
             case IntakeForm():
                 return self._record_intake(extracted, report, ordinals)
+            case MedicationList():
+                return self._record_medication_list(extracted, report, ordinals)
 
     def _record_lab(
         self, extracted: ExtractedDocument, report: LabReport, ordinals: Iterator[int]
@@ -279,10 +285,11 @@ class DocumentFactRegistry:
         """Record an intake form's facts in a FIXED section order.
 
         The section order — demographics in ``Demographics`` declaration order, chief concern,
-        medications, allergies, family history — is the contract, not a detail: a fact's citable id
-        is its flat ordinal within this one sequence, so the order is the only thing that makes an
-        ordinal name a stable fact. Reordering a section silently re-points every id after it at a
-        different fact. A field the form does not state consumes no ordinal.
+        allergies, family history — is the contract, not a detail: a fact's citable id is its flat
+        ordinal within this one sequence, so the order is the only thing that makes an ordinal name a
+        stable fact. Reordering a section silently re-points every id after it at a different fact. A
+        field the form does not state consumes no ordinal. Medications are not part of this sequence —
+        the ``medication_list`` document type owns them (see :meth:`_record_medication_list`).
 
         Args:
             extracted: The document being recorded.
@@ -323,24 +330,6 @@ class DocumentFactRegistry:
                     value=cited.value,
                 )
             )
-        for medication in form.current_medications:
-            resource_id = self._store(
-                extracted,
-                next(ordinals),
-                FactKind.MEDICATION,
-                value=medication.name,
-                identity=ResourceIdentity(label=medication.name),
-                citation=medication.citation,
-            )
-            handles.append(
-                MedicationFactHandle(
-                    resource_type=resource_type_for(FactKind.MEDICATION),
-                    resource_id=resource_id,
-                    name=medication.name,
-                    dose=medication.dose,
-                    frequency=medication.frequency,
-                )
-            )
         for allergy in form.allergies:
             resource_id = self._store(
                 extracted,
@@ -373,6 +362,43 @@ class DocumentFactRegistry:
                     resource_id=resource_id,
                     condition=entry.condition,
                     relation=entry.relation,
+                )
+            )
+        return handles
+
+    def _record_medication_list(
+        self, extracted: ExtractedDocument, report: MedicationList, ordinals: Iterator[int]
+    ) -> list[DocumentFactHandle]:
+        """Record each medication as a ``MedicationRequest``-tagged fact, in list order.
+
+        Mirrors :meth:`_record_lab`: one fact per row, the flat ordinal is the citable id, and
+        ``MedicationRequest`` (via :func:`resource_type_for`) is the resource_type.
+
+        Args:
+            extracted: The document being recorded.
+            report: Its strict medication-list extraction.
+            ordinals: The document's flat ordinal counter.
+
+        Returns:
+            One :class:`MedicationFactHandle` per medication.
+        """
+        handles: list[DocumentFactHandle] = []
+        for medication in report.medications:
+            resource_id = self._store(
+                extracted,
+                next(ordinals),
+                FactKind.MEDICATION,
+                value=medication.name,
+                identity=ResourceIdentity(label=medication.name),
+                citation=medication.citation,
+            )
+            handles.append(
+                MedicationFactHandle(
+                    resource_type=resource_type_for(FactKind.MEDICATION),
+                    resource_id=resource_id,
+                    name=medication.name,
+                    dose=medication.dose,
+                    frequency=medication.frequency,
                 )
             )
         return handles

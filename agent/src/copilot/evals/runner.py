@@ -38,11 +38,15 @@ _DOCUMENTS_DIR = Path(__file__).parents[3] / "tests" / "fixtures" / "documents"
 _DOCUMENT_PDF_PATHS = {
     DocType.LAB_PDF: _DOCUMENTS_DIR / "pdfs" / "sergio-angulo-lab-report.pdf",
     DocType.INTAKE_FORM: _DOCUMENTS_DIR / "pdfs" / "sergio-angulo-intake-form.pdf",
+    DocType.MEDICATION_LIST: _DOCUMENTS_DIR / "pdfs" / "sergio-angulo-medication-list.pdf",
 }
 # One recorded OCR response per document type — the replay is keyed by type, not by patient.
 _OCR_FIXTURE_PATHS = {
     DocType.LAB_PDF: _DOCUMENTS_DIR / "extractions" / "sergio-angulo-lab-report.ocr.json",
     DocType.INTAKE_FORM: _DOCUMENTS_DIR / "extractions" / "sergio-angulo-intake-form.ocr.json",
+    DocType.MEDICATION_LIST: _DOCUMENTS_DIR
+    / "extractions"
+    / "sergio-angulo-medication-list.ocr.json",
 }
 
 # The grounding gate exhausted its retries (or the turn hit the tool-call ceiling) without an

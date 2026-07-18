@@ -34,8 +34,9 @@ Open it in a browser; it does not render inline on GitHub.
 **What Week 2 adds.** Week 1 shipped a single conversational agent that reads *structured*
 OpenEMR data over FHIR R4 and attributes every claim back to a row it actually fetched
 ([`ARCHITECTURE.md`](ARCHITECTURE.md) §§1, 6, 7). Week 2 teaches that agent to **see** the
-documents clinicians actually receive — a scanned **lab PDF** and a front-desk **intake form** —
-and to **route** that new work across a small multi-agent graph without losing grounding. Three
+documents clinicians actually receive — a scanned **lab PDF**, a front-desk **intake form**, and a
+**medication list** — and to **route** that new work across a small multi-agent graph without losing
+grounding. Three
 new capabilities, each a controlled expansion of a Week-1 seam rather than a replacement:
 
 1. **Document ingestion.** A new `attach_and_extract(document_id)` tool reads a document already
@@ -65,7 +66,7 @@ new capabilities, each a controlled expansion of a Week-1 seam rather than a rep
 | Eval gate | 52-case golden set · 5 boolean rubrics · **PR-blocking**, fails below an absolute rubric floor | §7 |
 | Grounding | Week-1 `output_validator` + `ModelRetry` **ported to each worker + the final answer** | §4; [`ARCHITECTURE.md`](ARCHITECTURE.md) §7 |
 
-**The through-line.** Week 2 is deliberately *narrower than the original spec* — two document
+**The through-line.** Week 2 is deliberately *narrower than the original spec* — three document
 types, two workers, one regression gate — because the whole exercise is a test of whether the
 architecture stays comprehensible while gaining multimodal input. Every addition reuses a Week-1
 seam: the grounding gate becomes the per-worker citation enforcer, the correlation ID threads the
@@ -95,7 +96,7 @@ so this expansion would be additive.
 | Dimension | Week 1 (baseline) | Week 2 (delta) |
 |---|---|---|
 | **Agents** | One conversational agent | Supervisor + intake-extractor + evidence-retriever |
-| **Inputs** | Structured FHIR reads only (6 tools) | + unstructured lab PDF & intake form (document ingestion) |
+| **Inputs** | Structured FHIR reads only (6 tools) | + unstructured lab PDF, intake form & medication list (document ingestion) |
 | **Data written** | None (read-only agent) | **Still none by the agent** — it has no write surface. The sidebar posts derived facts to a session-authed module endpoint, which writes **native** OpenEMR records (the lab chain → projects out as `Observation`; `lists` for allergies/meds) + a module sidecar (§3.1) |
 | **Retrieval** | None (patient record only) | Hybrid RAG over a guideline corpus (Qdrant + Cohere) |
 | **Grounding gate** | One `output_validator` on the single agent's answer | Same gate **ported to each worker** + the final answer |
@@ -124,18 +125,21 @@ break in the existing tool contracts.
 ## 3. Document ingestion flow
 
 The new tool is `attach_and_extract(document_id)`, reading a document already filed in OpenEMR and
-supporting `doc_type ∈ {lab_pdf, intake_form}`. It is the intake-extractor worker's single tool. Its
-job: see the source, extract to a strict schema, and locate every fact on the page.
+supporting `doc_type ∈ {lab_pdf, intake_form, medication_list}`. It is the intake-extractor worker's
+single tool. Its job: see the source, extract to a strict schema, and locate every fact on the page.
 
 **The tool takes no `doc_type` argument, deliberately.** The type is resolved from the document's
 own OpenEMR **category** at discovery (`Lab Report` → `lab_pdf`, `Patient Information` →
-`intake_form`) and rides on the summary `list_documents` returns. The model chooses *which* document
-to read, never *how* to read it — a model-supplied `doc_type` would let it pick the schema a
-document is interpreted through, which is exactly the decision the category exists to make. Intake
-matches its category **exactly** while labs match on a substring: `Lab Report` is a purpose-built
-OpenEMR category, but `Patient Information` is the identity bucket (its children are `Patient ID
-card` and `Patient Photograph`), so a loose match there would read a driver's licence through the
-intake schema.
+`intake_form`, `Medication List` → `medication_list`) and rides on the summary `list_documents`
+returns. The model chooses *which* document to read, never *how* to read it — a model-supplied
+`doc_type` would let it pick the schema a document is interpreted through, which is exactly the
+decision the category exists to make. Intake and medication-list both match their category
+**exactly** while labs match on a substring: `Lab Report` is a purpose-built OpenEMR category, but
+`Patient Information` is the identity bucket (its children are `Patient ID card` and `Patient
+Photograph`), so a loose match there would read a driver's licence through the intake schema.
+`Medication List` is **not an OpenEMR default** — it is seeded for this deployment by
+`scripts/seed-medication-list-category.sh` (an idempotent MPTT append under the categories root), so
+it too is matched exactly.
 
 **Decided extractor: Mistral OCR 4 in schema mode**
 ([`vlm-extraction-week2.md`](context/decisions/vlm-extraction-week2.md)). It returns, in **one
@@ -195,7 +199,7 @@ flowchart TB
     up["attach_and_extract(document_id)"] --> store["1. Resolve doc_type from the source's\nOpenEMR category (NOT from the model)\nFHIR DocumentReference"]
     store --> ext["2. Mistral OCR 4 (schema mode)\none pass: typed VALUES + per-word confidence\n(block geometry only — no per-field boxes)"]
     ext --> locate["2b. Locator chain per field\ntext layer / table band / checkbox / line band\n→ a box in PDF points, or the fact is dropped"]
-    locate --> parse["3. Parse-don't-validate\nraw extractor output → strict Pydantic schema\n(LabReport | IntakeForm)"]
+    locate --> parse["3. Parse-don't-validate\nraw extractor output → strict Pydantic schema\n(LabReport | IntakeForm | MedicationList)"]
     parse -->|schema violation| retry["reject / retry\n(raw output NEVER bypasses the schema)"]
     parse -->|valid| conf["4. Confidence gate\nMistral per-field/word confidence"]
     conf --> derive["5. Persist derived facts\n(lab results) down OpenEMR's native\nlab chain — which projects back OUT\nas a FHIR Observation (no write route)"]
@@ -237,7 +241,8 @@ flowchart TB
      deployment needs a terminology-mapping layer — with its own confidence handling and a
      refuse-on-miss path — for the reports that carry none.
 3. **Parse, don't validate.** Raw extractor output is parsed into a strict Pydantic model
-   (`LabReport` for `lab_pdf`, `IntakeForm` for `intake_form`). Per the PRD Engineering
+   (`LabReport` for `lab_pdf`, `IntakeForm` for `intake_form`, `MedicationList` for
+   `medication_list`). Per the PRD Engineering
    Requirements, **the schema is the source of truth, not what the extractor happens to return** —
    a field it invents that isn't in the schema is dropped; a required field it omits fails
    validation and triggers a bounded retry. This is the same "parse at the boundary" discipline
@@ -300,31 +305,42 @@ flowchart TB
      page + pixel bbox that no OpenEMR or FHIR field can express. **The limitation, stated plainly:**
      provenance is visible to the module and to SQL, but not through FHIR. A
      `GET /fhir/AllergyIntolerance` will not show that a fact came from a document.
-   - **Intake facts — allergies and medications only**, written as native `lists` records, not as
-     Observations. Demographics, chief concern, and family history are extracted but deliberately
-     **not persisted** — no honest destination exists for them (§6).
+   - **Intake facts — allergies only**, written as native `lists` records, not as Observations.
+     Demographics, chief concern, and family history are extracted but deliberately **not
+     persisted** — no honest destination exists for them (§6). **Medications now come from a
+     `medication_list` document, not an intake form** (the two document types are mutually
+     exclusive in what they persist): a medication fact is written to `lists` / `lists_medication`
+     exactly as before — the persist endpoint routes on the fact's `type`, not on document type, so
+     **no PHP changed** (§6).
 6. **Citations + overlay.** Every derived fact emits a citation record and, for PDFs, the
    bounding-box coordinates for the click-to-source overlay (§3.3).
 
-### 3.2 The two schemas (canonical contracts)
+### 3.2 The three schemas (canonical contracts)
 
-Both are strict Pydantic v2 models; a source citation field is **mandatory on every extracted
+All are strict Pydantic v2 models; a source citation field is **mandatory on every extracted
 fact** — a fact without a citation is a schema violation, not a warning.
 
 - **`LabReport`** (per `lab_pdf`) — required fields include, at minimum: test name, value, unit,
   reference range, collection date, abnormal flag, and source citation.
 - **`IntakeForm`** (per `intake_form`) — required fields include, at minimum: demographics, chief
-  concern, current medications, allergies, family history, and source citation.
+  concern, allergies, family history, and source citation. It **no longer carries medications** —
+  those moved to the `medication_list` schema, so intake and medication-list are mutually exclusive
+  in what they own.
+- **`MedicationList`** (per `medication_list`) — `{ medications: list[Medication] }`, each
+  `Medication` carrying name, dose, frequency, and source citation. The `Medication` sub-model is
+  **shared with — and unchanged from — the intake schema**; only which document produces it changed.
 
 These schemas are the **canonical contract** for the ingestion boundary and are contract-tested
 in CI (§7, §8). The Pydantic definitions and their validation tests are a separate PRD deliverable.
 
 **Extracted is not the same as persisted.** `IntakeForm`'s field list is what the extractor is asked
-to read off the page; it is **not** a list of write targets. Only allergies and medications have an
-honest destination in OpenEMR — demographics, chief concern, and family history are returned to the
-physician in the answer but written nowhere (§6). Note also that an **empty list is missing data, not
-a negative finding**: an empty `allergies` means "none read from this form", never an affirmative
-NKDA, so an empty section persists nothing rather than fabricating a clinical assertion.
+to read off the page; it is **not** a list of write targets. Of the intake fields only **allergies**
+have an honest destination in OpenEMR — demographics, chief concern, and family history are returned
+to the physician in the answer but written nowhere (§6); medications now arrive on a
+`medication_list` and persist to `lists` / `lists_medication`. Note also that an **empty list is
+missing data, not a negative finding**: an empty `allergies` (or an empty `medications`) means "none
+read from this document", never an affirmative NKDA / "no medications", so an empty section persists
+nothing rather than fabricating a clinical assertion.
 
 ### 3.3 The citation contract
 
@@ -337,7 +353,7 @@ citation metadata in one shape:
 
 | Field | For an extracted document fact | For a retrieved guideline snippet | For a FHIR record claim |
 |---|---|---|---|
-| `source_type` | `lab_pdf` / `intake_form` | `guideline` | `fhir` |
+| `source_type` | `lab_pdf` / `intake_form` / `medication_list` | `guideline` | `fhir` |
 | `source_id` | the `DocumentReference` ID | the corpus document ID | the FHIR resource type/id (e.g. `Condition/123`) |
 | `page_or_section` | PDF page number | section heading | — (n/a for a record claim) |
 | `field_or_chunk_id` | the schema field name | the Qdrant chunk ID | the FHIR element / field name |
@@ -360,7 +376,11 @@ click-to-source UI consumes. The final answer grounds each claim via the interna
 emits the canonical `Citation` per claim: `source_type = guideline` for corpus claims,
 `fhir` for record claims (the `FhirCitation` arm of the `schemas.py` discriminated union, now
 produced for record claims alongside `GuidelineCitation`'s `guideline`); the `lab_pdf` /
-`intake_form` document citations (with bounding boxes) come from the ingestion path (§3.1).
+`intake_form` / `medication_list` document citations (with bounding boxes) come from the ingestion
+path (§3.1). The `source_type` union is therefore five values — `guideline`, `lab_pdf`,
+`intake_form`, `medication_list`, `fhir` — collapsing to **three trust tiers** in the UI: a
+guideline tier, a record tier, and a **document** tier the three document citations share (the
+frontend maps `medication_list` onto the document tier and labels it "Medication list").
 
 ### 3.4 Extraction is a one-time transform — re-extraction & idempotency
 
@@ -495,7 +515,7 @@ ungrounded. Enforcement is at map time; the gate is the backstop, not the mechan
 flowchart TB
     panel["Physician panel\n(OpenEMR module · SSE stream)"] --> sup
     sup["SUPERVISOR (router)\nemits a typed RouteDecision each hop:\nextract_intake | retrieve_evidence | answer  (+ one-line reason)"]
-    sup -->|route: extract_intake| ext["intake-extractor\npatient-scoped FHIR reads + attach_and_extract → Mistral OCR 4 (schema mode)\n→ schema → cited facts (record + lab PDF + intake form)"]
+    sup -->|route: extract_intake| ext["intake-extractor\npatient-scoped FHIR reads + attach_and_extract → Mistral OCR 4 (schema mode)\n→ schema → cited facts (record + lab PDF + intake form + medication list)"]
     sup -->|route: retrieve_evidence| ret["evidence-retriever\nhybrid RAG + rerank over guideline corpus"]
     ext -->|worker output_validator → grounded output accumulated| sup
     ret -->|worker output_validator → grounded output accumulated| sup
@@ -524,7 +544,10 @@ are:
   separate tools.) It therefore **fully subsumes the Week-1 single agent**, which has
   been **removed from the request path** — the supervisor graph is now the **only** behavior
   *behind `/chat`*. Turns an uploaded document, or the patient's own record, into schema-valid,
-  cited facts. (Week 2 also exposes three **read-only, LLM-free** GET endpoints — `/documents`,
+  cited facts: `attach_and_extract` yields lab results (`resource_type` `Observation`) from a
+  `lab_pdf`, demographics / allergies / family-history from an `intake_form`, and medications
+  (`resource_type` `MedicationRequest`) from a `medication_list` — an intake form no longer returns
+  medications. (Week 2 also exposes three **read-only, LLM-free** GET endpoints — `/documents`,
   `/documents/{id}/extraction`, `/evidence` — that call these same subsystem services directly,
   bypassing the graph, for isolated testing under the same SMART token; see §10.)
 - **evidence-retriever** — owns the hybrid RAG tool (§5). Turns a clinical question into ranked,
@@ -705,14 +728,15 @@ nothing on a few-hundred-chunk flat corpus.
 
 ## 6. Data model & authority
 
-Week 2 introduces five artifact types. Each has exactly **one source of truth**, explicit
+Week 2 introduces six artifact types. Each has exactly **one source of truth**, explicit
 lineage, defined access control, and validation rules — **no silent overwrites** (PRD Engineering
 Requirements, "data authority must be explicit").
 
 | Artifact | Authoritative owner | Lineage (where it came from) | Access | Validation |
 |---|---|---|---|---|
 | **Extracted lab observations** | OpenEMR — the native `procedure_order → order_code → report → result` chain, which projects out as FHIR `Observation` (there is no Observation write route, §3.1) | Derived from a stored `DocumentReference` via Mistral OCR 4 extraction; linked by `procedure_result.document_id` (native FK to `documents.id`) + the sidecar — **not** a FHIR Provenance tag | Written via a session-authed module endpoint under the physician's ACL; read via the same patient-scoped SMART read as all FHIR data ([`ARCHITECTURE.md`](ARCHITECTURE.md) §5) | `LabReport` schema; abnormal-flag + reference-range sanity checks; written `result_status='preliminary'` |
-| **Intake facts** | OpenEMR — **allergies and medications only** (`lists` / `lists_medication`). Demographics, chief concern, and family history are **not persisted** — see below | Derived from a stored `DocumentReference` via extraction; linked through the sidecar (`lists` has no document FK) | Same session-authed write / patient-scoped read | `IntakeForm` schema; allergy `verification='unconfirmed'`, medication `request_intent='proposal'` |
+| **Intake facts** | OpenEMR — **allergies only** (`lists`, `type='allergy'`). Demographics, chief concern, and family history are **not persisted** — see below | Derived from a stored `intake_form` `DocumentReference` via extraction; linked through the sidecar (`lists` has no document FK) | Same session-authed write / patient-scoped read | `IntakeForm` schema; allergy `verification='unconfirmed'` |
+| **Medication-list facts** | OpenEMR — medications (`lists` / `lists_medication`) | Derived from a stored `medication_list` `DocumentReference` via extraction; linked through the sidecar. Persisted by the **same** endpoint and `IntakeFactWriter::writeMedication` as before — the endpoint routes on the fact's `type`, not document type, so **no PHP changed** | Same session-authed write / patient-scoped read | `MedicationList` schema; medication `request_intent='proposal'` |
 | **Guideline chunks** | The **versioned corpus in the repo** (indexed into Qdrant) | Curated from published guidelines; reproducible from the repo alone (§11) | Non-PHI; read by the evidence-retriever | Chunk must carry `{chunk_id, guideline, source, source_url, section, date, text, anchor_quote}` (anchor_quote optional) |
 | **Citation records** | The agent (emitted per claim) | Composed from an extraction or a retrieval result; for `lab_pdf`, the page + pixel bbox are **native output of Mistral OCR 4**, not a reconstructed rectangle | Rides with the answer payload | Must satisfy the full citation shape (§3.3); a `lab_pdf` citation whose field lacks a resolved bbox is refused, not shipped with a fabricated box |
 | **Extraction-result cache (sidecar)** | Derived cache — **rebuildable**, not a system of record | One extraction pass over a stored source document; keyed to `(document id, content hash)` (§3.4) | Same patient scope as the source document it derives from | Holds the validated facts + page/bbox citations; superseded when the source version (hash) changes |
@@ -758,13 +782,17 @@ persisted fact carries a not-clinician-confirmed marker in OpenEMR's **own** voc
 changes, nothing masquerading as physician-authored. What each resource can express differs, so the
 markers differ in strength:
 
-| Fact | Table | Derived marker | Reads back as | Strength |
+| Fact (source document) | Table | Derived marker | Reads back as | Strength |
 |---|---|---|---|---|
-| Labs | `procedure_result` | `result_status='preliminary'` | `Observation.status: preliminary` | Strong — verified round-trip |
-| Allergies | `lists` (`type='allergy'`) | `verification='unconfirmed'` | `AllergyIntolerance.verificationStatus: unconfirmed` | Strong |
-| Medications | `lists_medication` | `request_intent='proposal'` (+ `lists.comments`) | `MedicationRequest.intent: proposal` (+ `note`) | **Weaker — see below** |
-| Demographics / chief concern | — | none exists | — | **Not written** |
-| Family history | — | no target exists | — | **Not written** |
+| Labs (`lab_pdf`) | `procedure_result` | `result_status='preliminary'` | `Observation.status: preliminary` | Strong — verified round-trip |
+| Allergies (`intake_form`) | `lists` (`type='allergy'`) | `verification='unconfirmed'` | `AllergyIntolerance.verificationStatus: unconfirmed` | Strong |
+| Medications (`medication_list`) | `lists_medication` | `request_intent='proposal'` (+ `lists.comments`) | `MedicationRequest.intent: proposal` (+ `note`) | **Weaker — see below** |
+| Demographics / chief concern (`intake_form`) | — | none exists | — | **Not written** |
+| Family history (`intake_form`) | — | no target exists | — | **Not written** |
+
+The persist endpoint routes on each fact's `type` (`lab` / `allergy` / `medication`), never on the
+document type it arrived from, so moving medications from the intake form to a `medication_list`
+changed **which document produces the fact**, not one line of the write path (§3.1).
 
 - **The medication marker is weaker, and that is a documented limitation.** `lists.verification` is
   **never read for a medication** — only the allergy and condition services read that column, so
@@ -884,7 +912,7 @@ LLM and Mistral OCR 4 extractor responses against fixture documents.
 
 | Layer | What it covers | Failure mode it guards |
 |---|---|---|
-| **Unit** | `LabReport` / `IntakeForm` schema validators; citation-shape validator; the `attach_and_extract` tool's pure logic; **extractor-output schema-conformance + bbox-presence validation** against fixture Mistral OCR 4 responses; RRF/rerank result-shaping | A schema silently accepting a malformed or uncited extraction; a citation record missing a required field; an extracted field reaching the overlay without a native bbox / with sub-floor confidence, or such a field not being flagged as a refusal (§11) |
+| **Unit** | `LabReport` / `IntakeForm` / `MedicationList` schema validators; citation-shape validator; the `attach_and_extract` tool's pure logic; **extractor-output schema-conformance + bbox-presence validation** against fixture Mistral OCR 4 responses; RRF/rerank result-shaping | A schema silently accepting a malformed or uncited extraction; a citation record missing a required field; an extracted field reaching the overlay without a native bbox / with sub-floor confidence, or such a field not being flagged as a refusal (§11) |
 | **Unit** | Supervisor route-decision logic (which worker for which request) | Routing regressions — the supervisor sending extraction work to the retriever or vice versa |
 | **Integration** | Full **ingestion→answer path** with fixture PDFs/form images and a **stubbed Mistral OCR 4 extractor** (fixture schema-mode responses — typed fields + native bboxes + confidence) | The store→extract→derive→cite chain breaking at a seam (e.g. a derived result losing its `document_id` / sidecar link back to the source, §6; a native bbox failing to thread into the citation record). The write-back arm is covered separately by DB-backed tests — including the **silent-vanish trap**: a chain written without `procedure_order_code` must fail loudly rather than return zero Observations (§3.1) |
 | **Integration** | RAG pipeline: FastEmbed → Qdrant hybrid → Cohere rerank, against a fixture corpus | Retrieval returning wrong/empty results, or fusion/rerank silently degrading |
@@ -1035,7 +1063,7 @@ logs** and **the recovery action** (PRD Engineering Requirements).
 | Failure mode | How to identify in logs | Recovery action |
 |---|---|---|
 | **Document ingestion / storage failure** (upload or `DocumentReference` write fails/times out) | `ingestion.start` with no matching `ingestion.complete` for the correlation ID; `/ready` shows document storage degraded | Source is stored *before* extraction, so a downstream failure never loses the document; if storage itself fails the tool returns a typed error and the agent reports "couldn't save the document," never fabricates around it. |
-| **Extraction schema violation** (extractor output fails `LabReport`/`IntakeForm` validation) | `schema_valid=false` on the extraction event; retry count on the extractor span | Raw output is rejected (never persisted). A bounded retry feeds the specific violation back; if still invalid, the field is surfaced as *unextracted / low-confidence* rather than guessed (§3). |
+| **Extraction schema violation** (extractor output fails `LabReport`/`IntakeForm`/`MedicationList` validation) | `schema_valid=false` on the extraction event; retry count on the extractor span | Raw output is rejected (never persisted). A bounded retry feeds the specific violation back; if still invalid, the field is surfaced as *unextracted / low-confidence* rather than guessed (§3). |
 | **Document-extraction failure** (Mistral OCR 4 errors/times out, or returns only low-confidence fields) | timeout / error on the extractor span; `/ready` shows Mistral OCR 4 unreachable; per-field confidence below the floor on the extraction event | Bounded retries with explicit timeouts on the extractor call; on hard failure the tool returns a typed error and the agent reports "couldn't read the document," never guesses. A field below the confidence floor (or without a native bbox) is a **low-confidence refusal** (§3, §4.3), surfaced as unextracted rather than presented as certain. A sustained low-confidence rate on the eval bar is the documented tripwire to revisit a reasoning-VLM fallback (§12). |
 | **Empty retrieval** (hybrid RAG returns no grounded evidence) | `retrieval hit=false` / zero candidates on the evidence-retriever span; retrieval-hit-rate metric drops | The evidence-retriever returns "no supporting guideline found"; the grounding gate (§4.3) blocks any evidence *claim* without a chunk citation, so the answer separates "record says X" from "no guideline evidence retrieved" rather than inventing a guideline. |
 | **Supervisor routing error** (routes to the wrong worker, or loops) | The structured route event (which worker, why) diverges from the request intent; per-worker span pattern is anomalous (e.g. extractor invoked on a pure-question turn) | Routing decisions are logged as inspectable events (§4.2); a per-turn worker-invocation ceiling bounds loops (extending Week-1's tool-call ceiling, [`ARCHITECTURE.md`](ARCHITECTURE.md) §8); the contract tests (§8) catch routing regressions pre-merge. |
@@ -1071,7 +1099,7 @@ verbal talking points from the architecture defense, recorded here as the risk r
 | **Browser-posted facts are client-supplied** | The write is posted by the sidebar, not the worker (the worker has no write surface at all — §3.1), so a crafted request could persist facts the agent never extracted; the endpoint cannot verify them against the agent's in-memory registry | **Bounded, not eliminated:** the endpoint is session-authed and ACL-gated to a physician who can already write these records through the normal OpenEMR UI, so it is not privilege escalation; pid comes from the session and never the URL (an explicit IDOR defense), and the content hash is computed server-side from the stored bytes. Documented rather than hidden ([`derived-fact-write-back.md`](context/specs/derived-fact-write-back.md)) |
 | **Silent-vanish on a missing `procedure_order_code`** | The one failure mode that looks exactly like success: omit that row and `ProcedureService`'s join predicate hits NULL, the results never match, and **zero Observations** come back from a clean insert (§3.1) | An explicit regression test asserts the chain fails loudly in our code rather than silently returning nothing (§8) |
 | **Black-box supervisor** | Delegation-via-tool-call is procedural, not a rendered graph — routing could read as opaque | Every route decision is a structured, logged event + a Langfuse child span (§4.2); `pydantic-graph` is the in-framework escalation to an explicit FSM if needed |
-| **Scope creep** | The pull to support five document types before two work reliably | Ship **two** document types and **two** workers first; a third doc type is explicitly PRD-*optional* extension work, not core |
+| **Scope creep** | The pull to support five document types before the core ones work reliably | Shipped the **two** core document types and **two** workers first; the **`medication_list`** third type was then added as the PRD-*optional* extension — deliberately reusing the intake schema's `Medication` sub-model, the existing locator chain, and the existing write path (no new PHP), so it is an additive seam, not a fourth and fifth type piled on |
 | **Multi-agent latency vs. <15s** | Extra inference hops (supervisor + workers + extraction + rerank) threaten the Week-1 <15s budget ([`ARCHITECTURE.md`](ARCHITECTURE.md) §2) | Routing discipline (only consult the worker the request needs); SSE streaming to first token; tiered Claude routing keeps cost and latency defensible; RRF/rerank latency measured in the cost/latency report |
 | **PHI leakage into observability** | The **disqualifying** failure — raw document text, identifiers, or extracted values reaching traces/logs/evals | Extend the single de-identification seam ([`ARCHITECTURE.md`](ARCHITECTURE.md) §9) to the new PHI surfaces; `no_phi_in_logs` rubric + CI PHI-detection check verify it mechanically (§§7–9) |
 

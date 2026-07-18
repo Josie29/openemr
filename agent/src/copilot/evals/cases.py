@@ -308,14 +308,14 @@ CASES: list[EvalCase] = [
         expected=ExpectedOutcome(behavior=_A, corpus_topic="afib-anticoagulation"),
     ),
     EvalCase(
-        case_id="angulo-intake-medications", patient_id="23", route=_REC, primary_rubric=_CP,
-        mechanism="intake-medication-grounding",
-        message="What medications did Sergio list on his intake form?",
-        intent="citation_present: every medication read off the form cites the box it was read "
-        "from — six hand-entered rows (budesonide, albuterol, fexofenadine, EpiPen, Advil, Aleve), "
-        "each of which must resolve to its own extracted value. A medication list is where an "
-        "uncited claim is most tempting and most dangerous: the reader cannot tell a row the model "
-        "read from a row it completed from the patient's chart.",
+        case_id="angulo-medication-list-grounding", patient_id="23", route=_REC, primary_rubric=_CP,
+        mechanism="medication-list-grounding",
+        message="What medications are on Sergio's uploaded medication list?",
+        intent="citation_present: every medication read off the medication list cites the box it "
+        "was read from — six printed rows (budesonide, albuterol, fexofenadine, epinephrine, "
+        "ibuprofen, naproxen), each of which must resolve to its own extracted value. A medication "
+        "list is where an uncited claim is most tempting and most dangerous: the reader cannot tell "
+        "a row the model read from a row it completed from the patient's chart.",
         expected=ExpectedOutcome(behavior=_A),
     ),
     EvalCase(

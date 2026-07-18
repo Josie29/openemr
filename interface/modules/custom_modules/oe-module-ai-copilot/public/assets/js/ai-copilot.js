@@ -828,9 +828,9 @@
     // into `citations[]`) — never re-derived from `resource_type`, which cannot tell a Patient read
     // from FHIR apart from a Patient read off an intake form.
     //
-    // Four `source_type` values collapse to three tiers: LAB_PDF and INTAKE_FORM make the same claim
-    // about trust and differ only in *which* document — the grouping key one level down, inside the
-    // tier.
+    // Five `source_type` values collapse to three tiers: LAB_PDF, INTAKE_FORM, and MEDICATION_LIST
+    // make the same claim about trust and differ only in *which* document — the grouping key one
+    // level down, inside the tier.
 
     var TIER_GUIDELINE = 'guideline';
     var TIER_RECORD = 'record';
@@ -853,6 +853,7 @@
                 return TIER_RECORD;
             case 'lab_pdf':
             case 'intake_form':
+            case 'medication_list':
                 return TIER_DOCUMENT;
             default:
                 return TIER_DOCUMENT;
@@ -1416,6 +1417,8 @@
                 return labels.docLabReport;
             case 'intake_form':
                 return labels.docIntakeForm;
+            case 'medication_list':
+                return labels.docMedicationList;
             default:
                 return labels.docGeneric;
         }
@@ -2172,6 +2175,7 @@
             tierDocumentsShort: els.sidebar.dataset.labelTierDocumentsShort || 'read from scan',
             docLabReport: els.sidebar.dataset.labelDocLabReport || 'Lab report',
             docIntakeForm: els.sidebar.dataset.labelDocIntakeForm || 'Intake form',
+            docMedicationList: els.sidebar.dataset.labelDocMedicationList || 'Medication list',
             docGeneric: els.sidebar.dataset.labelDocGeneric || 'Uploaded document',
             // Write-back confirmation card (JOS-81). {facts} and {families} are filled in JS.
             // Defaulted here so the card works before the PHP island grows these data-label-* attrs.

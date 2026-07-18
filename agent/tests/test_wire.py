@@ -12,6 +12,7 @@ from copilot.ingestion.schemas import (
     LabReport,
     LabResult,
     Medication,
+    MedicationList,
 )
 from copilot.ingestion.wire import derived_facts_for
 
@@ -52,19 +53,29 @@ def _intake_document(document_id: str = "doc-intake") -> ExtractedDocument:
                 full_name=CitedText(value="Sergio", citation=_citation("Sergio"))
             ),
             chief_concern=CitedText(value="cough", citation=_citation("cough")),
-            current_medications=[
+            allergies=[
+                Allergy(substance="Penicillin", reaction="hives", citation=_citation("Penicillin"))
+            ],
+            family_history=[
+                FamilyHistoryItem(condition="diabetes", citation=_citation("diabetes"))
+            ],
+        ),
+    )
+
+
+def _medication_list_document(document_id: str = "doc-meds") -> ExtractedDocument:
+    """A medication list — the document type that owns medication facts."""
+    return ExtractedDocument(
+        document_id=document_id,
+        doc_type=DocType.MEDICATION_LIST,
+        report=MedicationList(
+            medications=[
                 Medication(
                     name="Metformin",
                     dose="500 mg",
                     frequency="twice daily",
                     citation=_citation("Metformin"),
                 )
-            ],
-            allergies=[
-                Allergy(substance="Penicillin", reaction="hives", citation=_citation("Penicillin"))
-            ],
-            family_history=[
-                FamilyHistoryItem(condition="diabetes", citation=_citation("diabetes"))
             ],
         ),
     )
@@ -120,20 +131,22 @@ def test_a_document_whose_every_lab_was_dropped_is_omitted_entirely() -> None:
     assert groups == []
 
 
-def test_intake_form_emits_only_allergies_and_medications() -> None:
+def test_intake_form_emits_only_allergies() -> None:
     """Demographics, chief concern and family history must never reach the payload.
 
     They are extracted but have no honest write target, and the endpoint parser is all-or-nothing:
     one unpersistable `type` rejects the whole POST. If this regresses, every intake form 422s.
+    Medications are no longer here — they come from a medication list — so an intake form persists
+    allergies alone.
     """
     groups = derived_facts_for({"doc-intake": _intake_document()})
 
     assert len(groups) == 1
     types = sorted(fact["type"] for fact in groups[0]["facts"])
-    assert types == ["allergy", "medication"]
+    assert types == ["allergy"]
 
 
-def test_intake_allergy_and_medication_carry_their_fields_and_box() -> None:
+def test_intake_allergy_carries_its_fields_and_box() -> None:
     groups = derived_facts_for({"doc-intake": _intake_document()})
     facts = {fact["type"]: fact for fact in groups[0]["facts"]}
 
@@ -141,9 +154,32 @@ def test_intake_allergy_and_medication_carry_their_fields_and_box() -> None:
     assert facts["allergy"]["reaction"] == "hives"
     assert facts["allergy"]["bbox"] == {"x": 72.0, "y": 144.0, "w": 96.0, "h": 12.0}
     assert facts["allergy"]["page"] == 1
-    assert facts["medication"]["name"] == "Metformin"
-    assert facts["medication"]["dose"] == "500 mg"
-    assert facts["medication"]["frequency"] == "twice daily"
+
+
+def test_medication_list_emits_medications() -> None:
+    """A medication list persists its medications — the third document type's write surface.
+
+    If this regresses, a med-list document falls through the wire's isinstance chain to an empty
+    list and silently persists nothing, so the extracted medications never reach the chart.
+    """
+    groups = derived_facts_for({"doc-meds": _medication_list_document()})
+
+    assert len(groups) == 1
+    assert groups[0]["doc_type"] == "medication_list"
+    types = sorted(fact["type"] for fact in groups[0]["facts"])
+    assert types == ["medication"]
+
+
+def test_medication_carries_its_fields_and_box() -> None:
+    groups = derived_facts_for({"doc-meds": _medication_list_document()})
+    fact = groups[0]["facts"][0]
+
+    assert fact["type"] == "medication"
+    assert fact["name"] == "Metformin"
+    assert fact["dose"] == "500 mg"
+    assert fact["frequency"] == "twice daily"
+    assert fact["bbox"] == {"x": 72.0, "y": 144.0, "w": 96.0, "h": 12.0}
+    assert fact["page"] == 1
 
 
 def test_intake_fact_without_a_box_still_persists_without_geometry() -> None:
@@ -153,7 +189,6 @@ def test_intake_fact_without_a_box_still_persists_without_geometry() -> None:
         doc_type=DocType.INTAKE_FORM,
         report=IntakeForm(
             demographics=Demographics(),
-            current_medications=[],
             allergies=[
                 Allergy(substance="Latex", citation=_citation("Latex", boxed=False))
             ],

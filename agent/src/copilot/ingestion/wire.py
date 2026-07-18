@@ -8,6 +8,7 @@ from copilot.ingestion.schemas import (
     LabReport,
     LabResult,
     Medication,
+    MedicationList,
 )
 
 
@@ -99,10 +100,10 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
 
 
 def _attach_optional_box(fact: dict[str, Any], box: BoundingBox | None) -> None:
-    """Attach ``bbox``/``page`` to an intake fact when it has geometry.
+    """Attach ``bbox``/``page`` to a document fact when it has geometry.
 
-    Mutates ``fact`` in place. An intake fact with no box is valid and persists without one; the
-    endpoint's ``parseOptionalBox`` accepts an absent ``bbox``.
+    Mutates ``fact`` in place. An allergy or medication fact with no box is valid and persists
+    without one; the endpoint's ``parseOptionalBox`` accepts an absent ``bbox``.
     """
     if box is None:
         return
@@ -113,10 +114,11 @@ def _attach_optional_box(fact: dict[str, Any], box: BoundingBox | None) -> None:
 def _facts_for_document(extracted: ExtractedDocument) -> list[dict[str, Any]]:
     """Project one document's persistable facts onto the wire.
 
-    Only lab, allergy, and medication facts are emitted. Demographics, chief concern, and family
-    history are extracted but deliberately have no honest write target in this fork (JOS-81), so
-    they are omitted here. This filter is load-bearing: the endpoint's parser is all-or-nothing, so
-    a single unpersistable ``type`` would reject the whole payload.
+    An intake form yields allergies (medications moved to ``medication_list``); its demographics,
+    chief concern, and family history have no honest write target (JOS-81) and are omitted. A
+    medication list yields medications. Match every schema explicitly: a fall-through to
+    ``return []`` would silently persist nothing, and the endpoint's parser is all-or-nothing, so one
+    unpersistable ``type`` would reject the whole payload.
 
     Args:
         extracted: The full typed extraction for one document.
@@ -128,10 +130,9 @@ def _facts_for_document(extracted: ExtractedDocument) -> list[dict[str, Any]]:
     if isinstance(report, LabReport):
         return [fact for result in report.results if (fact := _lab_fact(result)) is not None]
     if isinstance(report, IntakeForm):
-        return [
-            *(_allergy_fact(allergy) for allergy in report.allergies),
-            *(_medication_fact(medication) for medication in report.current_medications),
-        ]
+        return [_allergy_fact(allergy) for allergy in report.allergies]
+    if isinstance(report, MedicationList):
+        return [_medication_fact(medication) for medication in report.medications]
     return []
 
 

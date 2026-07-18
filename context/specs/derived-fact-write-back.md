@@ -2,9 +2,18 @@
 
 **Status:** agreed, pre-implementation.
 **Issue:** [JOS-81](https://linear.app/josiemachalek/issue/JOS-81). Related: JOS-80 (intake extraction),
-JOS-70 (conditional extraction), JOS-49 (data authority).
+JOS-91 (medication-list doc type), JOS-70 (conditional extraction), JOS-49 (data authority).
 **Implements:** `W2_ARCHITECTURE.md` §3.4 (one-time transform, idempotency), §6 (data authority,
 FHIR round-trip without duplicates, sidecar-in-OpenEMR).
+
+> **The endpoint is document-type-agnostic (JOS-91).** This spec routes each fact by its **`type`**
+> (`lab` / `allergy` / `medication`) to the matching writer — it never looks at which *document type*
+> produced the fact. So when JOS-91 moved medications from the `intake_form` to a new
+> `medication_list` document type, **not one line of this PHP changed**. The attribution below is
+> updated to match: **allergies come from an `intake_form`, medications from a `medication_list`**
+> (the two are mutually exclusive in what they persist — see
+> [`medication-list-extraction.md`](medication-list-extraction.md)). The per-fact tables, markers,
+> and insert paths are exactly as written.
 
 ## Goal
 
@@ -53,12 +62,12 @@ Every derived fact carries a native "not clinician-confirmed" marker in OpenEMR'
 core changes, nothing masquerading as physician-authored. **The markers are not symmetric**, because
 what each resource can express differs:
 
-| Fact | Table | Derived marker | Reads back as | Strength |
+| Fact (source document) | Table | Derived marker | Reads back as | Strength |
 |---|---|---|---|---|
-| Labs | `procedure_result` | `result_status='preliminary'` | Observation `status: preliminary` | Strong |
-| Allergies | `lists` (`type='allergy'`) | `verification='unconfirmed'` | AllergyIntolerance `verificationStatus: unconfirmed` | Strong |
-| Medications | `lists_medication` | `request_intent='proposal'` (+ `lists.comments`) | MedicationRequest `intent: proposal` (+ `note`) | **Weaker — see below** |
-| Demographics | — | none exists | — | **Do not write** |
+| Labs (`lab_pdf`) | `procedure_result` | `result_status='preliminary'` | Observation `status: preliminary` | Strong |
+| Allergies (`intake_form`) | `lists` (`type='allergy'`) | `verification='unconfirmed'` | AllergyIntolerance `verificationStatus: unconfirmed` | Strong |
+| Medications (`medication_list`) | `lists_medication` | `request_intent='proposal'` (+ `lists.comments`) | MedicationRequest `intent: proposal` (+ `note`) | **Weaker — see below** |
+| Demographics (`intake_form`) | — | none exists | — | **Do not write** |
 
 `preliminary` is in the FHIR-valid status list (`FhirObservationLaboratoryService.php:357-364`), so it
 survives the round-trip. `lists.verification` genuinely defaults to `unconfirmed` on read: the coding
@@ -132,12 +141,13 @@ Phase 2 becomes a state transition on these same rows: `preliminary`→`final`,
 an affirmative "no known allergies". Persisting an empty list as NKDA would fabricate a clinical
 assertion the document never made. Write nothing for an empty section.
 
-### Bounding boxes are optional for intake facts
+### Bounding boxes are optional for non-lab facts
 
-Only `LabResult` enforces a box (`_require_bounding_box`, `schemas.py:140-153`); an intake medication
-with `bounding_box: null` is valid. So the intake path needs an optional citation, and the sidecar's
-`bbox` column already allows `''` for exactly this. `BoundingBox` itself keeps refusing zero-area boxes
-— correct for labs, and the nullability belongs at the fact level, not inside the value object.
+Only `LabResult` enforces a box (`_require_bounding_box`, `schemas.py:140-153`); a `medication_list`
+medication (or an intake allergy) with `bounding_box: null` is valid. So those paths need an optional
+citation, and the sidecar's `bbox` column already allows `''` for exactly this. `BoundingBox` itself
+keeps refusing zero-area boxes — correct for labs, and the nullability belongs at the fact level, not
+inside the value object.
 
 ### Labs require a grounded LOINC code (JOS-87 — merged)
 

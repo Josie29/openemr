@@ -70,8 +70,12 @@ def test_documents_response_matches_its_advertised_model() -> None:
     resp = client.get("/documents", params={"patient_id": "23"})
     assert resp.status_code == 200
     parsed = DocumentsResponse.model_validate(resp.json())
-    # Patient 23 (angulo) has the seeded lab + intake uploads.
-    assert {d.doc_type.value for d in parsed.documents} == {"lab_pdf", "intake_form"}
+    # Patient 23 (angulo) has the seeded lab + intake + medication-list uploads.
+    assert {d.doc_type.value for d in parsed.documents} == {
+        "lab_pdf",
+        "intake_form",
+        "medication_list",
+    }
 
 
 def test_extraction_response_matches_its_advertised_model() -> None:

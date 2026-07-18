@@ -25,6 +25,8 @@ _LAB_PDF = str(_DOCS / "pdfs" / "sergio-angulo-lab-report.pdf")
 _LAB_OCR = str(_DOCS / "extractions" / "sergio-angulo-lab-report.ocr.json")
 _INTAKE_PDF = str(_DOCS / "pdfs" / "sergio-angulo-intake-form.pdf")
 _INTAKE_OCR = str(_DOCS / "extractions" / "sergio-angulo-intake-form.ocr.json")
+_MEDLIST_PDF = str(_DOCS / "pdfs" / "sergio-angulo-medication-list.pdf")
+_MEDLIST_OCR = str(_DOCS / "extractions" / "sergio-angulo-medication-list.ocr.json")
 
 # The seeded angulo (patient 23) uploads — see fhir/seed/patient-23-angulo.bundle.json.
 _PATIENT = "23"
@@ -32,11 +34,11 @@ _LAB_DOC_ID = "labreport-2026-07"
 _INTAKE_DOC_ID = "intakeform-2026-07"
 
 
-def _fixture_settings(*, lab: bool = True, intake: bool = True) -> Settings:
+def _fixture_settings(*, lab: bool = True, intake: bool = True, meds: bool = True) -> Settings:
     """Offline settings with the extractor + document bytes wired to the angulo fixtures.
 
-    ``lab``/``intake`` toggle whether each type is configured, so a test can drive the partial-
-    configuration failure path (a document whose type has no fixture raises ExtractionError).
+    ``lab``/``intake``/``meds`` toggle whether each type is configured, so a test can drive the
+    partial-configuration failure path (a document whose type has no fixture raises ExtractionError).
     """
     return Settings(
         model_tier=ModelTier.SONNET,
@@ -47,6 +49,8 @@ def _fixture_settings(*, lab: bool = True, intake: bool = True) -> Settings:
         ocr_fixture_path_lab_pdf=_LAB_OCR if lab else None,
         document_pdf_path_intake_form=_INTAKE_PDF if intake else None,
         ocr_fixture_path_intake_form=_INTAKE_OCR if intake else None,
+        document_pdf_path_medication_list=_MEDLIST_PDF if meds else None,
+        ocr_fixture_path_medication_list=_MEDLIST_OCR if meds else None,
         anthropic_api_key=None,
         langfuse_public_key=None,
         langfuse_secret_key=None,
@@ -78,7 +82,7 @@ def test_documents_lists_the_patients_uploaded_documents() -> None:
     body = resp.json()
     assert body["patient_id"] == _PATIENT
     by_type = {d["doc_type"] for d in body["documents"]}
-    assert by_type == {"lab_pdf", "intake_form"}
+    assert by_type == {"lab_pdf", "intake_form", "medication_list"}
 
 
 def test_documents_is_empty_for_a_patient_with_no_uploads() -> None:
@@ -137,7 +141,7 @@ def test_extraction_reports_502_when_the_document_cannot_be_read() -> None:
 def test_extraction_reports_503_when_extraction_is_unconfigured() -> None:
     # Breaks the "extraction disabled" degradation: with no extractor wired the endpoint must say
     # so (503), not 500 or pretend the document has no facts.
-    settings = _fixture_settings(lab=False, intake=False)  # no fixtures -> build_extractor is None
+    settings = _fixture_settings(lab=False, intake=False, meds=False)  # no fixtures -> extractor None
     client = TestClient(create_app(settings))
     resp = client.get(f"/documents/{_LAB_DOC_ID}/extraction", params={"patient_id": _PATIENT})
     assert resp.status_code == 503

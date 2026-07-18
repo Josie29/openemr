@@ -13,12 +13,12 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\AiCopilot\Fact;
 
 /**
- * One medication read off an intake form, ready to persist as a `lists` row.
+ * One medication read off an uploaded medication list, ready to persist as a `lists` row.
  *
  * Mirrors the agent's `Medication` model (`agent/src/copilot/ingestion/schemas.py`): a name plus
  * unparsed free-text dose and frequency. The extractor reports no route, status, dates, or RxNorm
- * code, so none are invented here — `PrescriptionService`'s `lists` branch selects `NULL` for route,
- * unit, and rxnorm anyway ("we don't have rxnorm codes for free text meds").
+ * code, so none are invented here — `PrescriptionService`'s `lists` branch selects `NULL` for
+ * route, unit, and rxnorm anyway ("we don't have rxnorm codes for free text meds").
  *
  * As with allergies the bounding box is optional — only `LabResult` requires one agent-side.
  */

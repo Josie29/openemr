@@ -57,24 +57,26 @@ Your read tools are each scoped to the one open patient:
   than scanning others.
 
 You also read UPLOADED documents (values not yet filed in the chart):
-- list_documents: the patient's uploaded documents (id, title, date, and `doc_type`, which is either
-  "lab_pdf" or "intake_form"). Metadata only.
+- list_documents: the patient's uploaded documents (id, title, date, and `doc_type`, which is one of
+  "lab_pdf", "intake_form", or "medication_list"). Metadata only.
 - attach_and_extract(document_id): OCR one uploaded document into its individual facts. What is read
   depends on the document's own type — you do not choose it:
   - a `lab_pdf` returns lab results, each with `resource_type` "Observation" and the printed
     `test_name`/`value`/`unit`/`reference_range`/`abnormal_flag`.
   - an `intake_form` returns what the patient wrote at the front desk: demographics
-    (`resource_type` "Patient"), current medications ("MedicationRequest"), allergies
-    ("AllergyIntolerance"), and family history ("FamilyMemberHistory").
+    (`resource_type` "Patient"), allergies ("AllergyIntolerance"), and family history
+    ("FamilyMemberHistory"). It does NOT return medications — those come from a medication list.
+  - a `medication_list` returns the medications on a pharmacy/discharge medication list, each with
+    `resource_type` "MedicationRequest" and the printed `name`/`dose`/`frequency`.
   For lab values and trends, prefer get_lab_observations — the chart's structured labs. Reach for a
   document only when the value is NOT in the chart: an uploaded report the labs were not filed from,
-  or something the patient reported on their intake form (a chief concern, a medication they take, a
-  family history). Then call list_documents, then attach_and_extract on the relevant document, and
-  state the facts the question needs. Cite each fact with its `resource_type`/`resource_id` and
-  `field` "value" — verbatim from the tool result.
-  Facts from an intake form are what the PATIENT reported, not what a clinician has confirmed. Say
-  so when it matters — an intake medication list is not the chart's medication list, and the two can
-  disagree.
+  something the patient reported on their intake form (a chief concern, an allergy, a family
+  history), or a medication on an uploaded medication list. Then call list_documents, then
+  attach_and_extract on the relevant document, and state the facts the question needs. Cite each fact
+  with its `resource_type`/`resource_id` and `field` "value" — verbatim from the tool result.
+  Facts from an uploaded document are what the PATIENT supplied, not what a clinician has confirmed.
+  Say so when it matters — a medication list a patient brought in is not the chart's medication list,
+  and the two can disagree.
 
 Read the structured record with get_patient_summary once, add get_lab_observations for lab values or
 trends, and read a note or a document only when the question needs the narrative or a value not in
@@ -190,8 +192,8 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         """OCR one uploaded document into its individual, citable facts.
 
         What is read from the document is decided by the document's own type, not by the caller: a
-        lab report yields lab results, an intake form yields demographics, medications, allergies,
-        and family history.
+        lab report yields lab results, an intake form yields demographics, allergies, and family
+        history, and a medication list yields medications.
 
         Args:
             ctx: The run context (holds the extractor and the document-fact registry).

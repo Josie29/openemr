@@ -4,6 +4,7 @@ from copilot.ingestion.extractor import ExtractedDocument
 from copilot.ingestion.schemas import (
     Allergy,
     BoundingBox,
+    Citation,
     CitedText,
     Demographics,
     FamilyHistoryItem,
@@ -17,6 +18,11 @@ from copilot.ingestion.schemas import (
 
 # The Demographics attributes projected to the wire, in the persist endpoint's field vocabulary.
 _DEMOGRAPHIC_FIELDS = ("full_name", "date_of_birth", "sex", "address", "phone")
+
+
+def _cite(cited: CitedText | None) -> Citation | None:
+    """The citation of an optional cited value — the qualifier half of the field-box input."""
+    return cited.citation if cited is not None else None
 
 
 def _box_payload(box: BoundingBox) -> dict[str, Any]:
@@ -62,7 +68,16 @@ def _lab_fact(result: LabResult) -> dict[str, Any] | None:
         "bbox": _box_payload(box),
         "confidence": result.confidence,
     }
-    _attach_field_boxes(fact, {"unit": result.unit, "reference_range": result.reference_range})
+    _attach_field_boxes(
+        fact,
+        {
+            # The row entire: what test this is, its code, and the two qualifiers around the value.
+            "test_name": result.test_name_citation,
+            "loinc": result.loinc_citation,
+            "unit": _cite(result.unit),
+            "reference_range": _cite(result.reference_range),
+        },
+    )
     return fact
 
 
@@ -85,7 +100,7 @@ def _allergy_fact(allergy: Allergy) -> dict[str, Any]:
         "confidence": allergy.confidence,
     }
     _attach_optional_box(fact, allergy.citation.bounding_box)
-    _attach_field_boxes(fact, {"reaction": allergy.reaction})
+    _attach_field_boxes(fact, {"reaction": _cite(allergy.reaction)})
     return fact
 
 
@@ -109,7 +124,9 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
         "confidence": medication.confidence,
     }
     _attach_optional_box(fact, medication.citation.bounding_box)
-    _attach_field_boxes(fact, {"dose": medication.dose, "frequency": medication.frequency})
+    _attach_field_boxes(
+        fact, {"dose": _cite(medication.dose), "frequency": _cite(medication.frequency)}
+    )
     return fact
 
 
@@ -137,7 +154,7 @@ def _family_history_fact(item: FamilyHistoryItem) -> dict[str, Any] | None:
         "confidence": item.confidence,
     }
     _attach_optional_box(fact, item.citation.bounding_box)
-    _attach_field_boxes(fact, {"relation": item.relation})
+    _attach_field_boxes(fact, {"relation": _cite(item.relation)})
     return fact
 
 
@@ -188,7 +205,7 @@ def _demographic_facts(demographics: Demographics) -> list[dict[str, Any]]:
     return facts
 
 
-def _attach_field_boxes(fact: dict[str, Any], fields: dict[str, CitedText | None]) -> None:
+def _attach_field_boxes(fact: dict[str, Any], fields: dict[str, Citation | None]) -> None:
     """Attach ``field_boxes`` — where each SECONDARY value of this fact sits on the page.
 
     Mutates ``fact`` in place, and only when at least one qualifier was located. The fact's own
@@ -206,8 +223,8 @@ def _attach_field_boxes(fact: dict[str, Any], fields: dict[str, CitedText | None
         fields: The fact's secondary values, keyed by the field name the UI labels them with.
     """
     entries = []
-    for name, cited in fields.items():
-        box = cited.citation.bounding_box if cited is not None else None
+    for name, citation in fields.items():
+        box = citation.bounding_box if citation is not None else None
         if box is None:
             continue
         entries.append({"field": name, "page": box.page, "bbox": _box_payload(box)})

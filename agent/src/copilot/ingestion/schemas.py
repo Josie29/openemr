@@ -249,6 +249,17 @@ class LabResult(BaseModel):
         default=None,
         description="Specimen collection date if printed (ISO 8601). Null if absent — never infer.",
     )
+    # Geometry for the two IDENTITY fields, kept beside them rather than folded into their type.
+    # `unit`/`reference_range` are CitedText because their VALUE is what a citation qualifies; the
+    # test name and LOINC instead identify WHICH test this is — they are matched on, displayed, and
+    # (for the code) written to `procedure_result.result_code` — so they stay bare and only their
+    # box is optional. Null when the field is absent or could not be placed.
+    test_name_citation: Citation | None = Field(
+        default=None, description="Where the test name sits on the page. System-set."
+    )
+    loinc_citation: Citation | None = Field(
+        default=None, description="Where the LOINC code sits on the page. System-set."
+    )
     abnormal_flag: AbnormalFlag = Field(
         description="Abnormal indicator; use 'no' if the report shows none."
     )

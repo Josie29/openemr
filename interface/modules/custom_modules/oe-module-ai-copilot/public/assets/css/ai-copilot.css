@@ -928,6 +928,14 @@ body.ai-copilot-resizing {
     white-space: nowrap;
 }
 
+/* Units earn their own column rather than being concatenated onto the value: they carry their own
+   box, so they have to be clickable and column-scopeable in their own right. Muted like the
+   reference range — the value is what the eye should land on. */
+.ai-copilot__labs-units {
+    color: var(--copilot-muted);
+    white-space: nowrap;
+}
+
 /* The badge is the handle for the whole fact: clicking it shows every box backing that one result.
    It already reads as an affordance (a filled chip), so it needs a cursor and a focus ring, not
    more decoration. */

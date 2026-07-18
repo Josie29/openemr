@@ -987,9 +987,25 @@ def _build_lab_result(
     """
     value = str(raw.get("value", "")).strip()
     test_name = str(raw.get("test_name", "")).strip()
+    loinc = _ground_loinc(raw, geometry)
+    # Identity fields want a box but not a value wrapper, so reuse the secondary locator's
+    # non-dropping behaviour and keep only its citation: an unplaceable name never drops the result.
+    named = _secondary(
+        FieldId.LAB_RESULT_TEST_NAME,
+        test_name or None,
+        (test_name,),
+        geometry,
+        state,
+        DocType.LAB_PDF,
+    )
+    coded = _secondary(
+        FieldId.LAB_RESULT_LOINC, loinc, (test_name,), geometry, state, DocType.LAB_PDF
+    )
     return LabResult(
         test_name=test_name,
-        loinc=_ground_loinc(raw, geometry),
+        loinc=loinc,
+        test_name_citation=named.citation if named is not None else None,
+        loinc_citation=coded.citation if coded is not None else None,
         value=value,
         # Anchored on the row's own test name, so a unit or range is read from THIS analyte's row
         # rather than matching an identical one printed against another.

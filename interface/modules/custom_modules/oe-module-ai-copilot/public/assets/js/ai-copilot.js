@@ -1290,11 +1290,12 @@
 
         var head = document.createElement('thead');
         var headRow = document.createElement('tr');
-        // The analyte column is not proof of anything — the test NAME is a locator anchor, never
-        // boxed — so only the two value columns become headers you can interrogate.
+        // Every column is proof of something, including the analyte: the test name is boxed too, and
+        // a name bound to the wrong row is exactly how a value gets attributed to the wrong test.
         var columns = [
-            { heading: labels.labAnalyte, field: null },
+            { heading: labels.labAnalyte, field: 'test_name' },
             { heading: labels.labValue, field: 'value' },
+            { heading: labels.labUnits, field: 'unit' },
             { heading: labels.labRef, field: 'reference_range' }
         ];
         columns.forEach(function (column) {
@@ -1319,7 +1320,12 @@
             var analyte = document.createElement('td');
             analyte.className = 'ai-copilot__labs-analyte';
             analyte.appendChild(buildFactNumber(claim, boxed));
-            analyte.appendChild(document.createTextNode(detail.test_name));
+            // The name sits in its own span so the badge beside it keeps its own click target: the
+            // badge proves the whole row, the name proves just which test this is.
+            var analyteName = document.createElement('span');
+            analyteName.textContent = detail.test_name;
+            makeCellProvable(analyteName, claim, boxed, 'test_name');
+            analyte.appendChild(analyteName);
             row.appendChild(analyte);
 
             var value = document.createElement('td');
@@ -1328,11 +1334,17 @@
             if (detail.abnormal_flag === 'high' || detail.abnormal_flag === 'low') {
                 value.classList.add('ai-copilot__labs-value--abnormal');
             }
-            value.textContent = detail.unit
-                ? claim.source.value + ' ' + detail.unit
-                : claim.source.value;
+            // The unit used to be concatenated onto the value, which made it impossible to click or
+            // column-scope even once it had a box of its own. It gets its own cell now.
+            value.textContent = claim.source.value;
             makeCellProvable(value, claim, boxed, 'value');
             row.appendChild(value);
+
+            var units = document.createElement('td');
+            units.className = 'ai-copilot__labs-units';
+            units.textContent = detail.unit || '';
+            makeCellProvable(units, claim, boxed, 'unit');
+            row.appendChild(units);
 
             var ref = document.createElement('td');
             ref.className = 'ai-copilot__labs-ref';
@@ -2574,6 +2586,7 @@
             page: els.sidebar.dataset.labelPage || 'p.',
             labAnalyte: els.sidebar.dataset.labelLabAnalyte || 'Analyte',
             labValue: els.sidebar.dataset.labelLabValue || 'Value',
+            labUnits: els.sidebar.dataset.labelLabUnits || 'Units',
             labRef: els.sidebar.dataset.labelLabRef || 'Reference',
             tierGuidelines: els.sidebar.dataset.labelTierGuidelines || 'Guidelines',
             tierGuidelinesShort: els.sidebar.dataset.labelTierGuidelinesShort || 'guideline',

@@ -133,13 +133,41 @@ def test_secondary_fields_are_boxed_in_their_own_columns() -> None:
 
     glucose = next(result for result in report.results if result.test_name == "Glucose, Fasting")
     assert glucose.unit is not None and glucose.reference_range is not None
+    assert glucose.test_name_citation is not None and glucose.loinc_citation is not None
+    name_box = glucose.test_name_citation.bounding_box
+    code_box = glucose.loinc_citation.bounding_box
     value_box = glucose.citation.bounding_box
     range_box = glucose.reference_range.citation.bounding_box
     unit_box = glucose.unit.citation.bounding_box
-    assert value_box is not None and range_box is not None and unit_box is not None
+    assert None not in (name_box, code_box, value_box, range_box, unit_box)
 
-    # The report's columns run RESULT | FLAG | REFERENCE RANGE | UNITS, left to right...
-    assert value_box.x < range_box.x < unit_box.x
-    # ...and all three sit on this analyte's own row, so the range qualifies THIS result.
-    assert abs(range_box.y - value_box.y) < 12
-    assert abs(unit_box.y - value_box.y) < 12
+    # The report's columns run TEST | LOINC | RESULT | FLAG | REFERENCE RANGE | UNITS, left to
+    # right — so boxing the whole row means five rectangles in that order.
+    assert name_box.x < code_box.x < value_box.x < range_box.x < unit_box.x
+    # ...and every one sits on this analyte's own row, so each qualifies THIS result.
+    for box in (name_box, code_box, range_box, unit_box):
+        assert abs(box.y - value_box.y) < 12
+
+
+def test_the_test_name_is_boxed_even_though_it_anchors_its_own_row() -> None:
+    """The analyte name carries a box, not just the values beside it.
+
+    The name is the anchor the row's other locators scan for, and its span was computed and then
+    discarded — so the one column the sidebar shows as fact was the one column that could never be
+    checked. A name bound to the wrong row is precisely how a value gets attributed to the wrong
+    test, which makes it worth proving. Boxing it needs the row to START at the anchor rather than
+    past it, so this also pins that `include_anchor` behaviour.
+    """
+    name = "sergio-angulo-lab-report"
+    ocr: dict[str, Any] = json.loads((_FIXTURES / "extractions" / f"{name}.ocr.json").read_text())
+    words = extract_word_boxes((_FIXTURES / "pdfs" / f"{name}.pdf").read_bytes())
+    report = map_lab_report(ocr, DocumentGeometry.from_parts(ocr, words))
+
+    boxed = [r for r in report.results if r.test_name_citation is not None]
+    assert len(boxed) == len(report.results), "every analyte name must be locatable"
+
+    # A multi-word name is boxed across all its words, not just the anchor token.
+    wbc = next(r for r in report.results if r.test_name == "White Blood Cell Count")
+    assert wbc.test_name_citation is not None
+    box = wbc.test_name_citation.bounding_box
+    assert box is not None and box.width > 60

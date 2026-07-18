@@ -120,6 +120,8 @@ class RowSpanLocator:
     # one key would leave the second scanning from past the row the first consumed. Defaults to the
     # locator name, so the single-field lab walk is unchanged.
     cursor_key: str | None = None
+    # True when the value being boxed IS the anchor (the test name introducing its own row).
+    include_anchor: bool = False
 
     @property
     def name(self) -> LocatorName:
@@ -143,7 +145,7 @@ class RowSpanLocator:
             anchor = doc.words[index]
             if not (left <= anchor.x0 <= right) or norm(anchor.text) != anchor_key:
                 continue
-            row = _row_after(doc, anchor, self.row_tolerance)
+            row = _row_after(doc, anchor, self.row_tolerance, self.include_anchor)
             span = match_span(row, request.value, self.max_span_words)
             if span is None:
                 continue  # anchor matched but its value is not on this row — keep scanning
@@ -594,8 +596,14 @@ def _strip_marks(word: Word) -> Word:
     )
 
 
-def _row_after(doc: DocumentGeometry, anchor: Word, tolerance: float) -> list[Word]:
+def _row_after(
+    doc: DocumentGeometry, anchor: Word, tolerance: float, include_anchor: bool = False
+) -> list[Word]:
     """Words on the anchor's row and to its right, ordered left-to-right.
+
+    ``include_anchor`` starts the row AT the anchor instead of past it, which is what a field whose
+    value IS the anchor needs — the test name introduces its own row, so excluding the anchor makes
+    that name the one value on the row that can never be found.
 
     Sorted by x rather than taken in reading order: reading order sorts by top then x, so within the
     row tolerance two words can come back in an order that is not left-to-right. The result column
@@ -616,7 +624,7 @@ def _row_after(doc: DocumentGeometry, anchor: Word, tolerance: float) -> list[Wo
             for word in doc.words
             if word.page == anchor.page
             and abs(word.top - anchor.top) <= tolerance
-            and word.x0 > anchor.x1
+            and (word.x0 >= anchor.x0 if include_anchor else word.x0 > anchor.x1)
         ),
         key=lambda word: word.x0,
     )

@@ -653,6 +653,17 @@
             "description": "The LOINC code printed beside the analyte, e.g. '2823-3'. Null when the report prints none. Read it off the page \u2014 never supply a code from memory.",
             "title": "Loinc"
           },
+          "loinc_citation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Citation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the LOINC code sits on the page. System-set."
+          },
           "reference_range": {
             "anyOf": [
               {
@@ -669,6 +680,17 @@
             "minLength": 1,
             "title": "Test Name",
             "type": "string"
+          },
+          "test_name_citation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Citation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the test name sits on the page. System-set."
           },
           "unit": {
             "anyOf": [

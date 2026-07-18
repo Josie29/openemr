@@ -27,6 +27,8 @@ class FieldId(StrEnum):
     """
 
     LAB_RESULT_VALUE = "lab.result.value"
+    LAB_RESULT_TEST_NAME = "lab.result.test_name"
+    LAB_RESULT_LOINC = "lab.result.loinc"
     LAB_RESULT_UNIT = "lab.result.unit"
     LAB_RESULT_REFERENCE_RANGE = "lab.result.reference_range"
     DEMOGRAPHICS_FULL_NAME = "demographics.full_name"
@@ -100,12 +102,41 @@ LAB_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             ),
             floor=BoxPrecision.PAGE,
         ),
-        # Both SECONDARY, anchored on the row's own test name like the value is. These are the two
-        # fields LabDetail stamps onto the sidebar as system-authored fact — a wrong reference range
+        # The test name and its LOINC identify WHICH test a value belongs to. The name was already
+        # being located — it is the anchor the value's own locator scans for — and the box was then
+        # thrown away, even though the sidebar shows the name as fact and a name bound to the wrong
+        # row is how a value gets attributed to the wrong test. The LOINC is what write-back stamps
+        # as `procedure_result.result_code`, so a wrong one files the result under the wrong test.
+        # Both are anchored on the name, which is the row's left-most token.
+        FieldId.LAB_RESULT_TEST_NAME: FieldSpec(
+            field=FieldId.LAB_RESULT_TEST_NAME,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0),
+                    max_span_words=5,
+                    cursor_key="lab.test_name",
+                    include_anchor=True,
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        FieldId.LAB_RESULT_LOINC: FieldSpec(
+            field=FieldId.LAB_RESULT_LOINC,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0), max_span_words=2, cursor_key="lab.loinc"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        # The two qualifiers around the value, anchored on the row's test name like the value is.
+        # LabDetail stamps both onto the sidebar as system-authored fact — a wrong reference range
         # flips a normal value to abnormal — so each must be checkable in its own column rather than
         # transported as unlocatable text. `abnormal_flag` is deliberately NOT located: it is a
-        # single character ("H"/"L") that matches everywhere on the page, and what it asserts is
-        # derived from the value and the range, which are both boxed here.
+        # single character ("H"/"L") matching everywhere on the page, and what it asserts derives
+        # from the value and the range, which are both boxed here.
         FieldId.LAB_RESULT_REFERENCE_RANGE: FieldSpec(
             field=FieldId.LAB_RESULT_REFERENCE_RANGE,
             labels=(),

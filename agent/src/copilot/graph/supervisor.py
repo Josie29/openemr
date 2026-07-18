@@ -1,4 +1,5 @@
 import json
+import logging
 from dataclasses import dataclass
 
 from pydantic_ai import Agent
@@ -15,6 +16,8 @@ from copilot.graph.workers import (
 )
 from copilot.observability import TurnTrace
 from copilot.schemas import ChatResponse
+
+logger = logging.getLogger(__name__)
 
 # A worker's report this turn: its name and the output it handed back (both carry summary + claims).
 type WorkerReport = tuple[str, ExtractorOutput | RetrieverOutput]
@@ -109,6 +112,15 @@ async def run_graph(
     # also sums token usage across runs for pricing, so nothing needs to be added afterwards.
     usage = RunUsage()
 
+    # A worker runs at most once a turn, and this is enforced here rather than asked for in the
+    # router prompt (which already says "do not repeat a step already completed" — and was observed
+    # dispatching the retriever three times regardless). The guarantee is structural: a worker is
+    # re-run with the SAME `message`, the same tools and the same corpus, so a second dispatch has
+    # no new input and cannot produce a different report. The router only reaches for one when the
+    # first report came back thin — hoping repetition yields more, which is the same mistake a model
+    # makes re-calling a tool that returned nothing.
+    dispatched: set[Route] = set()
+
     for _ in range(max_hops):
         routing = await graph.router.run(
             _router_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
@@ -118,6 +130,15 @@ async def run_graph(
         turn.routed(decision.route.value, decision.reason)
         if decision.route is Route.ANSWER:
             break
+        if decision.route in dispatched:
+            # Nothing left to gather: the router asked for a worker that has already reported, so
+            # compose from what there is instead of burning the turn re-running it.
+            logger.info(
+                "router re-selected a completed worker; composing the answer",
+                extra={"route": decision.route.value, "correlation_id": deps.correlation_id},
+            )
+            break
+        dispatched.add(decision.route)
         if decision.route is Route.EXTRACT_INTAKE:
             extracted = await graph.extractor.run(
                 message, deps=deps, usage=usage, usage_limits=usage_limits

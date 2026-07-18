@@ -219,12 +219,14 @@ class Settings(BaseSettings):
     # and shared, so one looping tool starves every other). Enforced by hiding the tool from the
     # model once spent — see copilot.graph.budget.
     #
-    # Both defaults allow a retry or two past the expected call count, because the aim is to stop a
-    # runaway, not to punish a reformulation. A focused guideline query finds the corpus's answer in
-    # one or two tries; the document list is memoized and identical on every call, so needing it
-    # more than twice means the model is retrying, not discovering.
-    agent_max_searches_per_run: int = 4
-    agent_max_document_lists_per_run: int = 2
+    # Both are set to the number of calls that can do NEW work, not that number plus slack. The
+    # document list is read once and memoized, so a second call is definitionally a retry. Guideline
+    # snippets come back ranked best-first over a fixed corpus: one query establishes whether the
+    # topic is covered, a second allows one genuine reformulation, and beyond that the corpus is the
+    # limit rather than the phrasing — the observed runaway rephrased nine times and never found
+    # what was not there.
+    agent_max_searches_per_run: int = 2
+    agent_max_document_lists_per_run: int = 1
 
     # Browser origins allowed to call /chat directly (ARCHITECTURE.md §4: the chat XHR goes from the
     # physician's browser to this service, not proxied through PHP). Empty means no browser may call

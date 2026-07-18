@@ -723,11 +723,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         fhir, per_request_client = resolved
         extracted = None
         try:
-            # get_documents is also the security control: only a document the patient actually has,
-            # whose category maps to a schema, is extractable (no raw by-id path that would bypass
-            # the discovery filter).
-            summaries = await fhir.get_documents(patient_id)
-            extracted = await resolve_and_extract(document_id, summaries, extractor, fhir)
+            # resolve_and_extract reads the patient's documents itself; that listing IS the
+            # security control (only a document the patient actually has, whose category maps to a
+            # schema, is extractable — no raw by-id path bypasses the discovery filter).
+            extracted = await resolve_and_extract(document_id, patient_id, extractor, fhir)
         except ExtractionError:
             logger.warning(
                 "document extraction failed",

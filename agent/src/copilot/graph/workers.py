@@ -54,8 +54,7 @@ Your read tools are each scoped to the one open patient:
   from a lab value that lives only in an uploaded report (see attach_and_extract).
 - get_encounter_note(encounter_id): the free-text note for one visit — the narrative the structured
   lists don't hold. Find the visit in get_patient_summary's recent encounters first, then read the
-  note for the SPECIFIC encounter the question is about. If that visit has no note, say so rather
-  than scanning others.
+  note for the SPECIFIC encounter the question is about.
 
 You also read UPLOADED documents (values not yet filed in the chart):
 - list_documents: the patient's uploaded documents (id, title, date, and `doc_type`, which is one of
@@ -86,9 +85,8 @@ You also read UPLOADED documents (values not yet filed in the chart):
 Read the structured record with get_patient_summary once, add get_lab_observations for lab values or
 trends, read a note for a visit's narrative, and read an uploaded document whenever the question is
 about one — or when a relevant `medication_list` / `intake_form` is on file for a question about the
-patient's medications or what they reported. Answer only from what the tools return — if the record
-lacks something (e.g. no lab result and none in an uploaded report), say so plainly rather than
-inferring.
+patient's medications or what they reported. Answer only from what the tools return, and never
+infer a value the record does not hold.
 
 Return an ExtractorOutput: a one-line `summary` and a `claims` list, leading with safety signals (a
 high-severity allergy, an anticoagulant).
@@ -102,12 +100,17 @@ EVIDENCE_RETRIEVER_PROMPT = f"""You are the evidence-retriever in a clinical Co-
 job is to find guideline evidence relevant to the clinical question and return it as cited claims
 for the supervisor to use.
 
-Call `search_guidelines` with a focused query built from the CLINICAL TOPIC the question is about
-— the condition, the screening subject, the monitoring question. Use only de-identified clinical
-terms; never put patient identifiers (name, MRN, date of birth) or specific patient values in the
-query (it is sent to external retrieval/rerank services). Each returned snippet has just two fields:
-a `chunk_id` and its `text`. Read them and return a RetrieverOutput: a one-line `summary` and a
-`claims` list, each stating one guideline point and grounding it in a snippet.
+Call `search_guidelines` ONCE, with a focused query built from the CLINICAL TOPIC the question is
+about — the condition, the screening subject, the monitoring question. The corpus is a small fixed
+set of clinical topics and one search reads all of it, so a second query with different wording
+reaches the same content: whatever the first search returns is what the corpus holds. If it does
+not cover the question, that is your finding — report it and stop, rather than rephrasing.
+
+Use only de-identified clinical terms; never put patient identifiers (name, MRN, date of birth) or
+specific patient values in the query (it is sent to external retrieval/rerank services). Each
+returned snippet has just two fields: a `chunk_id` and its `text`. Read them and return a
+RetrieverOutput: a one-line `summary` and a `claims` list, each stating one guideline point and
+grounding it in a snippet.
 
 {_CITATION_RULES}
 
@@ -117,11 +120,7 @@ and set `quote` to a span copied verbatim from THAT snippet's `text` — word-fo
 never dosing directives. If retrieval returns nothing relevant, say so in the summary and return no
 claims rather than inventing evidence.
 
-Use at most a few focused searches. If two or three queries have not surfaced relevant snippets,
-the corpus does not cover the question — report that no guideline evidence was found and stop.
-Rephrasing the same question further will not find it, and the searches are budgeted: past that
-budget `search_guidelines` returns nothing at all, so continuing only spends the turn's tool
-allowance that composing the answer still needs."""
+"""
 
 # Langfuse Prompt Management name for the physician-facing answer prompt. The final answer is the
 # turn's user-visible output, so this is the prompt version stamped on each trace (the router and
@@ -183,7 +182,7 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     register_fhir_read_tools(agent)
 
     @agent.tool(prepare=budgeted(BudgetedTool.LIST_DOCUMENTS))
-    async def list_documents(ctx: RunContext[GraphDeps]) -> list[UploadedDocumentSummary]:
+    async def list_documents(ctx: RunContext[GraphDeps]) -> list[UploadedDocumentSummary] | str:
         """List the patient's uploaded documents (id, title, date, doc_type) for extraction.
 
         Call this whenever the question is about something a patient may have uploaded — their
@@ -191,18 +190,16 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         before answering from the chart alone. An uploaded `medication_list` is a primary source for
         a medications question, not a fallback.
 
-        The result is FIXED for the whole turn: it is read once and memoized, so calling this again
-        returns exactly the same list. An empty list means this patient has no uploaded documents —
-        that is the answer, not a transient failure to retry.
-
         Args:
             ctx: The run context (holds the patient-scoped FHIR client).
+
+        Returns:
+            The patient's uploaded documents, or a sentence saying there are none.
         """
-        cache = ctx.deps.documents_cache
-        if cache is None:
-            cache = await ctx.deps.fhir.get_documents(ctx.deps.patient_id)
-            ctx.deps.documents_cache = cache
-        return cache
+        documents = await ctx.deps.fhir.get_documents(ctx.deps.patient_id)
+        if not documents:
+            return "This patient has no uploaded documents on file."
+        return documents
 
     @agent.tool
     async def attach_and_extract(
@@ -233,7 +230,7 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         # HERE in the tool; the helper records nothing.
         try:
             extracted = await resolve_and_extract(
-                document_id, ctx.deps.documents_cache or [], ctx.deps.extractor, ctx.deps.fhir
+                document_id, ctx.deps.patient_id, ctx.deps.extractor, ctx.deps.fhir
             )
         except ExtractionError:
             # The document could not be read — return no facts so the worker reports the gap
@@ -313,7 +310,7 @@ def build_evidence_retriever(model: Model) -> Agent[GraphDeps, RetrieverOutput]:
     @agent.tool(prepare=budgeted(BudgetedTool.SEARCH_GUIDELINES))
     async def search_guidelines(
         ctx: RunContext[GraphDeps], query: str
-    ) -> list[RetrievedGuideline]:
+    ) -> list[RetrievedGuideline] | str:
         """Retrieve the top guideline snippets for a query via the hybrid-RAG pipeline.
 
         Returns only each snippet's ``chunk_id`` and ``text`` — the fields the model cites and
@@ -324,12 +321,23 @@ def build_evidence_retriever(model: Model) -> Agent[GraphDeps, RetrieverOutput]:
         Args:
             ctx: The run context (holds the retriever and the chunk registry).
             query: A focused retrieval query built from the clinical question and patient facts.
+
+        Returns:
+            Snippets ranked best-first, or a sentence saying the corpus does not cover the topic.
+            That sentence names the corpus as CLOSED.
         """
         snippets = await ctx.deps.retriever.retrieve(query)
         # Record the FULL snippets so the grounding gate can resolve, and the response serializer
         # can stamp provenance for, any chunk the worker cites — even though the model only sees a
         # trimmed view of them.
         ctx.deps.chunks.record_all(snippets)
+        if not snippets:
+            return (
+                "No guideline in this corpus covers that topic. The corpus is a small fixed set of "
+                "clinical topics and this search read all of it, so a reworded query searches the "
+                "same content and will return the same nothing. Report that no guideline evidence "
+                "was found."
+            )
         return [RetrievedGuideline.from_snippet(snippet) for snippet in snippets]
 
     @agent.output_validator

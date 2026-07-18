@@ -928,6 +928,28 @@ body.ai-copilot-resizing {
     white-space: nowrap;
 }
 
+/* A value that can prove itself against the scan. Deliberately quiet — a dotted underline that
+   firms up on hover, not a link colour: every cell in the table would otherwise read as a call to
+   action and the panel would stop scanning as data. The affordance is discovered on hover, which is
+   the moment a physician is actually asking "where did this come from?". */
+.ai-copilot__labs-cell--provable {
+    cursor: pointer;
+    text-decoration: underline dotted rgb(0 0 0 / 0.25);
+    text-underline-offset: 0.2em;
+}
+
+.ai-copilot__labs-cell--provable:hover,
+.ai-copilot__labs-cell--provable:focus-visible {
+    text-decoration: underline solid var(--copilot-accent);
+    outline: none;
+}
+
+.ai-copilot__labs-cell--provable:focus-visible {
+    /* Keyboard users get a real focus ring; the underline alone is not a visible focus indicator. */
+    box-shadow: 0 0 0 2px var(--copilot-accent);
+    border-radius: 2px;
+}
+
 /* Out-of-range is the whole reason a physician scans a panel — and it is the extractor's own flag,
    not the model's reading of it. A `no` flag renders as nothing at all. */
 .ai-copilot__labs-value--abnormal {

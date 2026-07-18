@@ -1318,17 +1318,92 @@
             value.textContent = detail.unit
                 ? claim.source.value + ' ' + detail.unit
                 : claim.source.value;
+            makeCellProvable(value, claim, boxed, 'value');
             row.appendChild(value);
 
             var ref = document.createElement('td');
             ref.className = 'ai-copilot__labs-ref';
             ref.textContent = detail.reference_range || '';
+            // The range is stamped here as system-authored fact, and a wrong one flips a normal
+            // value to abnormal — so it has to be checkable in its own right, not just displayed.
+            makeCellProvable(ref, claim, boxed, 'reference_range');
             row.appendChild(ref);
 
             body.appendChild(row);
         });
         table.appendChild(body);
         return table;
+    }
+
+    /**
+     * The box proving ONE field of a fact: the primary box for `value`, else a qualifier's.
+     *
+     * @param {object} claim The fact.
+     * @param {string} field Which value to prove — 'value', 'reference_range', 'unit', ...
+     * @returns {object|null} A `{page, x, y, width, height}` box, or null when that value was never
+     *                        located (it still displays, it just cannot be pointed at).
+     */
+    function boxForField(claim, field) {
+        var source = claim.source || {};
+        if (field === 'value') {
+            return source.bounding_box || null;
+        }
+        var matches = (source.field_boxes || []).filter(function (entry) {
+            return entry.field === field;
+        });
+        return matches.length ? matches[0] : null;
+    }
+
+    /**
+     * Make one table cell prove itself against the scan, when that value was located.
+     *
+     * This is the progressive part of click-to-source: the page stays as calm as it was — one box
+     * per fact — until the physician interrogates a SPECIFIC value, which highlights exactly that
+     * cell and nothing else. Verifying a reference range is a targeted question ("where did 0.70-1.30
+     * come from?"), not a reason to outline all 112 cells of a 28-row report.
+     *
+     * A cell whose value was never located silently stays inert rather than offering a click that
+     * would highlight something which does not support it.
+     *
+     * @param {HTMLElement} cell The cell to wire.
+     * @param {object} claim The fact the cell belongs to.
+     * @param {Array<object>} boxed The document page's boxed facts, defining the badge numbering.
+     * @param {string} field Which of the fact's values this cell shows.
+     */
+    function makeCellProvable(cell, claim, boxed, field) {
+        var box = boxForField(claim, field);
+        var source = claim.source || {};
+        if (!box || !source.document_id) {
+            return;
+        }
+        cell.classList.add('ai-copilot__labs-cell--provable');
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('tabindex', '0');
+        cell.title = labels.checkSource;
+        // Carry the fact's own badge number so the overlay labels this rectangle the same way the
+        // list above does, rather than restarting at 1 for a single-box view.
+        var ordinal = boxed.indexOf(claim) + 1;
+        var open = function () {
+            openSourceInChartTab(
+                String(source.document_id),
+                box.page,
+                [{
+                    x: box.x,
+                    y: box.y,
+                    width: box.width,
+                    height: box.height,
+                    n: ordinal > 0 ? ordinal : null
+                }],
+                docKindLabel(source)
+            );
+        };
+        cell.addEventListener('click', open);
+        cell.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                open();
+            }
+        });
     }
 
     /**

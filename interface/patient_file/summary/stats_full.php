@@ -21,6 +21,7 @@ require_once($srcdir . '/lists.inc.php');
 require_once($webserver_root . '/custom/code_types.inc.php');
 require_once($srcdir . '/options.inc.php');
 
+use OpenEMR\ClinicalCopilot\DerivedFactBadge;
 use OpenEMR\Common\Acl\AccessDeniedHelper;
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
@@ -260,7 +261,16 @@ $oemr_ui = new OemrUI($arrOeUiSettings);
                     }
 
                     $condition = (OEGlobalsBag::getInstance()->getBoolean('erx_enable') && OEGlobalsBag::getInstance()->getBoolean('erx_medication_display') && $t == 'medication') ? "AND erx_uploaded != '1'" :  '';
-                    $pres = sqlStatement("SELECT * FROM lists WHERE pid = ? AND type = ? $condition ORDER BY begdate", [$pid, $t]);
+                    // LEFT JOIN lists_medication only to expose request_intent (NULL for non-med
+                    // types and baseline meds) — drives the AI-proposed badge below. At most one
+                    // child row per list, so no fan-out. erx_uploaded/begdate are lists-only columns,
+                    // so the unqualified references in $condition/ORDER BY stay unambiguous.
+                    $pres = sqlStatement(
+                        "SELECT lists.*, lm.request_intent AS lm_request_intent"
+                        . " FROM lists LEFT JOIN lists_medication lm ON lm.list_id = lists.id"
+                        . " WHERE lists.pid = ? AND lists.type = ? $condition ORDER BY begdate",
+                        [$pid, $t]
+                    );
                     $noIssues = false;
                     $nothingRecorded = false;
 
@@ -369,6 +379,10 @@ $oemr_ui = new OemrUI($arrOeUiSettings);
                             $fullModDate = trim(DateFormatterUtils::oeFormatDateTime($row['modifydate']) ?? '');
 
                             $outcome = ($row['outcome']) ?  generate_display_field(['data_type' => 1, 'list_id' => 'outcome'], $row['outcome']) : false;
+
+                            // Flag rows the Co-Pilot proposed but a clinician has not confirmed.
+                            $aiUnconfirmed = ($t == 'allergy' && ($row['verification'] ?? '') === DerivedFactBadge::ALLERGY_VERIFICATION)
+                                || ($t == 'medication' && ($row['lm_request_intent'] ?? '') === DerivedFactBadge::MEDICATION_INTENT);
                             ?>
                         <div class="list-group-item p-1">
                             <div class="summary m-0 p-0 d-flex w-100 justify-content-end align-content-center">
@@ -383,6 +397,7 @@ $oemr_ui = new OemrUI($arrOeUiSettings);
                                     <a href="#" data-issue-id="<?php echo attr($row['id']); ?>" class="font-weight-bold issue_title" data-toggle="tooltip" data-placement="right" title="<?php echo text(($diag ?? '') . ": " . ($codedesc ?? '')); ?>">
                                         <?php echo text($disptitle); ?>
                                     </a>&nbsp;(<?php echo $statusCompute; ?><?php echo (!$resolved && $outcome) ? ", $outcome" : ""; ?>)
+                                    <?php echo DerivedFactBadge::html($aiUnconfirmed, 'ml-1'); ?>
                                     <?php
                                     if ($focustitles[0] == "Allergies") :
                                         echo generate_display_field(['data_type' => '1','list_id' => 'reaction'], $row['reaction']);

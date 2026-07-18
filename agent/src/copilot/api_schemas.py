@@ -36,6 +36,12 @@ class ExtractionResponse(BaseModel):
 
     document_id: str = Field(description="The extracted DocumentReference id")
     doc_type: DocType = Field(description="Which schema the document's category selected")
+    # Spelled out rather than using extractor.ExtractedReport, deliberately. Annotating with the
+    # alias makes FastAPI hoist a named `ExtractedReport` component and emit a $ref here instead of
+    # the inline anyOf — a change to the PUBLISHED contract (agent/openapi.json) for no safety gain,
+    # because the drift the alias guards against cannot occur at a Pydantic field: a stale union is
+    # validated at runtime and fails loudly on the first request carrying the missing arm, rather
+    # than typechecking clean the way a plain helper annotation does.
     report: LabReport | IntakeForm | MedicationList = Field(
         description="LabReport for a lab_pdf, IntakeForm for an intake_form, "
         "MedicationList for a medication_list"

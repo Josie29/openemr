@@ -15,6 +15,7 @@ from copilot.graph.workers import build_intake_extractor
 from copilot.ingestion.extractor import (
     DocumentExtractor,
     ExtractedDocument,
+    ExtractedReport,
     FixtureOcrBackend,
     FixturePdfByteSource,
     map_lab_report,
@@ -29,7 +30,7 @@ from copilot.ingestion.registry import (
     DocumentFactRegistry,
     LabFactHandle,
 )
-from copilot.ingestion.schemas import AbnormalFlag, DocType, IntakeForm, LabReport, LabResult
+from copilot.ingestion.schemas import AbnormalFlag, DocType, LabReport, LabResult
 from copilot.retrieval import ChunkRegistry
 from copilot.schemas import CitationSourceType, Claim, LabPdfCitation, SourceRef
 from copilot.verification import FetchLog, ground_claims
@@ -63,11 +64,13 @@ def _lab_handles(handles: list[DocumentFactHandle], test_name: str) -> Iterator[
     return (h for h in handles if isinstance(h, LabFactHandle) and h.test_name == test_name)
 
 
-def _find(report: LabReport | IntakeForm, test_name: str) -> LabResult | None:
+def _find(report: ExtractedReport, test_name: str) -> LabResult | None:
     """Return the extracted result with the given test name, or None.
 
-    Takes the union `ExtractedDocument.report` now carries (a lab_pdf maps to a LabReport, an
-    intake_form to an IntakeForm) and narrows to the lab side these tests are about.
+    Takes the union `ExtractedDocument.report` carries (a lab_pdf maps to a LabReport, an
+    intake_form to an IntakeForm, a medication_list to a MedicationList) and narrows to the lab side
+    these tests are about. Annotated with the alias rather than a spelled-out union so a new
+    document type cannot leave this helper declaring a stale, narrower type than it is handed.
     """
     if not isinstance(report, LabReport):
         return None

@@ -377,14 +377,21 @@ class FixturePdfByteSource:
 
 # --- Extraction result + facade ----------------------------------------------------------------
 
+# The strict schemas a document type can map to — one per DocType. Named because the union is
+# structural, not incidental: adding a document type widens it in exactly one place, and every
+# consumer that must handle the new arm becomes a type error instead of silently narrowing. Spelling
+# the union out per-site is what let `medication_list` land while a test helper still declared the
+# two-arm version and typechecked clean against a value that could be any of three.
+type ExtractedReport = LabReport | IntakeForm | MedicationList
+
 
 @dataclass(frozen=True)
 class ExtractedDocument:
     """One document's strict extraction: its cited facts, boxed for click-to-source.
 
     ``report`` is the schema the document's TYPE selected — a ``LabReport`` for a lab_pdf, an
-    ``IntakeForm`` for an intake_form. Which one it is was decided by the document's OpenEMR
-    category, never by the model.
+    ``IntakeForm`` for an intake_form, a ``MedicationList`` for a medication_list. Which one it is
+    was decided by the document's OpenEMR category, never by the model.
 
     Every fact's ``bounding_box`` is already in **PDF points** (top-left origin) — the exact space
     the overlay renders in — so nothing downstream converts coordinates (the JOS-57 seam).
@@ -392,12 +399,12 @@ class ExtractedDocument:
 
     document_id: str
     doc_type: DocType
-    report: LabReport | IntakeForm | MedicationList
+    report: ExtractedReport
 
 
 def _map_report(
     doc_type: DocType, raw: dict[str, Any], pdf_bytes: bytes
-) -> LabReport | IntakeForm | MedicationList:
+) -> ExtractedReport:
     """Map a raw OCR response into the strict schema the document's type names.
 
     The single place a document type selects its schema. Exhaustive over ``DocType`` with no default

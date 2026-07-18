@@ -429,7 +429,7 @@
         "type": "object"
       },
       "ExtractionResponse": {
-        "description": "``GET /documents/{id}/extraction`` \u2014 one document's strict-schema facts.\n\n``report`` is the schema the document's TYPE selected \u2014 a ``LabReport`` for a ``lab_pdf``, an\n``IntakeForm`` for an ``intake_form``, a ``MedicationList`` for a ``medication_list`` \u2014 with each\nfact carrying its citation (bounding box + verbatim value) and per-value confidence. ``doc_type``\nis the human-readable discriminant, resolved server-side from the document's OpenEMR category\n(never a caller input).",
+        "description": "``GET /documents/{id}/extraction`` \u2014 one document's strict-schema facts.\n\n``report`` is the schema the document's TYPE selected \u2014 a ``LabReport`` for a ``lab_pdf``, an\n``IntakeForm`` for an ``intake_form``, a ``MedicationList`` for a ``medication_list`` \u2014 with\neach fact carrying its citation (bounding box + verbatim value) and per-value confidence.\n``doc_type`` is the human-readable discriminant, resolved server-side from the document's\nOpenEMR category (never a caller input).",
         "properties": {
           "doc_type": {
             "$ref": "#/components/schemas/DocType",

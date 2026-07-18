@@ -50,7 +50,7 @@ def _lab_fact(result: LabResult) -> dict[str, Any] | None:
     box = result.citation.bounding_box
     if result.loinc is None or box is None:
         return None
-    return {
+    fact: dict[str, Any] = {
         "type": "lab",
         "loinc": result.loinc,
         "label": result.test_name,
@@ -62,6 +62,8 @@ def _lab_fact(result: LabResult) -> dict[str, Any] | None:
         "bbox": _box_payload(box),
         "confidence": result.confidence,
     }
+    _attach_field_boxes(fact, {"unit": result.unit, "reference_range": result.reference_range})
+    return fact
 
 
 def _allergy_fact(allergy: Allergy) -> dict[str, Any]:
@@ -83,6 +85,7 @@ def _allergy_fact(allergy: Allergy) -> dict[str, Any]:
         "confidence": allergy.confidence,
     }
     _attach_optional_box(fact, allergy.citation.bounding_box)
+    _attach_field_boxes(fact, {"reaction": allergy.reaction})
     return fact
 
 
@@ -106,6 +109,7 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
         "confidence": medication.confidence,
     }
     _attach_optional_box(fact, medication.citation.bounding_box)
+    _attach_field_boxes(fact, {"dose": medication.dose, "frequency": medication.frequency})
     return fact
 
 
@@ -133,6 +137,7 @@ def _family_history_fact(item: FamilyHistoryItem) -> dict[str, Any] | None:
         "confidence": item.confidence,
     }
     _attach_optional_box(fact, item.citation.bounding_box)
+    _attach_field_boxes(fact, {"relation": item.relation})
     return fact
 
 
@@ -181,6 +186,33 @@ def _demographic_facts(demographics: Demographics) -> list[dict[str, Any]]:
         _attach_optional_box(fact, cited.citation.bounding_box)
         facts.append(fact)
     return facts
+
+
+def _attach_field_boxes(fact: dict[str, Any], fields: dict[str, CitedText | None]) -> None:
+    """Attach ``field_boxes`` — where each SECONDARY value of this fact sits on the page.
+
+    Mutates ``fact`` in place, and only when at least one qualifier was located. The fact's own
+    ``bbox``/``page`` stay exactly as they were: they are the primary value's box, the one the
+    persist endpoint reads, and the only box the sidebar draws by default. These entries are what
+    let the UI prove a *specific* cell on demand — the reference range behind an abnormal flag, the
+    dose behind a medication — without blanketing the page in rectangles.
+
+    A qualifier the locator could not place is deliberately absent rather than sent with a null box:
+    its text still ships above, and the UI marks it unverified instead of drawing a rectangle that
+    proves nothing.
+
+    Args:
+        fact: The wire dict to extend.
+        fields: The fact's secondary values, keyed by the field name the UI labels them with.
+    """
+    entries = []
+    for name, cited in fields.items():
+        box = cited.citation.bounding_box if cited is not None else None
+        if box is None:
+            continue
+        entries.append({"field": name, "page": box.page, "bbox": _box_payload(box)})
+    if entries:
+        fact["field_boxes"] = entries
 
 
 def _attach_optional_box(fact: dict[str, Any], box: BoundingBox | None) -> None:

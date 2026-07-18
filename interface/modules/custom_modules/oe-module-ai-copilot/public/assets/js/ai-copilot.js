@@ -1164,7 +1164,21 @@
                 doc_type: group.doc_type,
                 page: fact.page,
                 value: fact.value,
-                bounding_box: { page: fact.page, x: box.x, y: box.y, width: box.w, height: box.h }
+                bounding_box: { page: fact.page, x: box.x, y: box.y, width: box.w, height: box.h },
+                // Where this fact's QUALIFIERS sit (unit, reference range) — carried through but not
+                // drawn by default, which is what keeps the page as calm as it is today. They are
+                // what a per-cell "prove this one" affordance highlights on demand; a qualifier the
+                // locator could not place is simply absent, never a rectangle proving nothing.
+                field_boxes: (fact.field_boxes || []).map(function (entry) {
+                    return {
+                        field: entry.field,
+                        page: entry.page,
+                        x: entry.bbox.x,
+                        y: entry.bbox.y,
+                        width: entry.bbox.w,
+                        height: entry.bbox.h
+                    };
+                })
             },
             citations: [{
                 source_type: 'lab_pdf',

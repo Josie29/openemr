@@ -100,7 +100,10 @@ def test_lab_result_maps_to_the_persist_endpoint_field_names() -> None:
     assert len(groups) == 1
     assert groups[0]["document_id"] == "doc-lab"
     assert groups[0]["doc_type"] == "lab_pdf"
-    fact = groups[0]["facts"][0]
+    # `field_boxes` is additive overlay data the persist endpoint ignores, so it is excluded here to
+    # keep this an exact check of the PHP-facing keys. Its own contract is pinned by
+    # test_qualifier_boxes_ride_alongside_the_primary_box.
+    fact = {key: value for key, value in groups[0]["facts"][0].items() if key != "field_boxes"}
     assert fact == {
         "type": "lab",
         "loinc": "4548-4",
@@ -113,6 +116,52 @@ def test_lab_result_maps_to_the_persist_endpoint_field_names() -> None:
         "bbox": {"x": 72.0, "y": 144.0, "w": 96.0, "h": 12.0},
         "confidence": None,
     }
+
+
+def test_qualifier_boxes_ride_alongside_the_primary_box() -> None:
+    """A fact's located qualifiers reach the browser without changing what it draws by default.
+
+    `bbox`/`page` stay the primary value's box — the one the persist endpoint reads and the only one
+    the sidebar draws — so the overlay is as calm as it was. `field_boxes` is what lets the UI prove
+    a SPECIFIC cell on demand (the reference range behind an abnormal flag) instead of blanketing
+    the page. If these stop being emitted, per-field geometry exists in the model but can never be
+    shown, which is the state this whole change set exists to leave behind.
+    """
+    fact = derived_facts_for({"doc-lab": _lab_document(_lab_result())})[0]["facts"][0]
+
+    # The primary box is untouched — same keys, same values as before.
+    assert fact["bbox"] == {"x": 72.0, "y": 144.0, "w": 96.0, "h": 12.0}
+    assert fact["page"] == 1
+
+    by_field = {entry["field"]: entry for entry in fact["field_boxes"]}
+    assert sorted(by_field) == ["reference_range", "unit"]
+    assert by_field["unit"]["bbox"] == {"x": 72.0, "y": 144.0, "w": 96.0, "h": 12.0}
+    assert by_field["unit"]["page"] == 1
+
+
+def test_an_unlocatable_qualifier_is_omitted_rather_than_sent_boxless() -> None:
+    """A qualifier with no box does not appear in field_boxes — its text still ships.
+
+    Sending it with a null box would invite the UI to draw something; omitting it keeps "we could
+    not place this" distinguishable from "here is where it is", which is the whole point of boxing
+    qualifiers in the first place.
+    """
+    result = LabResult(
+        test_name="Hemoglobin A1c",
+        loinc="4548-4",
+        value="8.2",
+        # Located, so it earns an entry...
+        unit=CitedText(value="%", citation=_citation("%")),
+        # ...whereas this one could not be placed, so it must not.
+        reference_range=CitedText(value="4.0-5.6", citation=_citation("4.0-5.6", boxed=False)),
+        abnormal_flag=AbnormalFlag.HIGH,
+        citation=_citation("8.2"),
+    )
+
+    fact = derived_facts_for({"doc-lab": _lab_document(result)})[0]["facts"][0]
+
+    assert [entry["field"] for entry in fact["field_boxes"]] == ["unit"]
+    assert fact["range"] == "4.0-5.6", "the unlocatable value still ships as text"
 
 
 def test_lab_result_without_a_loinc_code_is_dropped() -> None:

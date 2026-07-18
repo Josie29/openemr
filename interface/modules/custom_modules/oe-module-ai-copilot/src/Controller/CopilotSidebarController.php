@@ -37,19 +37,24 @@ final readonly class CopilotSidebarController
      * conversation-tailored prompts are a later increment.
      *
      * The set spans the agent's capabilities without assuming any specific condition, so the empty
-     * state doubles as a capability demo for any patient: a record summary, a guideline question
-     * scoped to whatever problems the chart holds, an uploaded-document (vision extraction)
-     * question, and a synthesis question pairing extracted document facts with matching guidance.
-     * One prompt per route, deliberately — a narrower variant of a route already covered would pad
-     * the empty state without demonstrating anything new. The document prompts assume an uploaded
-     * document is on file (the demo patient has a lab report and an intake form); for a patient
-     * without one the agent reports that none is on file.
+     * state doubles as a capability demo for any patient: a record summary, a lab-trend question
+     * that plots a result over time, a guideline question scoped to whatever problems the chart
+     * holds, an uploaded-document (vision extraction) question, and a synthesis question pairing
+     * extracted document facts with matching guidance. One prompt per route, deliberately — a
+     * narrower variant of a route already covered would pad the empty state without demonstrating
+     * anything new. The document prompts assume an uploaded document is on file (the demo patient
+     * has a lab report and an intake form); for a patient without one the agent reports that none
+     * is on file. The lab-trend prompt likewise renders its chart only when the patient has two or
+     * more results for the analyte; otherwise the agent answers in prose.
      *
      * @var list<string>
      */
     private const STARTER_PROMPTS = [
         // Record route (extract_intake -> answer): orientation summary from the chart.
         'Summarize this patient',
+        // Lab-trend route (get_lab_observations -> answer): reads the structured lab history and, when
+        // there are two or more results for the analyte, the sidebar plots them as a trend chart.
+        'How has hemoglobin changed over time?',
         // Record + guideline: reads the chart's problems, then retrieves guidance matching them.
         "What do guidelines recommend for this patient's active problems?",
         // Vision route (attach_and_extract -> answer): OCR the uploaded lab report, no retrieval.

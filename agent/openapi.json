@@ -36,14 +36,13 @@
           "reaction": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Reaction as printed, e.g. 'hives'. Null if not given.",
-            "title": "Reaction"
+            "description": "Reaction as printed, e.g. 'hives'. Null if not given."
           },
           "substance": {
             "description": "Allergen/substance as printed, e.g. 'Penicillin'.",
@@ -514,14 +513,13 @@
           "relation": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Affected relative, e.g. 'mother'. Null if not given.",
-            "title": "Relation"
+            "description": "Affected relative, e.g. 'mother'. Null if not given."
           }
         },
         "required": [
@@ -658,14 +656,13 @@
           "reference_range": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Reference range verbatim, e.g. '4.0-5.6'. Null if not printed.",
-            "title": "Reference Range"
+            "description": "Reference range verbatim, e.g. '4.0-5.6'. Null if not printed."
           },
           "test_name": {
             "description": "Analyte/test name exactly as printed, e.g. 'Hemoglobin A1c'.",
@@ -676,14 +673,13 @@
           "unit": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Unit as printed, e.g. '%'. Null if unitless/qualitative.",
-            "title": "Unit"
+            "description": "Unit as printed, e.g. '%'. Null if unitless/qualitative."
           },
           "value": {
             "description": "Result value verbatim, e.g. '8.2' or 'Positive'. Never round or convert.",

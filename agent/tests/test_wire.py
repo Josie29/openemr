@@ -30,8 +30,8 @@ def _lab_result(loinc: str | None = "4548-4") -> LabResult:
         test_name="Hemoglobin A1c",
         loinc=loinc,
         value="8.2",
-        unit="%",
-        reference_range="4.0-5.6",
+        unit=CitedText(value="%", citation=_citation("%")),
+        reference_range=CitedText(value="4.0-5.6", citation=_citation("4.0-5.6")),
         abnormal_flag=AbnormalFlag.HIGH,
         citation=_citation("8.2"),
     )
@@ -54,11 +54,17 @@ def _intake_document(document_id: str = "doc-intake") -> ExtractedDocument:
             ),
             chief_concern=CitedText(value="cough", citation=_citation("cough")),
             allergies=[
-                Allergy(substance="Penicillin", reaction="hives", citation=_citation("Penicillin"))
+                Allergy(
+                    substance="Penicillin",
+                    reaction=CitedText(value="hives", citation=_citation("hives")),
+                    citation=_citation("Penicillin"),
+                )
             ],
             family_history=[
                 FamilyHistoryItem(
-                    condition="diabetes", relation="mother", citation=_citation("diabetes")
+                    condition="diabetes",
+                    relation=CitedText(value="mother", citation=_citation("mother")),
+                    citation=_citation("diabetes"),
                 )
             ],
         ),
@@ -163,7 +169,9 @@ def test_family_history_without_a_relation_is_dropped() -> None:
             family_history=[
                 FamilyHistoryItem(condition="asthma", citation=_citation("asthma")),
                 FamilyHistoryItem(
-                    condition="diabetes", relation="mother", citation=_citation("diabetes")
+                    condition="diabetes",
+                    relation=CitedText(value="mother", citation=_citation("mother")),
+                    citation=_citation("diabetes"),
                 ),
             ],
         ),

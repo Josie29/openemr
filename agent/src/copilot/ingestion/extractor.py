@@ -625,7 +625,7 @@ def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport
             # No text-layer word, no table geometry, no page box — drop rather than fabricate.
             logger.warning("dropping lab result with no locatable box", extra={"test": test_name})
             continue
-        results.append(_build_lab_result(raw, located, page, geometry))
+        results.append(_build_lab_result(raw, located, page, geometry, state))
     return LabReport(results=results)
 
 
@@ -860,7 +860,18 @@ def _map_allergies(
         if citation is None:
             continue
         items.append(
-            Allergy(substance=substance, reaction=_clean(raw.get("reaction")), citation=citation)
+            Allergy(
+                substance=substance,
+                reaction=_secondary(
+                    FieldId.ALLERGIES_REACTION,
+                    _clean(raw.get("reaction")),
+                    (substance,),
+                    geometry,
+                    state,
+                    DocType.INTAKE_FORM,
+                ),
+                citation=citation,
+            )
         )
     return items
 
@@ -885,7 +896,16 @@ def _map_family_history(
             continue
         items.append(
             FamilyHistoryItem(
-                condition=condition, relation=_clean(raw.get("relation")), citation=citation
+                condition=condition,
+                relation=_secondary(
+                    FieldId.FAMILY_HISTORY_RELATION,
+                    _clean(raw.get("relation")),
+                    (condition,),
+                    geometry,
+                    state,
+                    DocType.INTAKE_FORM,
+                ),
+                citation=citation,
             )
         )
     return items
@@ -952,7 +972,11 @@ def _ground_loinc(raw: dict[str, Any], geometry: DocumentGeometry) -> str | None
 
 
 def _build_lab_result(
-    raw: dict[str, Any], located: LocatedBox, page: dict[str, Any], geometry: DocumentGeometry
+    raw: dict[str, Any],
+    located: LocatedBox,
+    page: dict[str, Any],
+    geometry: DocumentGeometry,
+    state: LocatorState,
 ) -> LabResult:
     """Build one cited ``LabResult`` from a document_annotation row and its located box.
 
@@ -962,12 +986,29 @@ def _build_lab_result(
     losing the result would cost the answer.
     """
     value = str(raw.get("value", "")).strip()
+    test_name = str(raw.get("test_name", "")).strip()
     return LabResult(
-        test_name=str(raw.get("test_name", "")).strip(),
+        test_name=test_name,
         loinc=_ground_loinc(raw, geometry),
         value=value,
-        unit=_clean(raw.get("unit")),
-        reference_range=_clean(raw.get("reference_range")),
+        # Anchored on the row's own test name, so a unit or range is read from THIS analyte's row
+        # rather than matching an identical one printed against another.
+        unit=_secondary(
+            FieldId.LAB_RESULT_UNIT,
+            _clean(raw.get("unit")),
+            (test_name,),
+            geometry,
+            state,
+            DocType.LAB_PDF,
+        ),
+        reference_range=_secondary(
+            FieldId.LAB_RESULT_REFERENCE_RANGE,
+            _clean(raw.get("reference_range")),
+            (test_name,),
+            geometry,
+            state,
+            DocType.LAB_PDF,
+        ),
         collection_date=_parse_date(raw.get("collection_date")),
         abnormal_flag=_map_abnormal(raw.get("abnormal_flag")),
         citation=Citation(

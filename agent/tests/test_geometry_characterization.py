@@ -8,7 +8,7 @@ import pytest
 from copilot.ingestion.extractor import map_lab_report
 from copilot.ingestion.geometry.document import DocumentGeometry
 from copilot.ingestion.geometry.words import extract_word_boxes
-from copilot.ingestion.schemas import LabReport
+from copilot.ingestion.schemas import LabReport, printed_text
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "documents"
 _GOLDENS = _FIXTURES / "goldens"
@@ -47,8 +47,19 @@ def _snapshot(name: str) -> list[dict[str, Any]]:
             # test was run, and the write-back would persist it under the wrong Observation.code.
             "loinc": result.loinc,
             "value": result.value,
-            "unit": result.unit,
-            "reference_range": result.reference_range,
+            "unit": printed_text(result.unit),
+            "reference_range": printed_text(result.reference_range),
+            # Both are SECONDARY fields with their own box now. Pinned as booleans, not coordinates:
+            # this net exists to catch the PRIMARY value box silently moving, and the secondaries'
+            # exact rectangles are asserted by the column test below. What matters here is that they
+            # do not regress to being unlocatable.
+            "unit_located": (
+                result.unit is not None and result.unit.citation.bounding_box is not None
+            ),
+            "reference_range_located": (
+                result.reference_range is not None
+                and result.reference_range.citation.bounding_box is not None
+            ),
             "collection_date": (
                 result.collection_date.isoformat() if result.collection_date else None
             ),
@@ -105,3 +116,30 @@ def test_lab_geometry_is_unchanged(name: str) -> None:
 
     expected: list[dict[str, Any]] = json.loads(golden_path.read_text())
     _assert_matches(actual, expected)
+
+
+def test_secondary_fields_are_boxed_in_their_own_columns() -> None:
+    """A unit and a reference range are boxed in their OWN cells, on the analyte's own row.
+
+    This is the per-field geometry that makes each value checkable. LabDetail stamps unit and
+    reference range onto the sidebar as system-authored fact, and a wrong range flips a normal value
+    to abnormal — so a box that merely repeated the value's rectangle, or landed on a neighbouring
+    analyte's row, would look like proof while proving nothing.
+    """
+    name = "sergio-angulo-lab-report"
+    ocr: dict[str, Any] = json.loads((_FIXTURES / "extractions" / f"{name}.ocr.json").read_text())
+    words = extract_word_boxes((_FIXTURES / "pdfs" / f"{name}.pdf").read_bytes())
+    report = map_lab_report(ocr, DocumentGeometry.from_parts(ocr, words))
+
+    glucose = next(result for result in report.results if result.test_name == "Glucose, Fasting")
+    assert glucose.unit is not None and glucose.reference_range is not None
+    value_box = glucose.citation.bounding_box
+    range_box = glucose.reference_range.citation.bounding_box
+    unit_box = glucose.unit.citation.bounding_box
+    assert value_box is not None and range_box is not None and unit_box is not None
+
+    # The report's columns run RESULT | FLAG | REFERENCE RANGE | UNITS, left to right...
+    assert value_box.x < range_box.x < unit_box.x
+    # ...and all three sit on this analyte's own row, so the range qualifies THIS result.
+    assert abs(range_box.y - value_box.y) < 12
+    assert abs(unit_box.y - value_box.y) < 12

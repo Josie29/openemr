@@ -8,6 +8,7 @@ from copilot.ingestion.schemas import (
     AbnormalFlag,
     BoundingBox,
     Citation,
+    CitedText,
     DocType,
     LabReport,
     LabResult,
@@ -152,7 +153,7 @@ def _lab_extraction() -> ExtractedDocument:
                     test_name="Hemoglobin A1c",
                     loinc="4548-4",
                     value="8.2",
-                    unit="%",
+                    unit=CitedText(value="%", citation=Citation(quote_or_value="%")),
                     abnormal_flag=AbnormalFlag.HIGH,
                     citation=Citation(
                         quote_or_value="8.2",

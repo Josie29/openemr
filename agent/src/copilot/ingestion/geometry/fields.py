@@ -27,6 +27,8 @@ class FieldId(StrEnum):
     """
 
     LAB_RESULT_VALUE = "lab.result.value"
+    LAB_RESULT_UNIT = "lab.result.unit"
+    LAB_RESULT_REFERENCE_RANGE = "lab.result.reference_range"
     DEMOGRAPHICS_FULL_NAME = "demographics.full_name"
     DEMOGRAPHICS_DATE_OF_BIRTH = "demographics.date_of_birth"
     DEMOGRAPHICS_SEX = "demographics.sex"
@@ -37,7 +39,9 @@ class FieldId(StrEnum):
     CURRENT_MEDICATIONS_DOSE = "current_medications[].dose"
     CURRENT_MEDICATIONS_FREQUENCY = "current_medications[].frequency"
     ALLERGIES = "allergies[]"
+    ALLERGIES_REACTION = "allergies[].reaction"
     FAMILY_HISTORY = "family_history[]"
+    FAMILY_HISTORY_RELATION = "family_history[].relation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +73,13 @@ def _chain(*locators: ValueLocator) -> LocatorChain:
     return LocatorChain(locators=tuple(locators))
 
 
+# SECONDARY fields (a dose, a reference range) are exact-or-nothing. A coarse fallback box is worse
+# than none for them: the whole point is to prove THIS cell, and a row-wide band claims to prove a
+# cell it does not. Missing the floor costs only the box — extractor._secondary keeps the parent
+# fact and cites the value without one, which the UI shows as unverified.
+_SECONDARY_FLOOR = BoxPrecision.EXACT
+
+
 # The lab chain, in the order lab extraction has always tried: the exact text-layer join first, the
 # coarse OCR row band when the PDF has no text layer, and the page as a last resort.
 #
@@ -88,6 +99,34 @@ LAB_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
                 PageBoxLocator(),
             ),
             floor=BoxPrecision.PAGE,
+        ),
+        # Both SECONDARY, anchored on the row's own test name like the value is. These are the two
+        # fields LabDetail stamps onto the sidebar as system-authored fact — a wrong reference range
+        # flips a normal value to abnormal — so each must be checkable in its own column rather than
+        # transported as unlocatable text. `abnormal_flag` is deliberately NOT located: it is a
+        # single character ("H"/"L") that matches everywhere on the page, and what it asserts is
+        # derived from the value and the range, which are both boxed here.
+        FieldId.LAB_RESULT_REFERENCE_RANGE: FieldSpec(
+            field=FieldId.LAB_RESULT_REFERENCE_RANGE,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0),
+                    max_span_words=3,
+                    cursor_key="lab.reference_range",
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        FieldId.LAB_RESULT_UNIT: FieldSpec(
+            field=FieldId.LAB_RESULT_UNIT,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0), max_span_words=2, cursor_key="lab.unit"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
         ),
     }
 )
@@ -167,6 +206,30 @@ INTAKE_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             chain=_chain(CheckboxLocator(), SectionSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
+        # SECONDARY, anchored on the entry each qualifies — the allergen, the condition — so a
+        # reaction is read from ITS allergy's row and not from the next one. Anchoring is what makes
+        # one spec serve both fixtures: v1 renders these as table rows, v2 as "Peanuts — hives" on a
+        # line, and in each the qualifier sits after its anchor on the same row.
+        FieldId.ALLERGIES_REACTION: FieldSpec(
+            field=FieldId.ALLERGIES_REACTION,
+            labels=("reaction", "reaction / severity"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=8, cursor_key="allergy.reaction"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        FieldId.FAMILY_HISTORY_RELATION: FieldSpec(
+            field=FieldId.FAMILY_HISTORY_RELATION,
+            labels=("relation", "relative", "who"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=6, cursor_key="family.relation"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
     }
 )
 
@@ -200,10 +263,9 @@ MEDICATION_LIST_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             chain=_chain(
                 RowSpanLocator(
                     anchor_region=(0.0, 300.0), max_span_words=6, cursor_key="medication.dose"
-                ),
-                LineBandLocator(),
+                )
             ),
-            floor=_MEDICATION_LIST_FLOOR,
+            floor=_SECONDARY_FLOOR,
         ),
         FieldId.CURRENT_MEDICATIONS_FREQUENCY: FieldSpec(
             field=FieldId.CURRENT_MEDICATIONS_FREQUENCY,
@@ -211,10 +273,9 @@ MEDICATION_LIST_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             chain=_chain(
                 RowSpanLocator(
                     anchor_region=(0.0, 300.0), max_span_words=8, cursor_key="medication.frequency"
-                ),
-                LineBandLocator(),
+                )
             ),
-            floor=_MEDICATION_LIST_FLOOR,
+            floor=_SECONDARY_FLOOR,
         ),
     }
 )

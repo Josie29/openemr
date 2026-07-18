@@ -185,6 +185,21 @@ class Citation(BaseModel):
     )
 
 
+class CitedText(BaseModel):
+    """A single free-text intake value with its source citation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    value: str = Field(min_length=1, description="The value verbatim as printed on the form.")
+    citation: Citation = Field(description="Where on the form this value was read from.")
+    confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
+    )
+
+
 class LabResult(BaseModel):
     """One extracted lab analyte with its citation (PRD Core Req 2 — lab fields).
 
@@ -220,10 +235,14 @@ class LabResult(BaseModel):
         min_length=1,
         description="Result value verbatim, e.g. '8.2' or 'Positive'. Never round or convert.",
     )
-    unit: str | None = Field(
+    # Cited, not bare strings: LabDetail stamps these onto the sidebar as system-authored fact, and
+    # a wrong reference range flips a normal value to abnormal — so each carries its own box and is
+    # checkable in its own column. One the locator cannot place still ships, boxless, so the UI can
+    # mark it unverified rather than imply it was read off the page (see extractor._secondary).
+    unit: CitedText | None = Field(
         default=None, description="Unit as printed, e.g. '%'. Null if unitless/qualitative."
     )
-    reference_range: str | None = Field(
+    reference_range: CitedText | None = Field(
         default=None, description="Reference range verbatim, e.g. '4.0-5.6'. Null if not printed."
     )
     collection_date: date | None = Field(
@@ -279,19 +298,21 @@ class LabReport(BaseModel):
     )
 
 
-class CitedText(BaseModel):
-    """A single free-text intake value with its source citation."""
 
-    model_config = ConfigDict(frozen=True)
+def printed_text(cited: CitedText | None) -> str | None:
+    """The printed text of an optional cited value, dropping its geometry.
 
-    value: str = Field(min_length=1, description="The value verbatim as printed on the form.")
-    citation: Citation = Field(description="Where on the form this value was read from.")
-    confidence: float | None = Field(
-        default=None,
-        ge=0,
-        le=1,
-        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
-    )
+    Secondary fields carry a box so they can be checked on the page, but the write-back payload and
+    the model-facing fact handles want the bare text. One helper so every consumer flattens the same
+    way instead of spelling the None-check out again.
+
+    Args:
+        cited: The cited value, or None when the document does not state it.
+
+    Returns:
+        The verbatim text, or None.
+    """
+    return cited.value if cited is not None else None
 
 
 class Demographics(BaseModel):
@@ -344,7 +365,7 @@ class Allergy(BaseModel):
     substance: str = Field(
         min_length=1, description="Allergen/substance as printed, e.g. 'Penicillin'."
     )
-    reaction: str | None = Field(
+    reaction: CitedText | None = Field(
         default=None, description="Reaction as printed, e.g. 'hives'. Null if not given."
     )
     citation: Citation = Field(description="Where on the form this allergy was read from.")
@@ -364,7 +385,7 @@ class FamilyHistoryItem(BaseModel):
     condition: str = Field(
         min_length=1, description="Condition as printed, e.g. 'Type 2 diabetes'."
     )
-    relation: str | None = Field(
+    relation: CitedText | None = Field(
         default=None, description="Affected relative, e.g. 'mother'. Null if not given."
     )
     citation: Citation = Field(description="Where on the form this entry was read from.")

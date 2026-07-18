@@ -54,7 +54,11 @@ def _intake_form() -> IntakeForm:
     return IntakeForm(
         demographics=Demographics(full_name=_cited("Sergio Angulo")),
         allergies=[
-            Allergy(substance="Penicillin", reaction="hives", citation=_citation("Penicillin"))
+            Allergy(
+                substance="Penicillin",
+                reaction=CitedText(value="hives", citation=_citation("hives")),
+                citation=_citation("Penicillin"),
+            )
         ],
         family_history=[],
     )
@@ -81,7 +85,7 @@ def _lab_report() -> LabReport:
             LabResult(
                 test_name="Creatinine",
                 value="1.44",
-                unit="mg/dL",
+                unit=CitedText(value="mg/dL", citation=_citation("mg/dL", page=2)),
                 abnormal_flag=AbnormalFlag.HIGH,
                 citation=_citation("1.44", page=2),
             )

@@ -12,6 +12,7 @@ from copilot.ingestion.schemas import (
     LabResult,
     Medication,
     MedicationList,
+    printed_text,
 )
 
 # The Demographics attributes projected to the wire, in the persist endpoint's field vocabulary.
@@ -54,8 +55,8 @@ def _lab_fact(result: LabResult) -> dict[str, Any] | None:
         "loinc": result.loinc,
         "label": result.test_name,
         "value": result.value,
-        "units": result.unit or "",
-        "range": result.reference_range or "",
+        "units": printed_text(result.unit) or "",
+        "range": printed_text(result.reference_range) or "",
         "abnormal": result.abnormal_flag.value,
         "page": box.page,
         "bbox": _box_payload(box),
@@ -78,7 +79,7 @@ def _allergy_fact(allergy: Allergy) -> dict[str, Any]:
     fact: dict[str, Any] = {
         "type": "allergy",
         "substance": allergy.substance,
-        "reaction": allergy.reaction,
+        "reaction": printed_text(allergy.reaction),
         "confidence": allergy.confidence,
     }
     _attach_optional_box(fact, allergy.citation.bounding_box)
@@ -100,8 +101,8 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
         # Flattened to the printed text: the persist endpoint writes these into
         # `drug_dosage_instructions`, so the wire contract with PHP is unchanged by the model
         # gaining per-field geometry.
-        "dose": medication.dose.value if medication.dose is not None else None,
-        "frequency": medication.frequency.value if medication.frequency is not None else None,
+        "dose": printed_text(medication.dose),
+        "frequency": printed_text(medication.frequency),
         "confidence": medication.confidence,
     }
     _attach_optional_box(fact, medication.citation.bounding_box)
@@ -122,12 +123,13 @@ def _family_history_fact(item: FamilyHistoryItem) -> dict[str, Any] | None:
     Returns:
         The wire dict, or None when the entry has no relation to place it on.
     """
-    if item.relation is None or item.relation.strip() == "":
+    relation = printed_text(item.relation)
+    if relation is None or relation.strip() == "":
         return None
     fact: dict[str, Any] = {
         "type": "family_history",
         "condition": item.condition,
-        "relation": item.relation,
+        "relation": relation,
         "confidence": item.confidence,
     }
     _attach_optional_box(fact, item.citation.bounding_box)

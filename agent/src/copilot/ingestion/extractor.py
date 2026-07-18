@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 from copilot.config import ExtractorMode, Settings
 from copilot.fhir.client import FhirClient, FhirError
-from copilot.fhir.models import UploadedDocumentSummary
 from copilot.ingestion import loinc
 from copilot.ingestion.errors import ExtractionError
 from copilot.ingestion.geometry.boxes import LocatedBox
@@ -466,7 +465,7 @@ class DocumentExtractor:
 
 async def resolve_and_extract(
     document_id: str,
-    documents: list[UploadedDocumentSummary],
+    patient_id: str,
     extractor: DocumentExtractor,
     fhir: FhirClient,
 ) -> ExtractedDocument | None:
@@ -484,11 +483,18 @@ async def resolve_and_extract(
     fetch + OCR — the same discovery filter is the security control (only a document the patient
     actually has, whose category maps to a schema, is extractable).
 
+    The lookup set is READ HERE, not passed in. It is the security control, so it must not depend
+    on whether some earlier call happened to populate a cache: the graph tool used to hand over a
+    per-turn memo of ``list_documents``, which meant a valid id resolved to "not one of the
+    patient's documents" whenever extraction ran without a listing first — a misleading answer of
+    exactly the kind that makes a model retry. Deriving it here also makes this function's contract
+    complete, so the tool and the HTTP endpoint enforce the same filter the same way.
+
     Args:
         document_id: The ``DocumentReference`` id to extract.
-        documents: The patient's uploaded documents (from ``get_documents``); the lookup set.
+        patient_id: The patient whose uploaded documents form the lookup set.
         extractor: The app-lifetime document extractor.
-        fhir: The request's patient-scoped FHIR client, used to fetch the document bytes.
+        fhir: The request's patient-scoped FHIR client — reads the lookup set and the bytes.
 
     Returns:
         The parsed :class:`ExtractedDocument`, or ``None`` when ``document_id`` is not one of the
@@ -497,6 +503,7 @@ async def resolve_and_extract(
     Raises:
         ExtractionError: If the byte fetch, OCR, or mapping fails.
     """
+    documents = await fhir.get_documents(patient_id)
     summary = next((doc for doc in documents if doc.resource_id == document_id), None)
     if summary is None:
         return None

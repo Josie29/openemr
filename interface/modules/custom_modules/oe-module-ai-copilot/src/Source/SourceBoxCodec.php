@@ -74,11 +74,15 @@ final readonly class SourceBoxCodec
     }
 
     /**
-     * Decode one `x,y,w,h` chunk.
+     * Decode one `x,y,w,h` or `x,y,w,h,n` chunk.
      *
-     * @param string $chunk One box's four comma-separated edges.
+     * The optional fifth field is the badge number the box shows. Four fields stay valid so an
+     * older link (or the single-box `View source` path) keeps working unchanged.
      *
-     * @return SourceBox|null Null when the chunk is not four numbers describing a real rectangle.
+     * @param string $chunk One box's comma-separated edges, optionally followed by its label.
+     *
+     * @return SourceBox|null Null when the chunk is not four or five numbers describing a real
+     *                        rectangle.
      */
     private static function decodeOne(string $chunk): ?SourceBox
     {
@@ -87,26 +91,36 @@ final readonly class SourceBoxCodec
             return null; // a trailing or doubled separator, not an error
         }
 
-        $edges = explode(self::EDGE_SEPARATOR, $chunk);
-        if (count($edges) !== 4) {
+        $fields = explode(self::EDGE_SEPARATOR, $chunk);
+        if (count($fields) !== 4 && count($fields) !== 5) {
             return null;
         }
 
         $values = [];
-        foreach ($edges as $edge) {
-            $edge = trim($edge);
+        foreach ($fields as $field) {
+            $field = trim($field);
             // is_numeric FIRST: a bare (float) cast turns "abc" into 0.0 and "1e999" into INF, so
             // casting without this gate would silently invent a rectangle at the origin.
-            if (!is_numeric($edge)) {
+            if (!is_numeric($field)) {
                 return null;
             }
-            $values[] = (float) $edge;
+            $values[] = (float) $field;
+        }
+
+        // A label is a badge ordinal, so a fractional or out-of-range one is malformed, not
+        // something to round into a plausible number.
+        $label = null;
+        if (count($values) === 5) {
+            if ($values[4] != (int) $values[4]) {
+                return null;
+            }
+            $label = (int) $values[4];
         }
 
         try {
-            return new SourceBox($values[0], $values[1], $values[2], $values[3]);
+            return new SourceBox($values[0], $values[1], $values[2], $values[3], $label);
         } catch (\DomainException) {
-            return null; // non-finite, negative origin, or zero-area: not a drawable box
+            return null; // non-finite, negative origin, zero-area, or a non-positive label
         }
     }
 }

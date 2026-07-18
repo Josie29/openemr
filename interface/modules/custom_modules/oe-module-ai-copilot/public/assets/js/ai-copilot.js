@@ -1384,8 +1384,11 @@
             : labels.checkSource;
         button.dataset.documentId = String(source.document_id);
         button.dataset.page = String(normalizePage(source));
-        button.dataset.boxes = JSON.stringify(boxed.map(function (claim) {
-            return claim.source.bounding_box;
+        // Stamp each box with the badge number its fact shows in the list above (buildFactNumber
+        // uses the same 1-based index into `boxed`), so the overlay and the sidebar cannot drift.
+        button.dataset.boxes = JSON.stringify(boxed.map(function (claim, index) {
+            var box = claim.source.bounding_box;
+            return { x: box.x, y: box.y, width: box.width, height: box.height, n: index + 1 };
         }));
         button.dataset.docTitle = docKindLabel(source);
         button.addEventListener('click', onCheckAllClick);
@@ -1690,9 +1693,19 @@
         // One scalar param rather than boxes[]: the viewer reads its input with filter_input, which
         // takes scalars. Note the field-name shift — JS boxes are {x, y, width, height}, the URL and
         // PHP both speak x/y/w/h.
+        // A box may carry `n`, the badge number the sidebar gave its fact. It is packed as a fifth
+        // field rather than left to the viewer to infer from array position: position only matched
+        // the sidebar while every fact contributed exactly one box, so it desynchronises as soon as
+        // one fact owns several. Omitted when absent, which keeps the four-field URL valid.
         var packed = (boxes || [])
             .filter(Boolean)
-            .map(function (box) { return [box.x, box.y, box.width, box.height].join(','); })
+            .map(function (box) {
+                var fields = [box.x, box.y, box.width, box.height];
+                if (box.n != null) {
+                    fields.push(box.n);
+                }
+                return fields.join(',');
+            })
             .join(';');
         if (packed !== '') {
             url += '&boxes=' + encodeURIComponent(packed);

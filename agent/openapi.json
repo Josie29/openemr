@@ -715,32 +715,30 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "dose": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Dose/strength as printed, e.g. '500 mg'. Null if not given.",
-            "title": "Dose"
+            "description": "Dose/strength as printed, e.g. '500 mg'. Null if not given."
           },
           "frequency": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Frequency as printed, e.g. 'twice daily'. Null if not given.",
-            "title": "Frequency"
+            "description": "Frequency as printed, e.g. 'twice daily'. Null if not given."
           },
           "name": {
             "description": "Medication name as printed, e.g. 'Metformin'.",

@@ -25,19 +25,25 @@ namespace OpenEMR\Modules\AiCopilot\Source;
 final readonly class SourceBox
 {
     /**
-     * @param float $x      Left edge in PDF points.
-     * @param float $y      Top edge in PDF points.
-     * @param float $width  Box width in PDF points; must be positive.
-     * @param float $height Box height in PDF points; must be positive.
+     * @param float    $x      Left edge in PDF points.
+     * @param float    $y      Top edge in PDF points.
+     * @param float    $width  Box width in PDF points; must be positive.
+     * @param float    $height Box height in PDF points; must be positive.
+     * @param int|null $label  The badge number this box shows, matching the sidebar's numbered fact
+     *                         list. Carried explicitly because the viewer used to derive it from
+     *                         the box's array position, which only agreed with the sidebar while
+     *                         each fact contributed exactly one box. Null keeps the legacy
+     *                         four-field contract, where position is still used.
      *
-     * @throws \DomainException If any edge is non-finite, an origin is negative, or an extent is
-     *                          not positive.
+     * @throws \DomainException If any edge is non-finite, an origin is negative, an extent is not
+     *                          positive, or the label is not a positive number.
      */
     public function __construct(
         public float $x,
         public float $y,
         public float $width,
         public float $height,
+        public ?int $label = null,
     ) {
         foreach (['x' => $x, 'y' => $y, 'width' => $width, 'height' => $height] as $name => $value) {
             if (!is_finite($value)) {
@@ -50,15 +56,26 @@ final readonly class SourceBox
         if ($width <= 0 || $height <= 0) {
             throw new \DomainException('Box extent must be positive.');
         }
+        if ($label !== null && $label < 1) {
+            throw new \DomainException('Box label must be a positive number.');
+        }
     }
 
     /**
      * The shape the viewer's JS consumes, matching the keys the single-box contract already used.
      *
-     * @return array{x: float, y: float, w: float, h: float}
+     * `n` is omitted when unlabelled, so a legacy four-field URL decodes to exactly the array the
+     * viewer consumed before.
+     *
+     * @return array{x: float, y: float, w: float, h: float, n?: int}
      */
     public function toViewArray(): array
     {
-        return ['x' => $this->x, 'y' => $this->y, 'w' => $this->width, 'h' => $this->height];
+        $view = ['x' => $this->x, 'y' => $this->y, 'w' => $this->width, 'h' => $this->height];
+        if ($this->label !== null) {
+            $view['n'] = $this->label;
+        }
+
+        return $view;
     }
 }

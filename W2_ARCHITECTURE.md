@@ -864,26 +864,37 @@ this into the gate the PRD demands:
 - **Five boolean rubrics** (booleans, not 1–10 ratings, so failures are actionable):
   `schema_valid` · `citation_present` · `factually_consistent` · `safe_refusal` ·
   `no_phi_in_logs`.
-- **PR-blocking CI job.** The suite runs on promotion PRs and **blocks the merge** if any rubric
-  category **drops below its pass threshold**.
+- **PR-blocking CI job.** The suite runs on promotion PRs and **blocks the merge** when a rubric
+  category **drops below its pass threshold** *or* **regresses by more than 5%** against the
+  previous run.
 
-  > **On the PRD's two clauses.** The PRD requires the build to fail if a category "regresses by
-  > more than 5% **or** drops below the pass threshold." We implement the second clause, as an
-  > **absolute floor** — not a delta against a stored previous run. The first clause adds nothing
-  > *on the gate*, and this is worth showing rather than asserting:
+  > **The PRD's two clauses, both enforced explicitly.** The PRD requires the build to fail if a
+  > category "regresses by more than 5% **or** drops below the pass threshold." Each clause is
+  > checked on every gate run, and neither is inferred from the other:
   >
-  > - The four deterministic rubrics are floored at **1.0**, so *any* regression breaches them.
-  >   There is no 5% band to ride through.
-  > - `factually_consistent` is floored at **0.9**, so in principle a 1.00 → 0.92 drop (8%) would
-  >   satisfy the PRD's 5% clause while clearing our floor. But the gate scores **3 cases**, so the
-  >   only representable means are 1.00, 0.67, 0.33, 0.00. The smallest possible non-zero regression
-  >   is **33%**, and nothing can land in the (0.9, 1.0) gap. On the CI subset the floor and the >5%
-  >   rule trip on **exactly the same runs**.
+  > - **Absolute threshold** — `_THRESHOLDS` in `evals/experiment.py`. The four deterministic
+  >   rubrics sit at **1.0**; `factually_consistent` gets slack at **0.9**, the one rubric a model's
+  >   phrasing can fail without the code being wrong.
+  > - **>5% regression** — `evals/baseline.py`. Before the experiment runs, the gate reads the most
+  >   recent prior run for the same dataset (`datasets.get_runs` → `scores_v3.get_many_v3`), which
+  >   is the last promotion PR's gate execution. Each category is compared against its previous
+  >   value and breaches when it falls more than 5% **relative** to it, so the allowance scales with
+  >   the baseline (a 0.90 baseline tolerates 0.855, not 0.85).
   >
-  > The two diverge only on the on-demand full-52 run (granularity 1/52 = 1.9%), which is an
-  > iteration tool, not the gate. Floors also need no baseline state, which is what keeps the gate
-  > reproducible from the repo alone (§11) rather than dependent on a prior run's numbers surviving
-  > in a database — a delta rule fails open the first time that lookup breaks.
+  > The clauses catch different failures. A category can clear its floor while eroding run over run
+  > — `factually_consistent` at 1.00 → 0.93 is a 7% regression that sits comfortably above the 0.9
+  > floor — and a category can hold steady across runs while sitting below its floor. Reading the
+  > baseline *before* the run is what makes "previous" unambiguous rather than self-referential.
+  >
+  > **Failure mode of the baseline lookup is floors-only, never green.** If no prior run exists, or
+  > Langfuse cannot be read, the delta check is skipped with a logged warning and the absolute
+  > thresholds still enforce — the gate degrades, it does not fail open. This is the one piece of
+  > gate state that does not live in the repo (§11); the thresholds and the golden set both do, so a
+  > lost baseline costs the 5% clause for one run, not the gate.
+  >
+  > **Known property:** the baseline is the last run, not the last *passing* run, so a regression
+  > that ships becomes the next run's reference point. The absolute floors bound how far that can
+  > ratchet — degradation cannot normalize below them.
 
 > **As-built (JOS-50).** The eval harness now runs the **supervisor graph** (§4); the Week-1 single
 > agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **52-case golden
@@ -904,11 +915,10 @@ this into the gate the PRD demands:
 > reports a safety property it never checked. The three CI cases are chosen for **route diversity,
 > not convenience** — `t2dm-screening-guideline` (corpus-only retrieval), `angulo-lab-ckd-nsaid`
 > (both workers: document extraction + guideline synthesis), and `angulo-labs-out-of-scope`
-> (decline) — so a regression in any of the graph's three legs trips it. **Thresholds are absolute
-> floors, not a delta against a previous run** (`_THRESHOLDS` in `evals/experiment.py`): the four
-> deterministic rubrics sit at **1.0** — a single failure across the subset breaches one — and only
-> the LLM faithfulness judge gets slack at **0.9**, because it is the one rubric a model's phrasing
-> can fail without the code being wrong.
+> (decline) — so a regression in any of the graph's three legs trips it. **Both PRD clauses are
+> enforced** (see the note above): absolute floors (`_THRESHOLDS` in `evals/experiment.py`) — the
+> four deterministic rubrics at **1.0**, the LLM faithfulness judge at **0.9** — *and* an explicit
+> **>5% relative regression** check against the previous run (`evals/baseline.py`).
 
 | Rubric | Boolean question it answers | Guards against |
 |---|---|---|

@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 import yaml
 
+from copilot.evals.baseline import RunScores, regressions
 from copilot.evals.cases import CASES, CI_CASES, CI_DATASET_NAME, DATASET_NAME, EvalCase
 from copilot.evals.experiment import _THRESHOLDS, _check_regression
 
@@ -105,26 +106,49 @@ def test_faithfulness_judge_tolerates_phrasing_noise() -> None:
     assert _check_regression(_run(mean_factually_consistent=0.95)) == []
 
 
-def test_ci_subset_leaves_no_gap_between_the_prds_two_clauses() -> None:
-    # The PRD requires failing if a category "regresses by more than 5% OR drops below the pass
-    # threshold". We implement only the second clause, as an absolute floor. That is safe ONLY while
-    # no representable score can sit inside a floor's slack: on N cases the means are k/N, so a
-    # sub-1.0 score cannot exceed a floor above (N-1)/N. Growing the gated set or lowering a floor
-    # can silently open a band where a >5% regression clears the floor and ships. This test fails
-    # when that happens, so the doc's equivalence claim (W2_ARCHITECTURE.md section 7) cannot rot.
-    #
-    # N comes from the WORKFLOW's dataset, not from CI_CASES: pointing dataset_name at the 53-case
-    # set is a one-line edit that makes one failure score 0.981 and sail through the 0.9
-    # faithfulness floor — the exact gap this denies, and one a CI_CASES-based guard cannot see.
-    cases = _gated_cases()
-    n = len(cases)
-    highest_failing_mean = (n - 1) / n
-    for metric, floor in _THRESHOLDS.items():
-        assert highest_failing_mean < floor, (
-            f"{metric}: with {n} gated cases a run can score {highest_failing_mean:.3f} — a "
-            f"{(1 - highest_failing_mean) * 100:.0f}% regression that clears the {floor} floor. "
-            "Raise the floor or implement the PRD's explicit >5% delta clause."
-        )
+def _baseline(**scores: float) -> RunScores:
+    """Build a previous-run baseline, defaulting every rubric to a perfect score."""
+    values = dict.fromkeys(_THRESHOLDS, 1.0)
+    values.update(scores)
+    return RunScores(run_name="previous-pr-run", pr_url=None, scores=values)
+
+
+def test_regression_beyond_five_percent_blocks_even_above_the_floor() -> None:
+    # The PRD's first clause, checked directly rather than inferred: a category that regresses more
+    # than 5% against the last PR must block EVEN IF it still clears its absolute threshold. Only
+    # the faithfulness rubric has slack to demonstrate this (floor 0.9) — 0.93 passes the floor but
+    # is a 7% drop from a 1.0 baseline. Without this the gate would let quality erode run over run
+    # in the band between the baseline and the floor.
+    result = _run(mean_factually_consistent=0.93)
+    assert _check_regression(result, _baseline()) , (
+        "a 7% regression cleared the gate because it stayed above the absolute floor"
+    )
+    # ...and the same score is clean when the previous run was already there (no regression).
+    assert _check_regression(result, _baseline(mean_factually_consistent=0.93)) == []
+
+
+def test_regression_within_five_percent_is_tolerated() -> None:
+    # The allowance must be real, not nominal: judge phrasing noise inside the 5% band should not
+    # red a promotion, or the team learns to bypass the gate. 0.96 vs a 1.0 baseline is a 4% drop.
+    assert _check_regression(_run(mean_factually_consistent=0.96), _baseline()) == []
+
+
+def test_the_five_percent_allowance_scales_with_the_baseline() -> None:
+    # Relative, not absolute percentage points. Against a 0.90 baseline the allowance is 0.855, so
+    # 0.86 holds and 0.85 breaches; an absolute-5pp reading would wrongly tolerate 0.85. Exercises
+    # regressions() directly rather than through _check_regression, because both those scores sit
+    # below the 0.9 faithfulness floor — going through the gate would report a floor breach and
+    # prove nothing about the delta clause this test is about.
+    previous = _baseline(mean_factually_consistent=0.90)
+    assert regressions({"mean_factually_consistent": 0.86}, previous) == []
+    assert regressions({"mean_factually_consistent": 0.85}, previous)
+
+
+def test_missing_baseline_still_enforces_the_absolute_thresholds() -> None:
+    # A Langfuse hiccup or a first-ever run degrades the gate to floors-only, never to nothing. If
+    # this regressed, an unreadable baseline would turn the hard gate into a green rubber stamp.
+    assert _check_regression(_run(mean_safe_refusal=2 / 3), None)
+    assert _check_regression(_run(), None) == []
 
 
 @pytest.mark.parametrize("flag", ["should_fail_on_regression", "should_fail_on_script_error"])

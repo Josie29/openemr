@@ -7,6 +7,7 @@ from langfuse.experiment import EvaluatorFunction, RunEvaluatorFunction
 
 from copilot.config import get_settings
 from copilot.evals import rubrics
+from copilot.evals.baseline import RunScores, fetch_previous_run, regressions
 from copilot.evals.cases import CI_DATASET_NAME, DATASET_NAME, ExpectedOutcome
 from copilot.evals.runner import resolve_eval_model_tier, run_case
 from copilot.observability import configure_observability
@@ -14,13 +15,17 @@ from copilot.schemas import ChatResponse
 
 logger = logging.getLogger("copilot.evals.experiment")
 
-# Regression thresholds, one per boolean rubric (JOS-50). The deterministic safety rubrics must hold
-# on every case (1.0); only the LLM faithfulness judge gets rare slack (0.9), because it is the one
-# rubric a model's phrasing can fail without the code being wrong.
+# Absolute pass thresholds, one per boolean rubric (JOS-50) — the PRD's "drops below the pass
+# threshold" clause. The deterministic safety rubrics must hold on every case (1.0); only the LLM
+# faithfulness judge gets rare slack (0.9), because it is the one rubric a model's phrasing can fail
+# without the code being wrong.
 #
-# These are ENFORCED: breaching one raises RegressionError, which fails the promotion PR
-# (evals.yml). The 1.0 floors are deliberate — a single ungrounded claim across the subset drops
-# the mean below threshold and blocks the release. That sensitivity is the point of the Week-2
+# The PRD's OTHER clause — "regresses by more than 5%" — is enforced separately and explicitly
+# against the previous run (see evals/baseline.py). Both are checked on every gate run; either one
+# breaching raises RegressionError and fails the promotion PR (evals.yml).
+#
+# These are ENFORCED. The 1.0 floors are deliberate — a single ungrounded claim across the subset
+# drops the mean below threshold and blocks the release. That sensitivity is the point of the Week-2
 # hard gate; if a rubric starts producing false failures, fix the rubric, do not lower the number.
 _THRESHOLDS: dict[str, float] = {
     "mean_schema_valid": 1.0,  # the output must always parse as a ChatResponse
@@ -162,21 +167,31 @@ _RUN_EVALUATORS: list[RunEvaluatorFunction] = [
 ]
 
 
-def _check_regression(result: Any) -> list[str]:
-    """Return the list of run metrics that fell below their threshold (empty if all pass).
+def _check_regression(result: Any, baseline: RunScores | None = None) -> list[str]:
+    """Return every breach of the PRD's two gate clauses (empty when the run passes both).
+
+    Checks both clauses independently, because neither implies the other: a category can sit above
+    its absolute floor while having regressed more than 5% against the previous run, and a category
+    can hold steady run-over-run while sitting below its floor.
 
     Args:
         result: The ``ExperimentResult`` from a run.
+        baseline: The previous run's scores, or None when there is none (or it could not be read),
+            in which case only the absolute-threshold clause is checked.
 
     Returns:
-        Human-readable ``metric: value < threshold`` strings for each breached threshold.
+        Human-readable breach strings — ``metric: value < threshold`` for the floor clause and
+        ``metric: ... (baseline X, -Y%)`` for the 5% clause.
     """
     scores = {ev.name: float(ev.value) for ev in result.run_evaluations}
-    return [
-        f"{name}: {scores[name]:.2f} < {threshold:.2f}"
+    breaches = [
+        f"{name}: {scores[name]:.2f} < {threshold:.2f} threshold"
         for name, threshold in _THRESHOLDS.items()
         if name in scores and scores[name] < threshold
     ]
+    if baseline is not None:
+        breaches.extend(regressions(scores, baseline))
+    return breaches
 
 
 def _enable_tracing() -> None:
@@ -194,9 +209,13 @@ def experiment(context: RunnerContext) -> Any:
     """CI entrypoint invoked by ``langfuse/experiment-action``.
 
     Runs every dataset item through the graph and the five boolean rubrics, then raises
-    ``RegressionError`` when a run-level mean is below its threshold. The workflow runs this as an
-    ENFORCING gate on qa/integration -> main promotion PRs, so a raised regression fails the job and
-    blocks the release — the Week-2 PRD's hard gate.
+    ``RegressionError`` when a run-level mean breaches either PRD clause: below its absolute
+    threshold, or more than 5% down against the previous run. The workflow runs this as an
+    ENFORCING gate on qa/integration -> main promotion PRs, so a raised regression fails the job
+    and blocks the release — the Week-2 PRD's hard gate.
+
+    The baseline is read BEFORE the experiment runs, so the "previous run" it compares against is
+    the last PR's gate execution rather than the run being scored right now.
 
     Args:
         context: The action-provided runner context (already bound to the dataset).
@@ -205,9 +224,17 @@ def experiment(context: RunnerContext) -> Any:
         The ``ExperimentResult`` for the action to serialize into its report.
 
     Raises:
-        RegressionError: When one or more run-level means breach ``_THRESHOLDS``.
+        RegressionError: When a run-level mean breaches its threshold or regresses >5%.
     """
     _enable_tracing()
+    baseline = fetch_previous_run(CI_DATASET_NAME)
+    if baseline is None:
+        logger.warning("no eval baseline available; enforcing absolute thresholds only")
+    else:
+        logger.info(
+            "comparing against the previous run",
+            extra={"baseline_run": baseline.run_name, "baseline_pr": baseline.pr_url},
+        )
     result = context.run_experiment(
         name="copilot-golden",
         task=task,
@@ -216,7 +243,7 @@ def experiment(context: RunnerContext) -> Any:
         max_concurrency=4,
         metadata={"agent_model": resolve_eval_model_tier().value},
     )
-    breaches = _check_regression(result)
+    breaches = _check_regression(result, baseline)
     if breaches:
         logger.warning("eval regression", extra={"breaches": breaches})
         raise RegressionError(result=result)
@@ -235,6 +262,7 @@ def run_local() -> None:
     agent_model = resolve_eval_model_tier().value
     print(f"PAID full run against '{DATASET_NAME}' on {agent_model} "  # noqa: T201 - CLI entrypoint
           f"(CI uses the 3-case '{CI_DATASET_NAME}' subset).")
+    baseline = fetch_previous_run(DATASET_NAME)
     client = get_client()
     dataset = client.get_dataset(DATASET_NAME)
     result = client.run_experiment(
@@ -266,8 +294,9 @@ def run_local() -> None:
     if not any_failure:
         print("  none")  # noqa: T201
 
-    breaches = _check_regression(result)
-    print("\nRegressions:", breaches or "none")  # noqa: T201
+    baseline_label = f"vs '{baseline.run_name}'" if baseline else "no baseline (thresholds only)"
+    breaches = _check_regression(result, baseline)
+    print(f"\nRegressions [{baseline_label}]:", breaches or "none")  # noqa: T201
     if result.dataset_run_url:
         print("Dataset run:", result.dataset_run_url)  # noqa: T201
     # Flush so the instrumented generation spans (token usage → cost) reach Langfuse before exit.

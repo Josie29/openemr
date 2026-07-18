@@ -68,20 +68,26 @@ You also read UPLOADED documents (values not yet filed in the chart):
     ("FamilyMemberHistory"). It does NOT return medications — those come from a medication list.
   - a `medication_list` returns the medications on a pharmacy/discharge medication list, each with
     `resource_type` "MedicationRequest" and the printed `name`/`dose`/`frequency`.
-  For lab values and trends, prefer get_lab_observations — the chart's structured labs. Reach for a
-  document only when the value is NOT in the chart: an uploaded report the labs were not filed from,
-  something the patient reported on their intake form (a chief concern, an allergy, a family
-  history), or a medication on an uploaded medication list. Then call list_documents, then
-  attach_and_extract on the relevant document, and state the facts the question needs. Cite each fact
-  with its `resource_type`/`resource_id` and `field` "value" — verbatim from the tool result.
+  For lab VALUES and trends, prefer get_lab_observations (the chart's structured labs). But an
+  uploaded document is a FIRST-CLASS source, not a last resort: when the question is about one — "the
+  med list", "what medications is he on", what the patient reported at intake, a value from an
+  uploaded report — call list_documents, then attach_and_extract the relevant document, and answer
+  from it. In particular, if the patient has a `medication_list` on file and the question is about
+  their medications, read that list; do NOT answer from the chart's medications alone — the list is
+  what the patient brought in, it can differ from the chart, and surfacing it (and, where useful,
+  noting where it disagrees with the chart) is the point. When unsure whether a relevant document
+  exists, call list_documents to check before falling back to the chart. Cite each fact with its
+  `resource_type`/`resource_id` and `field` "value" — verbatim from the tool result.
   Facts from an uploaded document are what the PATIENT supplied, not what a clinician has confirmed.
   Say so when it matters — a medication list a patient brought in is not the chart's medication list,
   and the two can disagree.
 
 Read the structured record with get_patient_summary once, add get_lab_observations for lab values or
-trends, and read a note or a document only when the question needs the narrative or a value not in
-the chart. Answer only from what the tools return — if the record lacks something (e.g. no lab
-result and none in an uploaded report), say so plainly rather than inferring.
+trends, read a note for a visit's narrative, and read an uploaded document whenever the question is
+about one — or when a relevant `medication_list` / `intake_form` is on file for a question about the
+patient's medications or what they reported. Answer only from what the tools return — if the record
+lacks something (e.g. no lab result and none in an uploaded report), say so plainly rather than
+inferring.
 
 Return an ExtractorOutput: a one-line `summary` and a `claims` list, leading with safety signals (a
 high-severity allergy, an anticoagulant).
@@ -172,6 +178,11 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     @agent.tool
     async def list_documents(ctx: RunContext[GraphDeps]) -> list[UploadedDocumentSummary]:
         """List the patient's uploaded documents (id, title, date, doc_type) for extraction.
+
+        Call this whenever the question is about something a patient may have uploaded — their
+        medications / "med list", what they reported at intake, a value from an uploaded report —
+        before answering from the chart alone. An uploaded `medication_list` is a primary source for a
+        medications question, not a fallback.
 
         Memoized per turn: the FHIR discovery read runs once, so repeated calls (a model retrying on
         an empty list) return the cached result instead of hammering FHIR.

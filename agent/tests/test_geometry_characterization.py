@@ -13,12 +13,11 @@ from copilot.ingestion.schemas import LabReport
 _FIXTURES = Path(__file__).parent / "fixtures" / "documents"
 _GOLDENS = _FIXTURES / "goldens"
 
-# Every lab fixture that has BOTH a recorded OCR response and a source PDF. The digital PDF
-# exercises the text-layer join; the scanned one has no text layer, so it exercises the coarse
-# table-row-band fallback — the two geometry paths map_lab_report can take.
+# The lab fixture with BOTH a recorded OCR response and a source PDF, exercising the text-layer
+# join map_lab_report performs against the digital PDF's word boxes. (The scanned/no-text-layer
+# row-band fallback is exercised by simulation in test_extractor.py, not a golden PDF here.)
 _CASES = [
     pytest.param("sergio-angulo-lab-report", id="digital-text-layer"),
-    pytest.param("sergio-angulo-lab-report-scanned", id="scanned-row-band-fallback"),
 ]
 
 # Boxes are compared with a tolerance rather than by exact float equality. The agent's deps float
@@ -82,12 +81,12 @@ def _assert_matches(actual: list[dict[str, Any]], expected: list[dict[str, Any]]
 
 @pytest.mark.parametrize("name", _CASES)
 def test_lab_geometry_is_unchanged(name: str) -> None:
-    """Every lab fact's value AND its exact box are pinned, for both geometry paths.
+    """Every lab fact's value AND its exact box are pinned, for the text-layer geometry path.
 
     This is the regression net for the geometry refactor (JOS-80): the locator abstraction must be
     behaviour-identical for lab_pdf, and test_extractor.py only spot-checks ~4 boxes across the
-    whole report. This pins ALL of them, to the value and the rectangle, on both the text-layer
-    path and the scanned row-band fallback.
+    whole report. This pins ALL of them, to the value and the rectangle, on the digital text-layer
+    path (the scanned row-band fallback is exercised by simulation in test_extractor.py).
 
     If this breaks, the click-to-source overlay has silently moved: the physician clicks a lab
     value and the highlight lands somewhere else on the scan — or the fact stops being extracted

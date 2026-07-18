@@ -1061,7 +1061,7 @@
     },
     "/ready": {
       "get": {
-        "description": "Readiness probe \u2014 200 only when FHIR, the LLM, and Langfuse are all reachable.",
+        "description": "Readiness probe \u2014 200 only when every probed dependency is reachable.\n\nSurfaces per-dependency status for FHIR, the LLM, Langfuse, document storage, the vector\nindex, and the reranker (W2_ARCHITECTURE.md \u00a710); 503 with the same body otherwise.",
         "operationId": "ready_ready_get",
         "responses": {
           "200": {

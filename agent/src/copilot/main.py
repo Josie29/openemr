@@ -476,7 +476,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/ready")
     async def ready(request: Request) -> JSONResponse:
-        """Readiness probe — 200 only when FHIR, the LLM, and Langfuse are all reachable."""
+        """Readiness probe — 200 only when every probed dependency is reachable.
+
+        Surfaces per-dependency status for FHIR, the LLM, Langfuse, document storage, the vector
+        index, and the reranker (W2_ARCHITECTURE.md §10); 503 with the same body otherwise.
+        """
         report = await check_readiness(request.app.state.settings, request.app.state.fhir)
         status_code = 200 if report.ready else 503
         return JSONResponse(status_code=status_code, content=report.model_dump())

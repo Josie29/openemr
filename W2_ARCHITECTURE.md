@@ -661,7 +661,8 @@ Each choice traces to a requirement
 (`retriever.py` hybrid+rerank, `index.py` content-correct indexer, `corpus.py`, `models.py`),
 with the concrete choices: dense `BAAI/bge-small-en-v1.5` (384-dim), sparse `Qdrant/bm25`
 (IDF), `prefetch_k=20`, `rerank_top_n=3` (τ-floor 0.5). Retrieved snippets carry the §3.3 `guideline`
-citation arm; `/ready` now probes Qdrant (`/readyz`) and Cohere (§10). Design contract:
+citation arm; `/ready` surfaces these as the `vector_index` (Qdrant `/readyz`) and `reranker`
+(Cohere) dependencies, alongside `document_storage` (§10). Design contract:
 [`context/specs/hybrid-rag-pipeline.md`](context/specs/hybrid-rag-pipeline.md). The retriever
 began as a standalone capability this increment; **the JOS-56 supervisor/worker graph** (§4) that
 weaves evidence into the final answer and the `output_validator` gate shown above is **now

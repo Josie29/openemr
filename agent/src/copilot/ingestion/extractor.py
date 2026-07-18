@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from copilot.config import ExtractorMode, Settings
 from copilot.fhir.client import FhirClient, FhirError
+from copilot.fhir.models import UploadedDocumentSummary
 from copilot.ingestion import loinc
 from copilot.ingestion.errors import ExtractionError
 from copilot.ingestion.geometry.document import DocumentGeometry
@@ -48,6 +49,7 @@ __all__ = [
     "build_extractor",
     "map_intake_form",
     "map_lab_report",
+    "resolve_and_extract",
 ]
 
 
@@ -441,6 +443,45 @@ class DocumentExtractor:
         raw = await self._ocr.process(pdf_bytes, doc_type)
         report = _map_report(doc_type, raw, pdf_bytes)
         return ExtractedDocument(document_id=document_id, doc_type=doc_type, report=report)
+
+
+async def resolve_and_extract(
+    document_id: str,
+    documents: list[UploadedDocumentSummary],
+    extractor: DocumentExtractor,
+    fhir: FhirClient,
+) -> ExtractedDocument | None:
+    """Look up an uploaded document by id and OCR it through the schema its OWN category names.
+
+    The pure core shared by the ``attach_and_extract`` graph tool and the ``GET
+    /documents/{id}/extraction`` endpoint: it resolves the document, fetches its bytes over the
+    request's patient-scoped FHIR client (``Binary``), and runs extraction — but records nothing.
+    The tool layers the per-turn registry side effects on top; the endpoint takes only the result.
+
+    Reading the ``doc_type`` off the discovered :class:`UploadedDocumentSummary` (never a caller
+    argument) is what keeps the schema out of the caller's hands: the type was resolved from the
+    document's OpenEMR category at discovery. Returning ``None`` for an id that is not one of the
+    patient's uploaded documents rejects a hallucinated/guessed id before the expensive Binary
+    fetch + OCR — the same discovery filter is the security control (only a document the patient
+    actually has, whose category maps to a schema, is extractable).
+
+    Args:
+        document_id: The ``DocumentReference`` id to extract.
+        documents: The patient's uploaded documents (from ``get_documents``); the lookup set.
+        extractor: The app-lifetime document extractor.
+        fhir: The request's patient-scoped FHIR client, used to fetch the document bytes.
+
+    Returns:
+        The parsed :class:`ExtractedDocument`, or ``None`` when ``document_id`` is not one of the
+        patient's uploaded documents.
+
+    Raises:
+        ExtractionError: If the byte fetch, OCR, or mapping fails.
+    """
+    summary = next((doc for doc in documents if doc.resource_id == document_id), None)
+    if summary is None:
+        return None
+    return await extractor.extract(document_id, summary.doc_type, FhirBinaryByteSource(fhir))
 
 
 def build_extractor(settings: Settings) -> DocumentExtractor | None:

@@ -208,6 +208,39 @@ Content-Type: application/json
 - Response: `200` with `{summary, claims[], follow_ups[], conversation_id}` (each claim carries a
   code-stamped `source`), or a refusal / `401` / `403` / `404` / `502` per ARCHITECTURE.md §8.
 
+## Read-only subsystem endpoints
+
+Beyond `/chat`, three **GET** endpoints call the Week-2 subsystem services directly — **bypassing
+the LLM/graph** — so each capability is exercisable in isolation (a runnable API collection, a
+contract test) without a full agent turn. All are read-only and gated by the same SMART
+patient-scoped token as `/chat` (fixture mode ignores it).
+
+```
+GET /documents?patient_id=<id>                       # list uploaded (extractable) documents
+GET /documents/{document_id}/extraction?patient_id=  # strict-schema extraction of one document
+GET /evidence?query=<text>&top_n=<n?>                # ranked guideline chunks (hybrid RAG)
+```
+
+- `/documents` + `/documents/{id}/extraction` need `patient/DocumentReference.read` +
+  `patient/Binary.read`; `doc_type` is resolved server-side (never a caller input); extraction is
+  synchronous (no async status endpoint). `/evidence` reads the non-PHI corpus but is still
+  token-gated. None write; corpus indexing stays a CLI dev op.
+- There is **no upload endpoint** — documents are uploaded in the OpenEMR UI (the token is
+  read-only).
+- The OpenAPI 3.1 spec for all HTTP endpoints is committed as [`openapi.json`](openapi.json),
+  generated from the endpoints' Pydantic models; regenerate with `python scripts/dump_openapi.py`.
+  A contract test (`tests/test_openapi_contract.py`) fails on drift.
+
+```bash
+# fixture mode (seed patient "23" has the demo lab + intake uploads), tokenless:
+curl "localhost:8000/documents?patient_id=23"
+curl "localhost:8000/evidence?query=hypertension%20blood%20pressure%20target"
+# extraction additionally needs the extractor wired (COPILOT_EXTRACTOR_MODE=fixture +
+# COPILOT_OCR_FIXTURE_PATH_* / COPILOT_DOCUMENT_PDF_PATH_* pointing at tests/fixtures/documents/);
+# see tests/test_read_endpoints.py for the exact fixture wiring. Then:
+curl "localhost:8000/documents/labreport-2026-07/extraction?patient_id=23"
+```
+
 ## Demo without the module (fixture toggle)
 
 `/chat` in `http` mode requires the module's SMART token, so a bare `curl`/Swagger call returns

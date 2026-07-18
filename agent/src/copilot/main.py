@@ -13,6 +13,12 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.usage import UsageLimits
 
+from copilot.api_schemas import (
+    DocumentsResponse,
+    EvidenceItem,
+    EvidenceResponse,
+    ExtractionResponse,
+)
 from copilot.config import FhirClientMode, Settings, get_settings
 from copilot.conversation import ConversationStore
 from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
@@ -23,7 +29,7 @@ from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
 from copilot.health import check_readiness
-from copilot.ingestion.extractor import build_extractor
+from copilot.ingestion.extractor import ExtractionError, build_extractor, resolve_and_extract
 from copilot.ingestion.schemas import paths_by_doc_type
 from copilot.ingestion.wire import derived_facts_for
 from copilot.observability import (
@@ -33,7 +39,7 @@ from copilot.observability import (
     sync_system_prompt,
 )
 from copilot.pricing import turn_cost_usd
-from copilot.rag.retriever import FixtureEvidenceRetriever, build_retriever
+from copilot.rag.retriever import FixtureEvidenceRetriever, RetrievalError, build_retriever
 from copilot.retrieval import ChunkRegistry
 from copilot.schemas import (
     ChatRequest,
@@ -300,6 +306,36 @@ def _build_model(settings: Settings) -> Model:
     return AnthropicModel(model_id, provider=provider)
 
 
+def _require_token(
+    request: Request, settings: Settings, correlation_id: str
+) -> JSONResponse | None:
+    """Gate a read on the SMART patient-scoped bearer token, without building a FHIR client.
+
+    The token half of :func:`_resolve_request_fhir`, factored out so a read that needs auth but no
+    FHIR client (``GET /evidence`` over the non-PHI corpus) shares one source of truth for the 401
+    body. In fixture mode no token exists, so the gate is a no-op (matching ``/chat``), which is
+    what lets the contract tests run without a token.
+
+    Args:
+        request: The inbound request (carries the ``Authorization`` header).
+        settings: Service settings (mode, dev token fallback).
+        correlation_id: This turn's correlation id, for logging.
+
+    Returns:
+        ``None`` when the request may proceed; a 401 ``JSONResponse`` when a token is required and
+        absent.
+    """
+    if settings.fhir_client_mode is FhirClientMode.FIXTURE:
+        return None
+    if _bearer_token(request) or settings.fhir_bearer_token:
+        return None
+    logger.info("rejected read with no patient token", extra={"cid": correlation_id})
+    return JSONResponse(
+        status_code=401,
+        content={"error": "missing patient-scoped FHIR token", "correlation_id": correlation_id},
+    )
+
+
 def _resolve_request_fhir(
     request: Request, settings: Settings, correlation_id: str
 ) -> tuple[FhirClient, HttpFhirClient | None] | JSONResponse:
@@ -321,16 +357,10 @@ def _resolve_request_fhir(
     """
     if settings.fhir_client_mode is FhirClientMode.FIXTURE:
         return request.app.state.fhir, None
+    denied = _require_token(request, settings, correlation_id)
+    if denied is not None:
+        return denied
     token = _bearer_token(request) or settings.fhir_bearer_token
-    if not token:
-        logger.info("rejected /chat with no patient token", extra={"cid": correlation_id})
-        return JSONResponse(
-            status_code=401,
-            content={
-                "error": "missing patient-scoped FHIR token",
-                "correlation_id": correlation_id,
-            },
-        )
     if not settings.fhir_base_url:
         logger.error("HTTP mode without a FHIR base URL", extra={"cid": correlation_id})
         return JSONResponse(
@@ -378,7 +408,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["POST"],
+        # POST for /chat; GET for the read-only Week-2 subsystem endpoints (/documents,
+        # /documents/{id}/extraction, /evidence). The browser preflights a cross-origin GET that
+        # carries an Authorization header, so GET must be allowed explicitly.
+        allow_methods=["GET", "POST"],
         allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"],
     )
 
@@ -603,6 +636,156 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Echo the conversation id on every answered turn so the client keeps the thread.
         content["conversation_id"] = conversation_id
         return JSONResponse(status_code=status_code, content=content)
+
+    # --- Read-only Week-2 subsystem endpoints (JOS-63 / JOS-67) --------------------------------
+    # Each exposes ONE Week-2 subsystem directly, bypassing the LLM/graph, so a caller (a grader's
+    # API collection, a contract test) can exercise document listing, extraction, or evidence
+    # retrieval without paying for a full /chat turn. All three are read-only (no writes, no
+    # corpus mutation) and gated by the same SMART patient token as /chat. Handlers return a raw
+    # JSONResponse (like /chat) but declare `response_model` so the committed OpenAPI is precise.
+
+    @app.get("/documents", response_model=DocumentsResponse)
+    async def documents(request: Request, patient_id: str) -> JSONResponse:
+        """List the patient's uploaded, extractable documents (metadata only).
+
+        Backs the ``list_documents`` tool: the same patient-scoped FHIR ``DocumentReference``
+        search, filtered to uploaded PDFs whose category resolves to an extraction schema.
+        """
+        correlation_id = current_correlation_id()
+        settings: Settings = request.app.state.settings
+        resolved = _resolve_request_fhir(request, settings, correlation_id)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        fhir, per_request_client = resolved
+        try:
+            summaries = await fhir.get_documents(patient_id)
+        except FhirError:
+            logger.warning(
+                "document list read failed",
+                extra={"cid": correlation_id, "reason": ChatFailureReason.FHIR_READ_FAILED},
+                exc_info=True,
+            )
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": "patient data is temporarily unavailable",
+                    "correlation_id": correlation_id,
+                },
+            )
+        finally:
+            if per_request_client is not None:
+                await per_request_client.aclose()
+        return JSONResponse(
+            content=DocumentsResponse(patient_id=patient_id, documents=summaries).model_dump(
+                mode="json"
+            )
+        )
+
+    @app.get("/documents/{document_id}/extraction", response_model=ExtractionResponse)
+    async def document_extraction(
+        request: Request, document_id: str, patient_id: str
+    ) -> JSONResponse:
+        """Extract one uploaded document into its strict-schema facts (synchronous; no LLM).
+
+        Backs ``attach_and_extract`` via the shared ``resolve_and_extract`` core: the document's
+        ``doc_type`` is resolved server-side from its OpenEMR category (never a caller input), and
+        an id that is not one of the patient's uploaded documents is a 404. The response IS the
+        extraction result — there is no async job/status to poll.
+        """
+        correlation_id = current_correlation_id()
+        settings = request.app.state.settings
+        extractor = request.app.state.extractor
+        if extractor is None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "document extraction is not available",
+                    "correlation_id": correlation_id,
+                },
+            )
+        resolved = _resolve_request_fhir(request, settings, correlation_id)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        fhir, per_request_client = resolved
+        extracted = None
+        try:
+            # get_documents is also the security control: only a document the patient actually has,
+            # whose category maps to a schema, is extractable (no raw by-id path that would bypass
+            # the discovery filter).
+            summaries = await fhir.get_documents(patient_id)
+            extracted = await resolve_and_extract(document_id, summaries, extractor, fhir)
+        except ExtractionError:
+            logger.warning(
+                "document extraction failed",
+                extra={"cid": correlation_id, "document_id": document_id},
+                exc_info=True,
+            )
+            return JSONResponse(
+                status_code=502,
+                content={"error": "could not read the document", "correlation_id": correlation_id},
+            )
+        except FhirError:
+            logger.warning(
+                "document read failed for extraction",
+                extra={"cid": correlation_id, "reason": ChatFailureReason.FHIR_READ_FAILED},
+                exc_info=True,
+            )
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": "patient data is temporarily unavailable",
+                    "correlation_id": correlation_id,
+                },
+            )
+        finally:
+            if per_request_client is not None:
+                await per_request_client.aclose()
+        if extracted is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "document not found for this patient",
+                    "correlation_id": correlation_id,
+                },
+            )
+        return JSONResponse(
+            content=ExtractionResponse.from_extracted(extracted).model_dump(mode="json")
+        )
+
+    @app.get("/evidence", response_model=EvidenceResponse)
+    async def evidence(request: Request, query: str, top_n: int | None = None) -> JSONResponse:
+        """Retrieve ranked guideline chunks for a query (the hybrid-RAG path; no LLM, no PHI).
+
+        Backs ``search_guidelines``: runs the retriever (Qdrant + rerank, or the fixture fallback)
+        over the non-PHI corpus. Gated by the bearer token for a uniform surface, though it reads no
+        patient data. Corpus indexing stays a CLI dev op — this endpoint never mutates the corpus.
+        """
+        correlation_id = current_correlation_id()
+        settings = request.app.state.settings
+        denied = _require_token(request, settings, correlation_id)
+        if denied is not None:
+            return denied
+        retriever = request.app.state.retriever
+        try:
+            snippets = await retriever.retrieve(query, top_n=top_n)
+        except RetrievalError:
+            logger.warning(
+                "evidence retrieval failed", extra={"cid": correlation_id}, exc_info=True
+            )
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": "evidence retrieval is temporarily unavailable",
+                    "correlation_id": correlation_id,
+                },
+            )
+        items = [EvidenceItem.from_snippet(snippet) for snippet in snippets]
+        resolved_top_n = top_n if top_n is not None else settings.rerank_top_n
+        return JSONResponse(
+            content=EvidenceResponse(
+                query=query, top_n=resolved_top_n, evidence=items
+            ).model_dump(mode="json")
+        )
 
     return app
 

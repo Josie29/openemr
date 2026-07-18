@@ -101,6 +101,7 @@ so this expansion would be additive.
 | **Grounding gate** | One `output_validator` on the single agent's answer | Same gate **ported to each worker** + the final answer |
 | **Services on Railway** | OpenEMR · agent · MySQL | + **Qdrant** service · Cohere API · document storage |
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
+| **HTTP surface** | `/health` · `/ready` · `/chat` | + read-only `/documents`, `/documents/{id}/extraction`, `/evidence` — subsystem endpoints for direct testing (same SMART token; no writes), plus a committed OpenAPI spec (§10) |
 | **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, below-floor = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs |
 | **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
@@ -521,8 +522,11 @@ are:
   (`get_patient_summary` fans its five reads out concurrently and records each sub-resource into the
   fetch-log individually, so grounding is unchanged; the per-resource reads are no longer exposed as
   separate tools.) It therefore **fully subsumes the Week-1 single agent**, which has
-  been **removed from the request path** — the supervisor graph is now the **only** `/chat`
-  behavior. Turns an uploaded document, or the patient's own record, into schema-valid, cited facts.
+  been **removed from the request path** — the supervisor graph is now the **only** behavior
+  *behind `/chat`*. Turns an uploaded document, or the patient's own record, into schema-valid,
+  cited facts. (Week 2 also exposes three **read-only, LLM-free** GET endpoints — `/documents`,
+  `/documents/{id}/extraction`, `/evidence` — that call these same subsystem services directly,
+  bypassing the graph, for isolated testing under the same SMART token; see §10.)
 - **evidence-retriever** — owns the hybrid RAG tool (§5). Turns a clinical question into ranked,
   cited guideline snippets.
 
@@ -996,6 +1000,28 @@ storage**, the **Qdrant vector index** (ping its private URL), **Cohere reranker
 a binary up/down: if the reranker is unreachable but Qdrant, the extractor, and FHIR are up, the
 system reports *degraded* (retrieval works, reranking doesn't) rather than a blanket 503. `/health`
 is unchanged — 200 if the process is alive. The two endpoints stay genuinely separate.
+
+**Read-only subsystem endpoints + a committed OpenAPI contract.** Alongside `/chat`, Week 2
+exposes three **GET** endpoints that call the same subsystem services directly, **bypassing the
+LLM/graph**, so each Week-2 capability is testable in isolation (a runnable API collection, a
+contract test) without paying for — or being unable to isolate a failure within — a full agent
+turn:
+
+| Endpoint | Wraps | Returns |
+|---|---|---|
+| `GET /documents?patient_id=` | `list_documents` (FHIR `DocumentReference`) | The patient's uploaded, extractable documents (metadata) |
+| `GET /documents/{id}/extraction?patient_id=` | `attach_and_extract` (shared `resolve_and_extract` core) | One document's strict-schema facts — cited, boxed, with confidence; `doc_type` resolved server-side |
+| `GET /evidence?query=&top_n=` | `search_guidelines` (Qdrant + rerank) | Ranked guideline chunks (source, section, chunk id, text, score, topic) |
+
+All three are **read-only** (no writes, no corpus mutation — indexing stays a CLI dev op) and gated
+by the **same SMART patient-scoped token** as `/chat`; `/documents*` need `patient/DocumentReference.read`
++ `patient/Binary.read`, `/evidence` reads the non-PHI corpus but is still token-gated for a uniform
+surface. There is **no upload endpoint** (documents are uploaded in the OpenEMR UI — the token is
+read-only) and **no async extraction-status endpoint** (extraction is synchronous; the response is
+the result). FastAPI generates the OpenAPI 3.1 spec from these endpoints' Pydantic response models;
+it is committed as [`agent/openapi.json`](agent/openapi.json) and a contract test fails on any drift
+(regenerate with `python scripts/dump_openapi.py`), so the published contract cannot silently
+diverge from the implementation.
 
 ---
 

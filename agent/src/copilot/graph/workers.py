@@ -8,7 +8,7 @@ from copilot.fhir_tools import register_fhir_read_tools
 from copilot.graph.deps import GraphDeps
 from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
-from copilot.ingestion.extractor import ExtractionError, FhirBinaryByteSource
+from copilot.ingestion.extractor import ExtractionError, resolve_and_extract
 from copilot.ingestion.registry import DocumentFactHandle
 from copilot.rag.models import RetrievedGuideline
 from copilot.schemas import ChatResponse
@@ -199,29 +199,21 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         """
         if ctx.deps.extractor is None:
             return []
-        # Only extract a document the patient actually has — i.e. one list_documents returned.
-        # Rejects a hallucinated/guessed id and avoids wasting a Binary fetch + OCR (the expensive
-        # hop) on a document that isn't there. If discovery hasn't run, there is nothing to extract.
-        #
-        # This lookup is also what keeps the SCHEMA out of the model's hands: the doc type comes off
-        # the discovered record, resolved from its OpenEMR category, so the tool takes no doc_type
-        # argument the model could set. The model chooses WHICH document to read, never how to read
-        # it.
-        summary = next(
-            (doc for doc in (ctx.deps.documents_cache or []) if doc.resource_id == document_id),
-            None,
-        )
-        if summary is None:
-            return []
         # Memoized per document id: don't re-fetch + re-OCR a document already extracted this turn.
+        # The memo is only populated after a successful lookup+extract below, so checking it before
+        # the lookup is behavior-preserving (a hit means the id was already resolved this turn).
         if document_id in ctx.deps.extracted_documents:
             return ctx.deps.extracted_documents[document_id]
-        # Fetch the document's bytes over the request's own patient-scoped FHIR client (Binary),
-        # so the bytes are authorized by the open patient's access rights — keyed on the same id
-        # the citation + click-to-source viewer use.
-        byte_source = FhirBinaryByteSource(ctx.deps.fhir)
+        # resolve_and_extract is the shared core (also the /documents/{id}/extraction endpoint): it
+        # only extracts a document the patient actually has (rejects a hallucinated/guessed id
+        # before the expensive Binary fetch + OCR), and reads the schema off the discovered record's
+        # OpenEMR category — so the model chooses WHICH document to read, never how to read it. The
+        # bytes ride the request's own patient-scoped FHIR client. All registry side effects stay
+        # HERE in the tool; the helper records nothing.
         try:
-            extracted = await ctx.deps.extractor.extract(document_id, summary.doc_type, byte_source)
+            extracted = await resolve_and_extract(
+                document_id, ctx.deps.documents_cache or [], ctx.deps.extractor, ctx.deps.fhir
+            )
         except ExtractionError:
             # The document could not be read — return no facts so the worker reports the gap
             # rather than fabricating facts around a failed OCR.
@@ -235,9 +227,12 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
             # rediscover.
             logger.warning(
                 "document extraction failed; reporting no facts for this document",
-                extra={"document_id": document_id, "doc_type": summary.doc_type.value},
+                extra={"document_id": document_id},
                 exc_info=True,
             )
+            return []
+        if extracted is None:
+            # Not one of the patient's uploaded documents (a guessed id) — no facts.
             return []
         # Record the extracted facts so the grounding gate can resolve any the worker cites.
         handles = ctx.deps.documents.record(extracted)

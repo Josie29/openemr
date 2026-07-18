@@ -1,9 +1,10 @@
 # Clinical Co-Pilot — runnable API collection
 
 A [Bruno](https://www.usebruno.com/) collection that exercises the deployed Clinical Co-Pilot
-agent end to end — liveness, readiness, the authorization boundary, and a multi-turn grounded
-conversation — **without reading any source code**. Bruno collections are plain-text `.bru`
-files, so this whole folder version-controls and diffs in git (unlike a Postman JSON blob).
+agent end to end — liveness, readiness, the authorization boundary, a multi-turn grounded
+conversation, and each Week-2 subsystem (document listing, extraction, evidence retrieval) —
+**without reading any source code**. Bruno collections are plain-text `.bru` files, so this whole
+folder version-controls and diffs in git (unlike a Postman JSON blob).
 
 Target: the live prod agent at `https://copilot-agent-production-eb24.up.railway.app`.
 
@@ -18,10 +19,22 @@ Target: the live prod agent at `https://copilot-agent-production-eb24.up.railway
 | 05 | Chat - New Turn | bearer | 200 `summary` + `claims` | Grounded answer with per-claim citations |
 | 06 | Chat - Follow-up | bearer | 200 | Multi-turn context (reuses `conversation_id`) |
 | 07 | Chat - Patient Mismatch | bearer | **403** | A conversation can't be steered to another patient |
+| 08 | Documents - List | bearer | 200 `documents` | Lists the patient's uploaded lab/intake documents |
+| 09 | Document Extraction | bearer | 200 `report` | Strict-schema extraction of one doc (cited, boxed) |
+| 10 | Evidence - Search | bearer | 200 `evidence` | Ranked guideline chunks from the RAG corpus |
+| 11 | Chat - Full Week-2 Flow | bearer | 200 `summary` + `claims` | The whole supervisor graph, composed, end to end |
 
 01–03 run cold against prod with **zero setup** — they need no token. 04 mints the token
-04–07 depend on. The two negative cases (03, 401 and 07, 403) are the authorization
+04–11 depend on. The two negative cases (03, 401 and 07, 403) are the authorization
 boundary tests: they hold whether or not you have a valid token.
+
+**Week-2 endpoints (08–11).** 08–10 are read-only GET endpoints that exercise each Week-2
+subsystem *directly*, without paying for a full `/chat` turn: 08 lists the uploaded documents,
+09 extracts one into its strict schema (chaining the `document_id` 08 stashes), 10 runs guideline
+retrieval. 11 then drives the same subsystems through the supervisor graph in one `/chat` turn.
+There is **no document-upload endpoint** — documents are uploaded in the OpenEMR UI (the SMART
+token is read-only by design), and there is **no async extraction-status endpoint** — extraction
+is synchronous, so request 09's response *is* the status.
 
 ## Setup
 
@@ -32,7 +45,8 @@ boundary tests: they hold whether or not you have a valid token.
      submission, never committed. If you received a filled `prod.bru` with the submission,
      drop it in and skip the copy.
 3. **Select the `prod` environment** in Bruno (top-right).
-4. **Run 04 (Refresh Token) first**, then 05 → 06 → 07. Or use the CLI:
+4. **Run 04 (Refresh Token) first**, then 05 → 06 → 07 → 08 → 09 → 10 → 11 (09 needs 08 first,
+   which stashes the `document_id` it extracts). Or use the CLI:
    ```bash
    bru run --env prod
    ```
@@ -42,11 +56,14 @@ boundary tests: they hold whether or not you have a valid token.
 - **No secrets are committed.** `client_id`, `client_secret`, and `refresh_token` live only in
   the git-ignored `prod.bru`, handed over with the submission. The committed
   `prod.example.bru` carries placeholders.
-- **The token is narrow.** It is a SMART **patient-scoped**, read-only token
-  (`patient/*.read`) bound to one demo patient (Adrian Becker, all-synthetic Synthea data).
-  It cannot write, and cannot read another patient — request 07 shows the agent refusing a
-  cross-patient turn. There are no database credentials anywhere in the agent; the token is
-  the only key it holds.
+- **The token is narrow.** It is a SMART **patient-scoped**, read-only token bound to one demo
+  patient (Sergio Angulo, prod pid 23, all-synthetic demo data). Its scopes are read-only
+  `patient/*.read` — including `patient/DocumentReference.read` (list uploaded documents) and
+  `patient/Binary.read` (fetch a document's PDF bytes for extraction). It **cannot write** —
+  which is why document *upload* is a UI-only step and derived facts are written back through a
+  separate, physician-session-authed path, never this token — and it cannot read another patient
+  (request 07 shows the agent refusing a cross-patient turn). There are no database credentials
+  anywhere in the agent; the token is the only key it holds.
 - **Prod stays locked down.** The insecure OAuth2 password grant is **not** enabled on the
   deployment. Tokens are minted out-of-band with OpenEMR's CLI (below), never via a public
   self-service grant.
@@ -68,9 +85,11 @@ agent/scripts/mint-fhir-token.sh --graded-only
 
 It prompts for your OpenEMR username (default `admin`) and password, runs the mint on prod,
 then **auto-extracts** the fresh access + refresh tokens from the CLI's JSON output and writes
-both into `prod.bru` — no copy/paste. The scopes — including `patient/DocumentReference.read`,
-needed for clinical-note reads — live in one place at the top of the script. Override
-`CLIENT_ID` / `PATIENT_ID` via env vars to target a different client or patient.
+them — plus the resolved `patient_id` — into `prod.bru` (no copy/paste). It also **resolves the
+demo patient's FHIR UUID from the stable pid (23)**, so you never hard-code it. The scopes —
+including `patient/DocumentReference.read` (note reads + document listing) and `patient/Binary.read`
+(fetch a document's bytes for extraction) — live in one place at the top of the script. Override
+`PATIENT_PID` (or pin `PATIENT_ID`) / `CLIENT_ID` via env vars to target a different chart or client.
 
 ### The manual way — CLI directly
 
@@ -78,12 +97,15 @@ Run OpenEMR's token CLI on the prod `openemr` service as the `apache` web user (
 password at the hidden prompt; username defaults to `admin`):
 
 ```bash
-railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=a234013f-932b-434c-8f21-9edc54ff3892 --scopes=openid,fhirUser,launch,patient/Patient.read,patient/Condition.read,patient/MedicationRequest.read,patient/AllergyIntolerance.read,patient/Encounter.read,patient/DocumentReference.read,offline_access'"
+railway ssh -s openemr "su -s /bin/sh apache -c 'cd /var/www/localhost/htdocs/openemr && php bin/console openemr-dev:api-generate-access-token --client-id=itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU --patient=<SERGIO_PROD_FHIR_UUID> --scopes=openid,fhirUser,launch,patient/Patient.read,patient/Condition.read,patient/MedicationRequest.read,patient/AllergyIntolerance.read,patient/Encounter.read,patient/DocumentReference.read,patient/Binary.read,offline_access'"
 ```
 
 - `--scopes` is a **comma-separated** list (the CLI splits on commas, not spaces).
-- `--patient` binds the token to one patient; `launch` + `patient/*.read` scope the FHIR
-  reads; `offline_access` is what makes the CLI also emit a refresh token.
+- `--patient` binds the token to one patient (the demo patient Sergio Angulo, prod pid 23);
+  `launch` + `patient/*.read` scope the FHIR reads; `offline_access` is what makes the CLI also
+  emit a refresh token. Resolve Sergio's FHIR UUID from his pid with:
+  `railway ssh -s openemr "mariadb --skip-ssl -h \$MYSQL_HOST -u \$MYSQL_USER -p\$MYSQL_PASS openemr -N -e \"SELECT LOWER(CONCAT(SUBSTR(HEX(uuid),1,8),'-',SUBSTR(HEX(uuid),9,4),'-',SUBSTR(HEX(uuid),13,4),'-',SUBSTR(HEX(uuid),17,4),'-',SUBSTR(HEX(uuid),21,12))) FROM patient_data WHERE pid=23;\""`
+  (the helper script does this for you).
 - Paste the printed **refresh token** into `refresh_token` in `prod.bru`. The access token it
   also prints is optional — request 04 will mint a fresh one.
 - To target a different patient, swap `--patient` for another Patient UUID and update

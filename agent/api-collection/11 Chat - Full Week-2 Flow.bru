@@ -1,0 +1,39 @@
+meta {
+  name: 11 Chat - Full Week-2 Flow
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{base_url}}/chat
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+body:json {
+  {
+    "patient_id": "{{patient_id}}",
+    "message": "Give me a pre-visit summary for this patient: the current problems and medications from the chart, the results from the uploaded lab report, and what the guidelines recommend for any abnormal findings — cite every claim."
+  }
+}
+
+docs {
+  Week-2 full agent flow. One /chat turn that drives the whole supervisor graph end to end — the
+  FHIR record read, document extraction, AND guideline retrieval — composed into one grounded,
+  cited answer. This is the multi-agent counterpart to the granular endpoints (08–10): where those
+  exercise each subsystem in isolation, this proves they compose behind the supervisor.
+
+  The response is a `summary` plus grounded `claims`, each carrying a citation (a FHIR record, an
+  extracted lab fact, or a guideline chunk). Opens a fresh conversation; needs only 04 (token).
+}
+
+assert {
+  res.status: eq 200
+  res.body.summary: isDefined
+  res.body.claims: isDefined
+  res.body.conversation_id: isDefined
+}

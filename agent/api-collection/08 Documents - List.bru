@@ -1,0 +1,45 @@
+meta {
+  name: 08 Documents - List
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{base_url}}/documents?patient_id={{patient_id}}
+  body: none
+  auth: bearer
+}
+
+params:query {
+  patient_id: {{patient_id}}
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+docs {
+  Week-2 document listing. Lists the patient's UPLOADED documents (a lab PDF, an intake form) —
+  the ones the agent extracts, not the inline clinical notes. This is the read-only /documents
+  endpoint, so a grader can see the source documents directly without a /chat turn. Each entry
+  carries `resource_id`, `doc_type` (lab_pdf | intake_form), `title`, and `date`.
+
+  The post-response script stashes a lab document's `resource_id` into `document_id` so request 09
+  can extract it. Needs only 04 (token) first.
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const docs = res.getBody().documents || [];
+    const chosen = docs.find(d => d.doc_type === "lab_pdf") || docs[0];
+    if (chosen) {
+      bru.setEnvVar("document_id", chosen.resource_id);
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.patient_id: eq {{patient_id}}
+  res.body.documents: isDefined
+}

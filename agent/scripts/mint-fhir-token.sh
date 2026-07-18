@@ -22,13 +22,21 @@
 
 set -euo pipefail
 
-# --- identity (defaults match the demo patient, Adrian Becker) --------------------
+# --- identity (defaults match the demo patient, Sergio Angulo, prod pid 23) -------
 CLIENT_ID="${CLIENT_ID:-itdfnJA8SHPTnSpzCGTVDc4FkqaMIiqBwqvvgooYcQU}"
-PATIENT_ID="${PATIENT_ID:-a234013f-932b-434c-8f21-9edc54ff3892}"
+# The FHIR Patient logical id (UUID) the token is scoped to. Prod assigns it, so rather than
+# hard-code it we resolve it from the demo patient's stable pid (23) below, unless PATIENT_ID is
+# pinned explicitly. PATIENT_PID targets a different chart by pid.
+PATIENT_ID="${PATIENT_ID:-}"
+PATIENT_PID="${PATIENT_PID:-23}"
+PATIENT_NAME=""
 
-# Single source of truth for the scopes. patient/DocumentReference.read is REQUIRED
-# for the clinical-note read (agent get_encounter_note / substrate request 06);
-# offline_access is what makes the CLI emit a refresh token at all.
+# Single source of truth for the scopes.
+# - patient/DocumentReference.read: the clinical-note read (get_encounter_note) AND listing a
+#   patient's uploaded documents (get_documents / GET /documents).
+# - patient/Binary.read: fetch an uploaded lab/intake PDF's bytes for extraction
+#   (GET /Binary/{id} — attach_and_extract and the GET /documents/{id}/extraction endpoint).
+# - offline_access: what makes the CLI emit a refresh token at all.
 SCOPES="openid,fhirUser,launch,\
 patient/Patient.read,\
 patient/Condition.read,\
@@ -37,6 +45,7 @@ patient/AllergyIntolerance.read,\
 patient/Encounter.read,\
 patient/Observation.read,\
 patient/DocumentReference.read,\
+patient/Binary.read,\
 offline_access"
 
 # --- resolve target env files -----------------------------------------------------
@@ -86,6 +95,23 @@ CLIENT_SECRET="$(gv client_secret)"
 if [[ -z "$OAUTH_URL" || -z "$CLIENT_SECRET" || "$CLIENT_SECRET" == "<CLIENT_SECRET>" ]]; then
   echo "error: oauth_url / client_secret missing from $GRADED_ENV — fill them in first." >&2
   exit 1
+fi
+
+# --- resolve the patient UUID from pid, unless pinned -----------------------------
+# Prod assigns the FHIR logical id, so resolve it from the stable pid via the same prod DB access
+# the clone tooling uses (openemr container has the mariadb client + $MYSQL_*). patient_data.uuid is
+# binary(16); format it to the canonical 8-4-4-4-12 string the FHIR API uses. Pin PATIENT_ID to skip.
+if [[ -z "$PATIENT_ID" ]]; then
+  echo "Resolving prod FHIR Patient UUID for pid ${PATIENT_PID}…"
+  read -r PATIENT_ID PATIENT_NAME < <(
+    railway ssh -s openemr "mariadb --skip-ssl -h \"\$MYSQL_HOST\" -u \"\$MYSQL_USER\" -p\"\$MYSQL_PASS\" openemr -N -e \"SELECT LOWER(CONCAT(SUBSTR(HEX(uuid),1,8),'-',SUBSTR(HEX(uuid),9,4),'-',SUBSTR(HEX(uuid),13,4),'-',SUBSTR(HEX(uuid),17,4),'-',SUBSTR(HEX(uuid),21,12))), CONCAT(fname,' ',lname) FROM patient_data WHERE pid=${PATIENT_PID};\"" 2>/dev/null
+  ) || true
+  if [[ ! "$PATIENT_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    echo "error: could not resolve a FHIR UUID for pid ${PATIENT_PID} from prod." >&2
+    echo "       pin it explicitly:  PATIENT_ID=<uuid> agent/scripts/mint-fhir-token.sh" >&2
+    exit 1
+  fi
+  echo "  pid ${PATIENT_PID} -> ${PATIENT_ID} (${PATIENT_NAME:-unknown})"
 fi
 
 # --- run the mint on prod, capture output to a private temp file ------------------
@@ -155,9 +181,14 @@ echo "  verified: refresh grant returned a working pair (access ${#NEW_AT} chars
 
 # --- write the verified, rotated pair into env file(s) ----------------------------
 for f in "${targets[@]}"; do
-  NEW_RT="$NEW_RT" NEW_AT="$NEW_AT" awk '
+  # Also rewrite patient_id (and patient_name, when resolved) so the delivered env stays coherent
+  # with the token's patient scope — a token minted for a different patient than the env's
+  # patient_id would 403 every read. Lines absent from an env file are left untouched.
+  NEW_RT="$NEW_RT" NEW_AT="$NEW_AT" PID="$PATIENT_ID" PNAME="$PATIENT_NAME" awk '
     /^[[:space:]]*refresh_token:/ { print "  refresh_token: " ENVIRON["NEW_RT"]; next }
     /^[[:space:]]*access_token:/  { print "  access_token: " ENVIRON["NEW_AT"];  next }
+    /^[[:space:]]*patient_id:/    { print "  patient_id: " ENVIRON["PID"]; next }
+    /^[[:space:]]*patient_name:/  { if (ENVIRON["PNAME"] != "") print "  patient_name: " ENVIRON["PNAME"]; else print; next }
     { print }
   ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   label="$(basename "$(dirname "$(dirname "$f")")")"

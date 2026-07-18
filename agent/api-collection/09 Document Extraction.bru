@@ -1,0 +1,37 @@
+meta {
+  name: 09 Document Extraction
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/documents/{{document_id}}/extraction?patient_id={{patient_id}}
+  body: none
+  auth: bearer
+}
+
+params:query {
+  patient_id: {{patient_id}}
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
+
+docs {
+  Week-2 extraction. Runs the VLM/OCR extraction on one uploaded document and returns its
+  strict-schema facts — for a lab report: each result's test name, value, unit, reference range,
+  abnormal flag, per-value confidence, and a bounding box for click-to-source. `doc_type` is
+  resolved server-side from the document's category (never a caller input).
+
+  There is no separate "upload" or "extraction status" endpoint: uploading is done in the OpenEMR
+  UI, and extraction is synchronous — this response IS the result. Uses `document_id` stashed by
+  request 08, so run 08 first (then 04 for the token).
+}
+
+assert {
+  res.status: eq 200
+  res.body.document_id: eq {{document_id}}
+  res.body.doc_type: isDefined
+  res.body.report: isDefined
+}

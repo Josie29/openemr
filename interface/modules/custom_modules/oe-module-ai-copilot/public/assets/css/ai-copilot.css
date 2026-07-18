@@ -947,8 +947,7 @@ body.ai-copilot-resizing {
     filter: brightness(1.15);
 }
 
-.ai-copilot__doc-num--provable:focus-visible,
-.ai-copilot__labs-col--provable:focus-visible {
+.ai-copilot__doc-num--provable:focus-visible {
     outline: 2px solid var(--copilot-accent);
     outline-offset: 2px;
 }
@@ -962,6 +961,13 @@ body.ai-copilot-resizing {
 .ai-copilot__labs-col--provable:hover {
     color: var(--copilot-accent);
     text-decoration: underline;
+}
+
+/* Kept after its own base rule rather than shared with the badge's focus ring above: a
+   pseudo-class listed before the plain selector it qualifies is a descending-specificity trap. */
+.ai-copilot__labs-col--provable:focus-visible {
+    outline: 2px solid var(--copilot-accent);
+    outline-offset: 2px;
 }
 
 /* A value that can prove itself against the scan. Deliberately quiet — a dotted underline that

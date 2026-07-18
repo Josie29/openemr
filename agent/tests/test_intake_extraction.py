@@ -275,6 +275,9 @@ def test_checkbox_detection_ignores_letter_x_in_prose() -> None:
     happened to be nearest and start asserting facts the patient never claimed.
     """
     boxes = extract_checkboxes(_pdf("sergio-angulo-intake-form"))
+    # None means the detector could not run at all; this fixture must actually be parseable, or the
+    # assertions below would be vacuously checking "we saw nothing".
+    assert boxes is not None, "checkbox evidence must be available for this fixture"
     assert len(boxes) == 10, "v1 has ten tick boxes"
     # Five conditions plus one sex option are ticked; the rest are offered but unclaimed.
     assert sum(1 for box in boxes if box.ticked) == 6

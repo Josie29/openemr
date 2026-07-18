@@ -139,7 +139,8 @@ def test_secondary_fields_are_boxed_in_their_own_columns() -> None:
     value_box = glucose.citation.bounding_box
     range_box = glucose.reference_range.citation.bounding_box
     unit_box = glucose.unit.citation.bounding_box
-    assert None not in (name_box, code_box, value_box, range_box, unit_box)
+    assert name_box is not None and code_box is not None and value_box is not None
+    assert range_box is not None and unit_box is not None
 
     # The report's columns run TEST | LOINC | RESULT | FLAG | REFERENCE RANGE | UNITS, left to
     # right — so boxing the whole row means five rectangles in that order.

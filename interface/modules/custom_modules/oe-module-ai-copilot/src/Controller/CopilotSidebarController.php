@@ -124,6 +124,9 @@ final readonly class CopilotSidebarController
             'data-label-toggle="' . xla('Co-Pilot') . '"',
             'data-label-auth-failed="' . xla('Could not authorize against the record. Try again.') . '"',
             'data-label-unavailable="' . xla('The co-pilot could not answer that. Please try again.') . '"',
+            // Shown when a turn exceeds the client-side deadline with no response (hung/offline agent),
+            // distinct from `unavailable` which implies the agent answered but declined.
+            'data-label-timeout="' . xla('The assistant did not respond. It may be offline - please try again.') . '"',
             'data-label-clear-confirm="' . xla('Clear this conversation? This cannot be undone.') . '"',
             // Caption under the animated indicator while a turn is in flight (spec §5.3.1).
             'data-label-thinking="' . xla('Checking the record...') . '"',

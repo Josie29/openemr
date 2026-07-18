@@ -21,6 +21,11 @@
 
     var EXPIRY_SKEW_MS = 60 * 1000; // re-launch this long before the token's stated expiry
     var LAUNCH_TIMEOUT_MS = 30 * 1000; // a launch that never posts back must not hang the panel
+    // The browser calls the agent directly (no server-side proxy in the chat path), so a hung or
+    // suspended agent would leave the turn's fetch pending forever and the panel stuck on
+    // "Checking the record...". Bound each attempt; 90s clears a real OCR-heavy turn (20-40s) with
+    // headroom while still failing a dead agent in bounded time.
+    var CHAT_TIMEOUT_MS = 90 * 1000;
     var LAUNCH_FAILURES = ['launch_failed', 'token_exchange_failed', 'launch_timeout'];
 
     var LS_OPEN = 'aicopilot.open';
@@ -1796,14 +1801,35 @@
     }
 
     function postChat(message) {
+        // Each attempt gets its own deadline: on the 401 re-launch path sendTurn calls this twice,
+        // and the first attempt's timer is already cleared by the time the second fires.
+        var controller = new AbortController();
+        var timer = window.setTimeout(function () {
+            controller.abort();
+        }, CHAT_TIMEOUT_MS);
         return fetch(config.chatUrl, {
             method: 'POST',
             mode: 'cors',
+            signal: controller.signal,
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + token.accessToken
             },
             body: JSON.stringify({ patient_id: token.patient, message: message })
+        }).then(function (response) {
+            window.clearTimeout(timer);
+            return response;
+        }, function (err) {
+            window.clearTimeout(timer);
+            // An AbortError means our deadline fired -> the agent never responded. Retag it so the
+            // turn's catch shows the "no response / may be offline" message, not the generic fallback
+            // (which implies the agent answered but declined).
+            if (err && err.name === 'AbortError') {
+                var timeoutErr = new Error('chat_timeout');
+                timeoutErr.timedOut = true;
+                throw timeoutErr;
+            }
+            throw err;
         });
     }
 
@@ -1860,6 +1886,10 @@
                 if (LAUNCH_FAILURES.indexOf(err.message) !== -1) {
                     setStatus(labels.authFailed, true);
                     appendError(labels.authFailed);
+                    return;
+                }
+                if (err && err.timedOut) {
+                    appendError(labels.timeout);
                     return;
                 }
                 // Only surface a message we authored (the agent's {error} body). Raw browser
@@ -2291,6 +2321,10 @@
         labels = {
             authFailed: els.sidebar.dataset.labelAuthFailed,
             unavailable: els.sidebar.dataset.labelUnavailable,
+            // Shown when the turn's fetch hits CHAT_TIMEOUT_MS with no response (hung/offline agent).
+            // Defaulted so it works before the PHP island grows the data-label-timeout attribute.
+            timeout: els.sidebar.dataset.labelTimeout
+                || 'The assistant did not respond. It may be offline — please try again.',
             clearConfirm: els.sidebar.dataset.labelClearConfirm,
             thinking: els.sidebar.dataset.labelThinking,
             hasConversation: els.sidebar.dataset.labelHasConversation,

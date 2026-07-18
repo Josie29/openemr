@@ -11,6 +11,7 @@ from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, Usag
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from copilot.api_schemas import (
@@ -304,7 +305,12 @@ def _build_model(settings: Settings) -> Model:
     """
     _, _, model_id = settings.model_tier.value.partition(":")
     provider = AnthropicProvider(api_key=settings.anthropic_api_key or "not-configured")
-    return AnthropicModel(model_id, provider=provider)
+    # Lift pydantic-ai's 4096-token Anthropic default: a full lab report's claims overran it
+    # (finish_reason=length), dropping the claims array and degrading the turn to a fabrication.
+    # Short document-fact aliases keep normal outputs well under this — a backstop, not a target.
+    return AnthropicModel(
+        model_id, provider=provider, settings=ModelSettings(max_tokens=8192)
+    )
 
 
 # Shared across the FHIR-backed read endpoints (a document read failing surfaces the same way

@@ -591,6 +591,15 @@ the framework unchanged, we attach it in **three** places rather than one — al
 3. **On the final answer** — a **composite of both resolvers**: reject any clinical claim lacking
    the full citation shape (§3.3), exactly as Week 1 did for the single agent.
 
+The intake-extractor gate additionally rejects a **summary that reports extracted facts but carries
+zero claims** — the hole that let a lab-report turn silently fail. `ground_claims([])` has no
+offenders, so an empty claims list is not "ungrounded"; the emptied answer reached the composer,
+which fabricated a citation to fill it. Forcing a retry when facts were extracted but none is cited
+keeps the failure direction a refusal, not a fabrication. And so a full report's worth of claims fits
+the model's output budget, a document fact's *grounding* id is a **short turn-local alias** (`d1#0`),
+not the 36-char document UUID a weak model both truncated (dropping later claims) and fabricated; the
+real `document_id` still rides each fact for the click-to-source overlay (§3.3).
+
 **One seam, reused three times, not rebuilt** — a single citation-resolver abstraction with a
 FHIR-fetch-log implementation for record claims, a chunk-registry implementation for evidence
 claims, and a composite of the two for the final answer. This is the mechanical enforcement of the

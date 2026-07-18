@@ -1,6 +1,6 @@
 import logging
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
 
 from copilot.fhir.models import UploadedDocumentSummary
@@ -248,7 +248,22 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     async def enforce_grounding(
         ctx: RunContext[GraphDeps], output: ExtractorOutput
     ) -> ExtractorOutput:
-        """Reject any intake claim not grounded in a FHIR record read or a lab fact extracted."""
+        """Reject any claim not grounded in a FHIR read or an extracted fact.
+
+        Also rejects a zero-claim output when facts were extracted — a dropped claims array
+        (e.g. a truncated structured output) has no offenders for ``ground_claims`` to catch, so it
+        would silently hand the composer an empty answer to fabricate around.
+
+        Raises:
+            ModelRetry: When a claim is ungrounded, or facts were extracted but none is cited.
+        """
+        extracted_count = sum(len(handles) for handles in ctx.deps.extracted_documents.values())
+        if extracted_count and not output.claims:
+            raise ModelRetry(
+                f"You extracted {extracted_count} fact(s) from the document(s) this turn but "
+                "returned zero claims. Emit one claim per fact you are reporting, each citing the "
+                "fact's resource_type and resource_id verbatim from the tool result."
+            )
         resolver = CompositeResolver((ctx.deps.fetched, ctx.deps.documents))
         return enforce_claim_grounding(output, resolver, subject="intake-extractor")
 

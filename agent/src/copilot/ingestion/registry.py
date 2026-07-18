@@ -28,8 +28,10 @@ from copilot.verification import Resolution
 # also fetches — so this applies to labs too.
 #
 # What keeps the two resolvers from shadowing each other is therefore ID-disjointness, not
-# type-disjointness. A document fact's id is `<document_id>#<ordinal>`, which is never a FHIR uuid,
-# so the FetchLog misses every document-fact id and this registry misses every FHIR id.
+# type-disjointness. A document fact's id is `<doc-alias>#<ordinal>` (e.g. `d1#0`) — a short,
+# turn-local alias for the document, `#`-suffixed and so never a FHIR uuid — so the FetchLog misses
+# every document-fact id and this registry misses every FHIR id (the alias is short so a
+# claims-heavy answer fits the model's output budget — see `_doc_aliases`).
 # `CompositeResolver` (verification.py:52-69) tries the FetchLog first and falls through on a miss,
 # so each citation reaches exactly the one resolver that owns it. This invariant is load-bearing —
 # it is what the tags' change cost us — and is covered explicitly by tests/test_document_facts.py.
@@ -207,6 +209,11 @@ class DocumentFactRegistry:
     """
 
     _facts: dict[str, _RecordedFact] = field(default_factory=dict)
+    # document_id -> short turn-local alias ("d1", …): a claim cites `<alias>#<ordinal>`, not
+    # `<document_id>#<ordinal>`. Short id = a full report's claims fit the output budget and copy
+    # cleanly (the 36-char uuid was truncated AND fabricated). The real document_id rides each
+    # `_RecordedFact` for click-to-source.
+    _doc_aliases: dict[str, str] = field(default_factory=dict)
 
     def record(self, extracted: ExtractedDocument) -> list[DocumentFactHandle]:
         """Record an extracted document's facts and return their citable handles.
@@ -403,6 +410,18 @@ class DocumentFactRegistry:
             )
         return handles
 
+    def _doc_alias(self, document_id: str) -> str:
+        """This turn's short, stable alias for a document (``d1``, ``d2``, …).
+
+        Memoized per ``document_id`` in first-seen order, so every fact from one document shares an
+        alias and a re-extract reuses it — deterministic within a turn.
+        """
+        alias = self._doc_aliases.get(document_id)
+        if alias is None:
+            alias = f"d{len(self._doc_aliases) + 1}"
+            self._doc_aliases[document_id] = alias
+        return alias
+
     def _store(
         self,
         extracted: ExtractedDocument,
@@ -427,9 +446,9 @@ class DocumentFactRegistry:
                 citing claim for the sidebar's lab table. None for every non-lab fact.
 
         Returns:
-            The fact's ``<document_id>#<ordinal>`` resource id.
+            The fact's short ``<doc-alias>#<ordinal>`` citation id (e.g. ``d1#0``).
         """
-        resource_id = f"{extracted.document_id}#{ordinal}"
+        resource_id = f"{self._doc_alias(extracted.document_id)}#{ordinal}"
         self._facts[resource_id] = _RecordedFact(
             resource_type=resource_type_for(kind),
             value=value,

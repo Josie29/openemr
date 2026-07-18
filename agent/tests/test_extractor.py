@@ -279,8 +279,9 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
                     )
                 ]
             )
-        # Cite the first extracted fact — Glucose is ordinal 0, so its id is
-        # "labreport-2026-07#0" (the seeded document id, which the fixture byte source keys on).
+        # Cite the first extracted fact — Glucose is ordinal 0 and its document is the first seen
+        # this turn, so its citation id is the short alias "d1#0" (the real document_id
+        # "labreport-2026-07" still rides the fact for click-to-source — asserted below).
         output = ExtractorOutput(
             summary="Fasting glucose is high.",
             claims=[
@@ -288,7 +289,7 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
                     text="Fasting glucose was 108 mg/dL (high).",
                     source=SourceRef(
                         resource_type=DOCUMENT_FACT_RESOURCE_TYPE,
-                        resource_id="labreport-2026-07#0",
+                        resource_id="d1#0",
                         field="value",
                     ),
                 )
@@ -400,7 +401,7 @@ async def test_attach_and_extract_memoizes_per_document() -> None:
                     text="Fasting glucose 108 (high).",
                     source=SourceRef(
                         resource_type=DOCUMENT_FACT_RESOURCE_TYPE,
-                        resource_id="labreport-2026-07#0",
+                        resource_id="d1#0",
                         field="value",
                     ),
                 )
@@ -410,8 +411,61 @@ async def test_attach_and_extract_memoizes_per_document() -> None:
             parts=[ToolCallPart(tool_name=_final_tool_name(info), args=out.model_dump(mode="json"))]
         )
 
-    result = await build_intake_extractor(FunctionModel(respond)).run("synthesize", deps=deps)
+    await build_intake_extractor(FunctionModel(respond)).run("synthesize", deps=deps)
     assert spy.calls == 1  # extracted once despite two attach_and_extract calls
+
+
+async def test_intake_extractor_retries_when_facts_extracted_but_no_claims() -> None:
+    """Extracting facts but returning zero claims is retried, not passed through.
+
+    Reproduces the lab-report refusal: the model summarized the labs but dropped the claims array,
+    which grounding can't catch (``ground_claims([])`` has no offenders). The empty answer reached
+    the composer and became a fabricated citation; the forced retry recovers a real claim.
+    """
+    deps = _extractor_deps(
+        _SpyExtractor(),
+        [
+            UploadedDocumentSummary(
+                resource_id="labreport-2026-07", doc_type=DocType.LAB_PDF, title="lab.pdf"
+            )
+        ],
+    )
+    state = {"i": 0}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        state["i"] += 1
+        if state["i"] == 1:  # read the document
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="attach_and_extract", args={"document_id": "labreport-2026-07"}
+                    )
+                ]
+            )
+        if state["i"] == 2:  # the bug: a summary of the facts, but the claims array dropped
+            out = ExtractorOutput(summary="Multiple lab abnormalities.", claims=[])
+            empty = out.model_dump(mode="json")
+            return ModelResponse(parts=[ToolCallPart(tool_name=_final_tool_name(info), args=empty)])
+        # the guard's ModelRetry lands us here — now cite the extracted fact properly
+        out = ExtractorOutput(
+            summary="Fasting glucose is high.",
+            claims=[
+                Claim(
+                    text="Fasting glucose was 108 mg/dL (high).",
+                    source=SourceRef(
+                        resource_type=DOCUMENT_FACT_RESOURCE_TYPE, resource_id="d1#0", field="value"
+                    ),
+                )
+            ],
+        )
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=_final_tool_name(info), args=out.model_dump(mode="json"))]
+        )
+
+    agent = build_intake_extractor(FunctionModel(respond))
+    result = await agent.run("What do the labs show?", deps=deps)
+    assert state["i"] == 3  # the empty-claims output was rejected and retried, not accepted
+    assert len(result.output.claims) == 1  # the retry recovered a grounded claim
     assert result.output.claims[0].source.value == "108"  # the memoized fact still grounds
 
 

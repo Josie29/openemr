@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from copilot.fhir.client import FhirClient
 from copilot.fhir.models import UploadedDocumentSummary
@@ -7,6 +8,18 @@ from copilot.ingestion.registry import DocumentFactHandle, DocumentFactRegistry
 from copilot.rag.retriever import EvidenceRetriever
 from copilot.retrieval import ChunkRegistry
 from copilot.verification import FetchLog
+
+
+class BudgetedTool(StrEnum):
+    """Tools that carry a per-agent-run call budget. Value is the tool's name as the model sees it.
+
+    Both members are tools whose result a stuck model reads as "retry" rather than "this is the
+    answer": an empty document list and an unhelpful guideline hit. Neither becomes truer on the
+    ninth call, and both have run a turn into the tool-call ceiling.
+    """
+
+    LIST_DOCUMENTS = "list_documents"
+    SEARCH_GUIDELINES = "search_guidelines"
 
 
 @dataclass
@@ -39,6 +52,10 @@ class GraphDeps:
     chunks: ChunkRegistry
     documents: DocumentFactRegistry
     extractor: DocumentExtractor | None
+    # Max calls per agent run, per tool. No default on purpose: a construction site that forgets
+    # these should fail, not silently run unbudgeted. An absent KEY is still unlimited, so
+    # budgeting stays opt-in per tool.
+    tool_budgets: dict[BudgetedTool, int]
     # Per-turn memo for list_documents: the discovery FHIR read happens once, so repeated tool
     # calls (e.g. a model retrying on an empty result) are cheap cache hits, not extra round-trips.
     documents_cache: list[UploadedDocumentSummary] | None = None

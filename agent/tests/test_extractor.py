@@ -267,7 +267,8 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
                 resource_id="labreport-2026-07", doc_type=DocType.LAB_PDF, title="lab.pdf"
             )
         ],
-    )
+               tool_budgets={},
+           )
 
     state = {"extracted": False}
 
@@ -338,7 +339,8 @@ def _extractor_deps(
         chunks=ChunkRegistry(),
         documents=DocumentFactRegistry(),
         documents_cache=cache,
-    )
+               tool_budgets={},
+           )
 
 
 async def test_attach_and_extract_ignores_undiscovered_document() -> None:

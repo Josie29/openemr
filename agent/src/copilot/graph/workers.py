@@ -5,7 +5,8 @@ from pydantic_ai.models import Model
 
 from copilot.fhir.models import UploadedDocumentSummary
 from copilot.fhir_tools import register_fhir_read_tools
-from copilot.graph.deps import GraphDeps
+from copilot.graph.budget import budgeted
+from copilot.graph.deps import BudgetedTool, GraphDeps
 from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.ingestion.extractor import ExtractionError, resolve_and_extract
@@ -114,7 +115,13 @@ Cite guideline snippets with resource_type `guideline` and the snippet's `chunk_
 and set `quote` to a span copied verbatim from THAT snippet's `text` — word-for-word from the
 `text`, nothing else. Surface criteria, thresholds, screening intervals, and monitoring cadence —
 never dosing directives. If retrieval returns nothing relevant, say so in the summary and return no
-claims rather than inventing evidence."""
+claims rather than inventing evidence.
+
+Use at most a few focused searches. If two or three queries have not surfaced relevant snippets,
+the corpus does not cover the question — report that no guideline evidence was found and stop.
+Rephrasing the same question further will not find it, and the searches are budgeted: past that
+budget `search_guidelines` returns nothing at all, so continuing only spends the turn's tool
+allowance that composing the answer still needs."""
 
 # Langfuse Prompt Management name for the physician-facing answer prompt. The final answer is the
 # turn's user-visible output, so this is the prompt version stamped on each trace (the router and
@@ -175,7 +182,7 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
     )
     register_fhir_read_tools(agent)
 
-    @agent.tool
+    @agent.tool(prepare=budgeted(BudgetedTool.LIST_DOCUMENTS))
     async def list_documents(ctx: RunContext[GraphDeps]) -> list[UploadedDocumentSummary]:
         """List the patient's uploaded documents (id, title, date, doc_type) for extraction.
 
@@ -184,8 +191,9 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         before answering from the chart alone. An uploaded `medication_list` is a primary source for
         a medications question, not a fallback.
 
-        Memoized per turn: the FHIR discovery read runs once, so repeated calls (a model retrying on
-        an empty list) return the cached result instead of hammering FHIR.
+        The result is FIXED for the whole turn: it is read once and memoized, so calling this again
+        returns exactly the same list. An empty list means this patient has no uploaded documents —
+        that is the answer, not a transient failure to retry.
 
         Args:
             ctx: The run context (holds the patient-scoped FHIR client).
@@ -302,7 +310,7 @@ def build_evidence_retriever(model: Model) -> Agent[GraphDeps, RetrieverOutput]:
         retries=2,
     )
 
-    @agent.tool
+    @agent.tool(prepare=budgeted(BudgetedTool.SEARCH_GUIDELINES))
     async def search_guidelines(
         ctx: RunContext[GraphDeps], query: str
     ) -> list[RetrievedGuideline]:

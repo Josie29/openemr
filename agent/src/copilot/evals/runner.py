@@ -12,6 +12,7 @@ from pydantic_ai.usage import UsageLimits
 from copilot.config import ModelTier, Settings, get_settings
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.fhir.models import UploadedDocumentSummary
+from copilot.graph.budget import tool_budgets
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.ingestion.extractor import DocumentExtractor, FixtureOcrBackend
@@ -197,6 +198,7 @@ async def run_case(
         # and the run stays deterministic and OCR-call-free, matching the fixture-only PHI-free
         # contract.
         documents=DocumentFactRegistry(),
+        tool_budgets=tool_budgets(settings),
         extractor=_fixture_extractor_for(await fhir.get_documents(patient_id)),
     )
     try:

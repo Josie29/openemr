@@ -140,7 +140,8 @@ def _deps_with_extractions(extractions: dict[str, ExtractedDocument]) -> GraphDe
         documents=DocumentFactRegistry(),
         extractor=cast(DocumentExtractor, None),
         extractions=extractions,
-    )
+               tool_budgets={},
+           )
 
 
 def _lab_extraction() -> ExtractedDocument:

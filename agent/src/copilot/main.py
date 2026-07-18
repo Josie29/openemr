@@ -26,6 +26,7 @@ from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.fhir.models import LabObservation
+from copilot.graph.budget import tool_budgets
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
@@ -550,6 +551,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 fetched=session.fetched,
                 chunks=session.chunks,
                 documents=session.documents,
+                tool_budgets=tool_budgets(settings),
             )
 
             with observe_turn(

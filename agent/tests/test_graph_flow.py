@@ -1,14 +1,17 @@
 from contextlib import ExitStack
+from dataclasses import dataclass
 
 import pytest
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.tools import RunContext, ToolDefinition
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from copilot.fhir.fixtures import FixtureFhirClient
-from copilot.graph.deps import GraphDeps
+from copilot.graph.budget import budgeted
+from copilot.graph.deps import BudgetedTool, GraphDeps
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.graph.routing import Route, RouteDecision
 from copilot.graph.supervisor import build_graph, run_graph
@@ -20,6 +23,27 @@ from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
 from copilot.schemas import ChatResponse, Claim, GuidelineCitation, SourceRef
 from copilot.verification import FetchLog
 from graph_script import StubRetriever
+
+
+@dataclass
+class _CountingRetriever(StubRetriever):
+    """A StubRetriever that records how many times the store was actually queried."""
+
+    calls: int = 0
+
+    async def retrieve(
+        self,
+        query: str,
+        *,
+        guideline: str | None = None,
+        source: str | None = None,
+        section: str | None = None,
+        top_n: int | None = None,
+    ) -> list[EvidenceSnippet]:
+        self.calls += 1
+        return await super().retrieve(
+            query, guideline=guideline, source=source, section=section, top_n=top_n
+        )
 
 # NOTE (same caveat as test_chat_flow): these tests drive each agent with a scripted FunctionModel,
 # so they depend on Pydantic AI's message/AgentInfo API. The behavior asserted — the supervisor
@@ -57,6 +81,7 @@ def _deps() -> GraphDeps:
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
         documents=DocumentFactRegistry(),
+        tool_budgets={},
     )
 
 
@@ -207,6 +232,105 @@ async def test_tool_call_ceiling_is_enforced_per_turn() -> None:
             await run_graph(
                 graph, "q", deps, TurnTrace(None), usage_limits=UsageLimits(tool_calls_limit=1)
             )
+
+
+async def test_guideline_search_budget_caps_retrievals_not_just_tool_calls() -> None:
+    """A looping retriever performs at most ``max_searches`` real retrievals in a turn.
+
+    The failure this guards is not hypothetical: asked for NSAID guidance in CKD — which the corpus
+    does not cover — the evidence-retriever fired NINE rephrased search_guidelines calls, exhausted
+    the turn-wide tool-call ceiling, and collapsed a turn whose extraction had already succeeded
+    into a refusal. pydantic-ai's UsageLimits is turn-wide and has no per-tool form, so one looping
+    tool can starve every other tool in the turn. The budget bounds the expensive half: past it the
+    tool short-circuits without touching the store, so a model that keeps calling burns no
+    retrieval, no Qdrant/Cohere spend, and no latency.
+
+    Asserts the RETRIEVAL count rather than the tool-call count on purpose — capping calls is what
+    the ceiling already does, and it is what fails the turn. Capping work is what makes the loop
+    harmless.
+    """
+    counting = _CountingRetriever(snippets=(_SNIPPET,))
+    deps = _deps()
+    deps.retriever = counting
+    deps.tool_budgets = {BudgetedTool.SEARCH_GUIDELINES: 2}
+
+    # A model that rephrases forever, the way the real one did. Each call carries a DIFFERENT valid
+    # query, so nothing is deduplicated and nothing fails validation — the budget is the only thing
+    # that can stop the retrievals.
+    state = {"n": 0}
+
+    def rephrasing_search(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        state["n"] += 1
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="search_guidelines",
+                    args={"query": f"NSAID kidney query {state['n']}"},
+                )
+            ]
+        )
+
+    # Either terminal outcome proves the point, and which one occurs is an artifact of the double:
+    # once the budget withholds the tool, this scripted model keeps calling a name no longer in the
+    # schema and dies on unknown-tool retries, where a real model simply stops. What the assertion
+    # below pins is the invariant common to both — the store was queried a bounded number of times.
+    retriever = build_evidence_retriever(TestModel())
+    with (
+        retriever.override(model=FunctionModel(rephrasing_search)),
+        pytest.raises((UsageLimitExceeded, UnexpectedModelBehavior)),
+    ):
+        await retriever.run(
+            "NSAIDs in chronic kidney disease?",
+            deps=deps,
+            usage_limits=UsageLimits(tool_calls_limit=8),
+        )
+
+    assert counting.calls == 2, (
+        f"the store was queried {counting.calls} times against a budget of 2 — a corpus that "
+        "cannot answer the question must cost a bounded number of retrievals, not one per rephrase"
+    )
+
+
+async def test_spent_budget_withholds_the_tool_from_the_model() -> None:
+    """A spent budget removes the tool from the schema the model is offered.
+
+    This is the half that actually stops the loop, and it is why the budget is a ``prepare`` hook
+    rather than a check inside the tool. A tool that returns "budget exhausted" is still callable,
+    and every call it accepts costs a full model round-trip: prod fired nine `list_documents` calls
+    at ~$0.024 each — $0.22 of a $0.30 turn — even though the tool was memoized and each repeat was
+    a free ~0.4s cache hit. Bounding the tool's work does not bound the loop's cost; withholding the
+    tool does.
+
+    If this regresses, the budget still caps the WORK but the model keeps paying to be told no.
+    """
+    deps = _deps()
+    deps.tool_budgets = {BudgetedTool.SEARCH_GUIDELINES: 1}
+    prepare = budgeted(BudgetedTool.SEARCH_GUIDELINES)
+    tool_def = ToolDefinition(
+        name=BudgetedTool.SEARCH_GUIDELINES.value, parameters_json_schema={}
+    )
+
+    def ctx_after(calls: int) -> RunContext[GraphDeps]:
+        """A run context whose history already holds ``calls`` calls to the budgeted tool."""
+        history: list[ModelMessage] = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name=BudgetedTool.SEARCH_GUIDELINES.value, args={"query": "q"}
+                    )
+                ]
+            )
+            for _ in range(calls)
+        ]
+        return RunContext(deps=deps, model=TestModel(), usage=RunUsage(), messages=history)
+
+    assert await prepare(ctx_after(0), tool_def) is tool_def, (
+        "an unspent budget must offer the tool"
+    )
+    assert await prepare(ctx_after(1), tool_def) is None, (
+        "a spent budget still offered the tool to the model — it can keep calling, and each call "
+        "costs a model round-trip whether or not the tool does any work"
+    )
 
 
 async def test_evidence_worker_gate_rejects_ungrounded_quote() -> None:

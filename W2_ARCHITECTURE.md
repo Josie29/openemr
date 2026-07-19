@@ -1150,6 +1150,35 @@ span, with the agent reporting "couldn't read the document" rather than guessing
 `fixture` retrieval/extractor mode the `vector_index` and `reranker` probes report ready without a
 network call, since no external service is in play.
 
+**Timeout budget — every outbound call bounded, and the turn bounded under the client.** Each value
+sits above the largest latency observed in production
+([`loadtest-results.md`](context/planning/loadtest-results.md)), so these cut genuine hangs rather
+than trimming the tail; all are settings, not literals (`config.py`).
+
+| Bound | Value | Set against |
+|---|---:|---|
+| FHIR read | 10s + 2 transport retries | (existing) |
+| Anthropic, per generation | 60s | max observed 41.3s |
+| Mistral OCR | 30s | max observed 16.5s |
+| Cohere rerank | 10s + 2 **SDK** retries | max observed 5.2s |
+| Qdrant query | 5s | private-network call |
+| **Whole `/chat` turn** | **85s** | **under the sidebar's 90s `CHAT_TIMEOUT_MS`** |
+
+The turn deadline is the one that matters most, and it is deliberately set *below* the browser's.
+Before it existed a slow turn ran unbounded server-side while the sidebar aborted at 90s and told
+the physician the assistant "may be offline" — so the user saw an outage, the turn kept spending
+tokens after nobody was listening, and the trace recorded nothing to distinguish it from a healthy
+turn. The server now stops first, returns a plain "this took longer than I can spend" answer, logs
+`reason=turn_deadline`, and scores `turn_timeout` on the span (§9) — separately from `tool_ceiling`
+(too many calls) and `verification_grounding` (a trust signal), because the three have different
+remedies.
+
+Two notes on the mechanics. The per-generation LLM timeout (60s) is set *below* the turn deadline
+on purpose: any per-call budget above it could never fire on the chat path. And the OCR timeout is
+an **SDK-level** `timeout_ms`, not an `asyncio.wait_for` — the Mistral SDK call is blocking and runs
+via `asyncio.to_thread`, so cancelling the awaitable returns control to the event loop but leaves
+the HTTP request running and billing. Only the SDK's own deadline actually stops it.
+
 **Read-only subsystem endpoints + a committed OpenAPI contract.** Alongside `/chat`, Week 2
 exposes three **GET** endpoints that call the same subsystem services directly, **bypassing the
 LLM/graph**, so each Week-2 capability is testable in isolation (a runnable API collection, a
@@ -1265,6 +1294,7 @@ verbal talking points from the architecture defense, recorded here as the risk r
 | **Black-box supervisor** | Delegation-via-tool-call is procedural, not a rendered graph — routing could read as opaque | Every route decision is a structured, logged event + a Langfuse child span (§4.2); `pydantic-graph` is the in-framework escalation to an explicit FSM if needed |
 | **Scope creep** | The pull to support five document types before the core ones work reliably | Shipped the **two** core document types and **two** workers first; the **`medication_list`** third type was then added as the PRD-*optional* extension — deliberately reusing the intake schema's `Medication` sub-model, the existing locator chain, and the existing write path (no new PHP), so it is an additive seam, not a fourth and fifth type piled on |
 | **Multi-agent latency vs. <15s** | Extra inference hops (supervisor + workers + extraction + rerank) threaten the Week-1 <15s budget ([`ARCHITECTURE.md`](ARCHITECTURE.md) §2) | Routing discipline (only consult the worker the request needs); SSE streaming to first token; tiered Claude routing keeps cost and latency defensible; RRF/rerank latency measured in the cost/latency report |
+| **No circuit breaker (accepted)** | The PRD's engineering heading names circuit breakers; we ship timeouts, retries and degradation instead. A dependency that fails *persistently* is therefore retried on every turn rather than being short-circuited after N failures — wasted latency during a sustained outage | **Deliberate, on the measured shape of this system:** three external dependencies, one replica, ~40 turns in five days. Two of the three already degrade gracefully — extraction failure reports the gap (§3), and retrieval failure now answers from the record alone rather than failing the turn — so a breaker would add state, a half-open probe path and its own failure modes to save retry latency that nothing has yet measured as a problem. **Tripwires that flip this:** a sustained dependency failure rate visible on the A3 tool-failure monitor, or multi-replica deployment (where per-replica breaker state starts to matter). Timeouts (§10) bound every call meanwhile, so a hang cannot become an outage |
 | **PHI leakage into observability** | The **disqualifying** failure — raw document text, identifiers, or extracted values reaching traces/logs/evals | Extend the single de-identification seam ([`ARCHITECTURE.md`](ARCHITECTURE.md) §9) to the new PHI surfaces; `no_phi_in_logs` rubric + CI PHI-detection check verify it mechanically (§§7–9) |
 
 **Rejected alternatives** (brief — full reasoning in the decision docs):

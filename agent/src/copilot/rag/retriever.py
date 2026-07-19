@@ -263,8 +263,19 @@ def build_retriever(settings: Settings) -> EvidenceRetriever | None:
         )
     if not (settings.qdrant_url and settings.cohere_api_key):
         return None
-    qdrant = AsyncQdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-    cohere_client = cohere.AsyncClientV2(api_key=settings.cohere_api_key)
+    qdrant = AsyncQdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        timeout=settings.qdrant_timeout_seconds,
+    )
+    # Client-level timeout AND retries: the Cohere SDK's own retry honours 429/5xx, which the httpx
+    # transport retry used for FHIR does not — so rerank gets real backoff against a rate-limited
+    # or flaking upstream, not just a reconnect.
+    cohere_client = cohere.AsyncClientV2(
+        api_key=settings.cohere_api_key,
+        timeout=settings.rerank_timeout_seconds,
+        max_retries=settings.rerank_max_retries,
+    )
     return QdrantEvidenceRetriever(
         qdrant=qdrant,
         cohere_client=cohere_client,

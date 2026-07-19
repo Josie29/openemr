@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -88,12 +89,25 @@ class ChatFailureReason(StrEnum):
     LLM_HTTP_ERROR = "llm_http_error"
     # A patient-data (FHIR) read failed.
     FHIR_READ_FAILED = "fhir_read_failed"
+    # The turn exceeded its wall-clock budget (turn_deadline_seconds).
+    TURN_DEADLINE = "turn_deadline"
     # Any unforeseen failure caught by the route's catch-all boundary.
     UNEXPECTED = "unexpected"
 
 
 _UNAVAILABLE_ANSWER = ChatResponse(
     summary="I could not produce an answer I can fully attribute to this patient's record.",
+    claims=[],
+)
+
+# Distinct from _UNAVAILABLE_ANSWER: that one means "I looked and could not attribute an answer";
+# this one means "I ran out of time". Conflating them would tell a physician the record lacks
+# support when the real cause was a slow turn.
+_TIMEOUT_ANSWER = ChatResponse(
+    summary=(
+        "This question took longer than I can spend on a single turn, so I stopped before "
+        "finishing. Please try again, or narrow the question."
+    ),
     claims=[],
 )
 
@@ -309,8 +323,13 @@ def _build_model(settings: Settings) -> Model:
     # Lift pydantic-ai's 4096-token Anthropic default: a full lab report's claims overran it
     # (finish_reason=length), dropping the claims array and degrading the turn to a fabrication.
     # Short document-fact aliases keep normal outputs well under this — a backstop, not a target.
+    # timeout bounds ONE generation, not the turn — a turn makes ~8 of them, so the wall-clock
+    # ceiling is turn_deadline_seconds (see chat_turn). This is the per-call hang guard, and the
+    # only bound on the read endpoints, which run outside the turn deadline.
     return AnthropicModel(
-        model_id, provider=provider, settings=ModelSettings(max_tokens=8192)
+        model_id,
+        provider=provider,
+        settings=ModelSettings(max_tokens=8192, timeout=settings.llm_timeout_seconds),
     )
 
 
@@ -563,24 +582,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.app.state.system_prompt_ref,
             ) as turn:
                 try:
-                    result = await run_graph(
-                        request.app.state.graph,
-                        payload.message,
-                        deps,
-                        turn,
-                        max_hops=settings.agent_max_hops,
-                        # Hard ceiling on tool calls per agent run so a runaway loop (e.g. scanning
-                        # every note on a 90+-encounter chart) cannot spend up to pydantic-ai's
-                        # default. Hitting it degrades to a refusal below, not a 500.
-                        usage_limits=UsageLimits(tool_calls_limit=settings.agent_tool_calls_limit),
-                        # Prices each worker's own usage delta onto its span (JOS-64). The turn
-                        # total is still priced below from the shared accumulator.
-                        model_tier=settings.model_tier,
-                    )
+                    # Wall-clock ceiling on the whole turn, complementing the tool-call ceiling
+                    # below: that one bounds how MANY calls a turn makes, this bounds how LONG it
+                    # takes. Set under the sidebar's 90s abort so the physician gets a real
+                    # "ran out of time" answer instead of the browser's "may be offline" while the
+                    # turn keeps running and keeps billing.
+                    async with asyncio.timeout(settings.turn_deadline_seconds):
+                        result = await run_graph(
+                            request.app.state.graph,
+                            payload.message,
+                            deps,
+                            turn,
+                            max_hops=settings.agent_max_hops,
+                            # Hard ceiling on tool calls per agent run so a runaway loop (e.g.
+                            # scanning every note on a 90+-encounter chart) cannot spend up to
+                            # pydantic-ai's default. Hitting it degrades to a refusal below,
+                            # not a 500.
+                            usage_limits=UsageLimits(
+                                tool_calls_limit=settings.agent_tool_calls_limit
+                            ),
+                            # Prices each worker's own usage delta onto its span (JOS-64). The turn
+                            # total is still priced below from the shared accumulator.
+                            model_tier=settings.model_tier,
+                        )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))
                     content = _answer_payload(result.answer, session.chunks, deps)
                     turn.output(content)
+                except TimeoutError:
+                    # The turn blew its wall-clock budget. Degrade to a plain "ran out of time"
+                    # answer rather than a 500 — and score it distinctly so it is separable from a
+                    # grounding miss (a trust signal) and from the tool ceiling (a runaway-loop
+                    # signal). Without this the deadline would land in the catch-all and read as
+                    # `unexpected` in the Railway logs.
+                    logger.warning(
+                        "agent exceeded the per-turn deadline",
+                        extra={
+                            "cid": correlation_id,
+                            "reason": ChatFailureReason.TURN_DEADLINE,
+                            "deadline_seconds": settings.turn_deadline_seconds,
+                        },
+                    )
+                    turn.timed_out()
+                    content = _TIMEOUT_ANSWER.model_dump()
                 except UnexpectedModelBehavior:
                     # The grounding gate exhausted its retries without an attributable answer —
                     # degrade to a refusal rather than ship an unverified claim (§8). A user got a

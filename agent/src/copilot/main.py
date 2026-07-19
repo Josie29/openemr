@@ -714,6 +714,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         correlation_id = current_correlation_id()
         settings = request.app.state.settings
+        # Auth before service-state: an unauthenticated caller gets 401, never a 503 that would leak
+        # whether extraction is configured (mirrors /documents and /evidence — this handler's auth
+        # otherwise rides on _resolve_request_fhir below, which runs after the 503 check).
+        denied = _require_token(request, settings, correlation_id)
+        if denied is not None:
+            return denied
         extractor = request.app.state.extractor
         if extractor is None:
             return _json_error(correlation_id, 503, "document extraction is not available")

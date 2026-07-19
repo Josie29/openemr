@@ -1,12 +1,24 @@
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from copilot.fhir.client import FhirClient
-from copilot.fhir.models import UploadedDocumentSummary
 from copilot.ingestion.extractor import DocumentExtractor, ExtractedDocument
 from copilot.ingestion.registry import DocumentFactHandle, DocumentFactRegistry
 from copilot.rag.retriever import EvidenceRetriever
 from copilot.retrieval import ChunkRegistry
 from copilot.verification import FetchLog
+
+
+class BudgetedTool(StrEnum):
+    """Tools that carry a per-agent-run call budget. Value is the tool's name as the model sees it.
+
+    Both members are tools whose result a stuck model reads as "retry" rather than "this is the
+    answer": an empty document list and an unhelpful guideline hit. Neither becomes truer on the
+    ninth call, and both have run a turn into the tool-call ceiling.
+    """
+
+    LIST_DOCUMENTS = "list_documents"
+    SEARCH_GUIDELINES = "search_guidelines"
 
 
 @dataclass
@@ -39,9 +51,11 @@ class GraphDeps:
     chunks: ChunkRegistry
     documents: DocumentFactRegistry
     extractor: DocumentExtractor | None
-    # Per-turn memo for list_documents: the discovery FHIR read happens once, so repeated tool
-    # calls (e.g. a model retrying on an empty result) are cheap cache hits, not extra round-trips.
-    documents_cache: list[UploadedDocumentSummary] | None = None
+    # Max calls per agent run, per tool — a backstop, not the fix (the tools now state their empty
+    # case, which is what stopped the looping). No default on purpose: a construction site that
+    # forgets these should fail rather than run unbudgeted. An absent KEY is unlimited, so budgeting
+    # stays opt-in per tool. Per-run is safe only because run_graph dispatches each worker once.
+    tool_budgets: dict[BudgetedTool, int]
     # Per-turn memo for attach_and_extract, keyed by document id: OCR (Binary fetch + Mistral) is
     # the expensive hop, so re-extracting the same document in a turn returns the recorded handles.
     # The handles are the union: which kind a document yields is decided by its type, not the

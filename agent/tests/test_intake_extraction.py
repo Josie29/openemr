@@ -7,7 +7,7 @@ import pytest
 from copilot.ingestion.extractor import map_intake_form
 from copilot.ingestion.geometry.document import DocumentGeometry
 from copilot.ingestion.geometry.words import extract_checkboxes
-from copilot.ingestion.schemas import Citation, IntakeForm
+from copilot.ingestion.schemas import BoxEvidence, Citation, IntakeForm
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "documents"
 
@@ -174,6 +174,43 @@ def test_linear_form_reads_sex_as_printed_text() -> None:
     assert form.demographics.sex.value == "Male"
 
 
+def test_unavailable_checkbox_evidence_is_not_text_matched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the checkbox detector cannot RUN, a checkbox-gated fact is dropped, not text-matched.
+
+    The third case, between "ticked" and "this form has no boxes". v1 preprints its whole condition
+    checklist, so only a tick distinguishes "the patient has this" from "the form asked about it".
+    If pdfplumber is missing or the bytes will not parse we cannot see the ticks — and deferring to
+    a coarser locator text-matches each PREPRINTED condition and boxes it.
+
+    This is not hypothetical: with the detector's None read as [] ("form has none"), this fixture
+    yields FIVE family-history facts the page never asserts, each with a box pointing at the
+    preprinted label. Hence None ("could not tell") must stop the chain instead.
+    """
+    monkeypatch.setattr(
+        "copilot.ingestion.geometry.document.extract_checkboxes", lambda _pdf: None
+    )
+    form = _extract("sergio-angulo-intake-form")
+    # The load-bearing assertion: 5 laundered entries before, none now.
+    assert form.family_history == [], "a preprinted condition is not an asserted diagnosis"
+    assert form.demographics.sex is None
+
+
+def test_checkbox_backed_fact_records_what_its_box_proves() -> None:
+    """A ticked-option fact records CHECKED_MARK; a printed one records PRINTED_VALUE.
+
+    The discriminator was computed by the locator and then dropped at the Citation boundary, leaving
+    "boxed over a tick" and "boxed over preprinted text" indistinguishable to everything downstream
+    of extraction — so nothing could enforce, or even audit, the difference.
+    """
+    form = _extract("sergio-angulo-intake-form")
+    assert form.demographics.sex is not None
+    assert form.demographics.sex.citation.evidence is BoxEvidence.CHECKED_MARK
+    assert form.demographics.address is not None
+    assert form.demographics.address.citation.evidence is BoxEvidence.PRINTED_VALUE
+
+
 def test_multi_word_values_merge_into_one_box() -> None:
     """A value spanning several words is boxed once, over all of them.
 
@@ -238,6 +275,9 @@ def test_checkbox_detection_ignores_letter_x_in_prose() -> None:
     happened to be nearest and start asserting facts the patient never claimed.
     """
     boxes = extract_checkboxes(_pdf("sergio-angulo-intake-form"))
+    # None means the detector could not run at all; this fixture must actually be parseable, or the
+    # assertions below would be vacuously checking "we saw nothing".
+    assert boxes is not None, "checkbox evidence must be available for this fixture"
     assert len(boxes) == 10, "v1 has ten tick boxes"
     # Five conditions plus one sex option are ticked; the rest are offered but unclaimed.
     assert sum(1 for box in boxes if box.ticked) == 6

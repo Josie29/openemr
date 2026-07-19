@@ -8,6 +8,7 @@ from copilot.ingestion.schemas import (
     AbnormalFlag,
     BoundingBox,
     Citation,
+    CitedText,
     DocType,
     LabReport,
     LabResult,
@@ -139,7 +140,8 @@ def _deps_with_extractions(extractions: dict[str, ExtractedDocument]) -> GraphDe
         documents=DocumentFactRegistry(),
         extractor=cast(DocumentExtractor, None),
         extractions=extractions,
-    )
+               tool_budgets={},
+           )
 
 
 def _lab_extraction() -> ExtractedDocument:
@@ -152,7 +154,7 @@ def _lab_extraction() -> ExtractedDocument:
                     test_name="Hemoglobin A1c",
                     loinc="4548-4",
                     value="8.2",
-                    unit="%",
+                    unit=CitedText(value="%", citation=Citation(quote_or_value="%")),
                     abnormal_flag=AbnormalFlag.HIGH,
                     citation=Citation(
                         quote_or_value="8.2",

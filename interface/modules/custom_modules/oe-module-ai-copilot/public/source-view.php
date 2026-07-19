@@ -226,11 +226,16 @@ $viewData = json_encode(
                             box.style.top = (rect.y / base.height * 100) + '%';
                             box.style.width = (rect.w / base.width * 100) + '%';
                             box.style.height = (rect.h / base.height * 100) + '%';
-                            if (boxes.length > 1) {
-                                // A lone box needs no badge — there is nothing to disambiguate.
+                            if (boxes.length > 1 || rect.n != null) {
+                                // A lone UNLABELLED box needs no badge — nothing to disambiguate.
+                                // A labelled one always shows its number, because the label ties it
+                                // to a specific row in the sidebar's list.
                                 var num = document.createElement('span');
                                 num.className = 'doc-bbox-num';
-                                num.textContent = String(index + 1);
+                                // Prefer the label the sidebar assigned. Array position only agreed
+                                // with it while every fact contributed exactly one box, so deriving
+                                // it here desynchronised the moment one fact carried several.
+                                num.textContent = String(rect.n != null ? rect.n : index + 1);
                                 // The badge hangs off the box's left edge; a box hard against the
                                 // page margin has nowhere to put it, so flip it to the right.
                                 if (rect.x / base.width < 0.035) {

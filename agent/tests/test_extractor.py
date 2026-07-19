@@ -8,7 +8,6 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from copilot.fhir.fixtures import FixtureFhirClient
-from copilot.fhir.models import UploadedDocumentSummary
 from copilot.graph.deps import GraphDeps
 from copilot.graph.outputs import ExtractorOutput
 from copilot.graph.workers import build_intake_extractor
@@ -254,19 +253,17 @@ async def test_intake_extractor_extracts_and_grounds_a_lab_fact() -> None:
         # get_document_bytes serves this fixture PDF, so attach_and_extract's FhirBinaryByteSource
         # exercises the real fetch -> OCR path offline (mirroring the Binary fetch in prod).
         fhir=FixtureFhirClient.from_seed({DocType.LAB_PDF: str(_LAB_PDF)}),
-        patient_id="1",
+        # Patient 23 is the seeded patient whose record actually carries the uploaded lab report.
+        # attach_and_extract discovers it through the FHIR client, so the test exercises the real
+        # lookup rather than a hand-placed cache standing in for it.
+        patient_id="23",
         correlation_id="test-cid",
         retriever=StubRetriever(snippets=()),
         extractor=extractor,
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
         documents=DocumentFactRegistry(),
-        # Pre-seed discovery: attach_and_extract only extracts a doc list_lab_documents returned.
-        documents_cache=[
-            UploadedDocumentSummary(
-                resource_id="labreport-2026-07", doc_type=DocType.LAB_PDF, title="lab.pdf"
-            )
-        ],
+        tool_budgets={},
     )
 
     state = {"extracted": False}
@@ -326,18 +323,18 @@ class _SpyExtractor(DocumentExtractor):
 
 
 def _extractor_deps(
-    extractor: DocumentExtractor, cache: list[UploadedDocumentSummary]
+    extractor: DocumentExtractor,
 ) -> GraphDeps:
     return GraphDeps(
         fhir=FixtureFhirClient.from_seed({DocType.LAB_PDF: str(_LAB_PDF)}),
-        patient_id="1",
+        patient_id="23",  # the seeded patient holding labreport-2026-07
         correlation_id="test-cid",
         retriever=StubRetriever(snippets=()),
         extractor=extractor,
         fetched=FetchLog(),
         chunks=ChunkRegistry(),
         documents=DocumentFactRegistry(),
-        documents_cache=cache,
+        tool_budgets={},
     )
 
 
@@ -347,14 +344,7 @@ async def test_attach_and_extract_ignores_undiscovered_document() -> None:
     Guards against the model guessing an id and wasting the expensive extraction hop.
     """
     spy = _SpyExtractor()
-    deps = _extractor_deps(
-        spy,
-        [
-            UploadedDocumentSummary(
-                resource_id="real-doc", doc_type=DocType.LAB_PDF, title="lab.pdf"
-            )
-        ],
-    )
+    deps = _extractor_deps(spy)
     state = {"tried": False}
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -376,14 +366,7 @@ async def test_attach_and_extract_ignores_undiscovered_document() -> None:
 async def test_attach_and_extract_memoizes_per_document() -> None:
     """Re-extracting the same document in a turn returns the recorded handles — OCR runs once."""
     spy = _SpyExtractor()
-    deps = _extractor_deps(
-        spy,
-        [
-            UploadedDocumentSummary(
-                resource_id="labreport-2026-07", doc_type=DocType.LAB_PDF, title="lab.pdf"
-            )
-        ],
-    )
+    deps = _extractor_deps(spy)
     state = {"i": 0}
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -425,14 +408,7 @@ async def test_intake_extractor_retries_when_facts_extracted_but_no_claims() -> 
     which grounding can't catch (``ground_claims([])`` has no offenders). The empty answer reached
     the composer and became a fabricated citation; the forced retry recovers a real claim.
     """
-    deps = _extractor_deps(
-        _SpyExtractor(),
-        [
-            UploadedDocumentSummary(
-                resource_id="labreport-2026-07", doc_type=DocType.LAB_PDF, title="lab.pdf"
-            )
-        ],
-    )
+    deps = _extractor_deps(_SpyExtractor())
     state = {"i": 0}
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:

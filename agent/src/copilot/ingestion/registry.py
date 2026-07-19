@@ -16,6 +16,7 @@ from copilot.ingestion.schemas import (
     LabDetail,
     LabReport,
     MedicationList,
+    printed_text,
 )
 from copilot.schemas import SourceRef
 from copilot.verification import Resolution
@@ -268,8 +269,8 @@ class DocumentFactRegistry:
                 citation=result.citation,
                 lab_detail=LabDetail(
                     test_name=result.test_name,
-                    unit=result.unit,
-                    reference_range=result.reference_range,
+                    unit=printed_text(result.unit),
+                    reference_range=printed_text(result.reference_range),
                     abnormal_flag=result.abnormal_flag,
                 ),
             )
@@ -279,8 +280,8 @@ class DocumentFactRegistry:
                     resource_id=resource_id,
                     test_name=result.test_name,
                     value=result.value,
-                    unit=result.unit,
-                    reference_range=result.reference_range,
+                    unit=printed_text(result.unit),
+                    reference_range=printed_text(result.reference_range),
                     abnormal_flag=result.abnormal_flag.value,
                 )
             )
@@ -352,7 +353,7 @@ class DocumentFactRegistry:
                     resource_type=resource_type_for(FactKind.ALLERGY),
                     resource_id=resource_id,
                     substance=allergy.substance,
-                    reaction=allergy.reaction,
+                    reaction=printed_text(allergy.reaction),
                 )
             )
         for entry in form.family_history:
@@ -369,7 +370,7 @@ class DocumentFactRegistry:
                     resource_type=resource_type_for(FactKind.FAMILY_HISTORY),
                     resource_id=resource_id,
                     condition=entry.condition,
-                    relation=entry.relation,
+                    relation=printed_text(entry.relation),
                 )
             )
         return handles
@@ -405,8 +406,9 @@ class DocumentFactRegistry:
                     resource_type=resource_type_for(FactKind.MEDICATION),
                     resource_id=resource_id,
                     name=medication.name,
-                    dose=medication.dose,
-                    frequency=medication.frequency,
+                    # The model states the printed text; the box stays server-side for the overlay.
+                    dose=printed_text(medication.dose),
+                    frequency=printed_text(medication.frequency),
                 )
             )
         return handles

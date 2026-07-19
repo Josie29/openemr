@@ -928,6 +928,70 @@ body.ai-copilot-resizing {
     white-space: nowrap;
 }
 
+/* Units earn their own column rather than being concatenated onto the value: they carry their own
+   box, so they have to be clickable and column-scopeable in their own right. Muted like the
+   reference range — the value is what the eye should land on. */
+.ai-copilot__labs-units {
+    color: var(--copilot-muted);
+    white-space: nowrap;
+}
+
+/* The badge is the handle for the whole fact: clicking it shows every box backing that one result.
+   It already reads as an affordance (a filled chip), so it needs a cursor and a focus ring, not
+   more decoration. */
+.ai-copilot__doc-num--provable {
+    cursor: pointer;
+}
+
+.ai-copilot__doc-num--provable:hover {
+    filter: brightness(1.15);
+}
+
+.ai-copilot__doc-num--provable:focus-visible {
+    outline: 2px solid var(--copilot-accent);
+    outline-offset: 2px;
+}
+
+/* A column header that shows its field across the whole panel. Underlined on hover only: a header
+   is a label first, and every column reading as a button would compete with the data. */
+.ai-copilot__labs-col--provable {
+    cursor: pointer;
+}
+
+.ai-copilot__labs-col--provable:hover {
+    color: var(--copilot-accent);
+    text-decoration: underline;
+}
+
+/* Kept after its own base rule rather than shared with the badge's focus ring above: a
+   pseudo-class listed before the plain selector it qualifies is a descending-specificity trap. */
+.ai-copilot__labs-col--provable:focus-visible {
+    outline: 2px solid var(--copilot-accent);
+    outline-offset: 2px;
+}
+
+/* A value that can prove itself against the scan. Deliberately quiet — a dotted underline that
+   firms up on hover, not a link colour: every cell in the table would otherwise read as a call to
+   action and the panel would stop scanning as data. The affordance is discovered on hover, which is
+   the moment a physician is actually asking "where did this come from?". */
+.ai-copilot__labs-cell--provable {
+    cursor: pointer;
+    text-decoration: underline dotted rgb(0 0 0 / 0.25);
+    text-underline-offset: 0.2em;
+}
+
+.ai-copilot__labs-cell--provable:hover,
+.ai-copilot__labs-cell--provable:focus-visible {
+    text-decoration: underline solid var(--copilot-accent);
+    outline: none;
+}
+
+.ai-copilot__labs-cell--provable:focus-visible {
+    /* Keyboard users get a real focus ring; the underline alone is not a visible focus indicator. */
+    box-shadow: 0 0 0 2px var(--copilot-accent);
+    border-radius: 2px;
+}
+
 /* Out-of-range is the whole reason a physician scans a panel — and it is the extractor's own flag,
    not the model's reading of it. A `no` flag renders as nothing at all. */
 .ai-copilot__labs-value--abnormal {

@@ -120,6 +120,26 @@ class LabDetail(BaseModel):
     )
 
 
+class BoxEvidence(StrEnum):
+    """What a located box PROVES — not where it is.
+
+    The distinction that stops a box laundering a hallucination. On a form an option's text is
+    *preprinted*: "Male" and "Female" are both on the page, and "Asthma" is printed whether or
+    not it is ticked. Boxing that text proves only that the form offers the option — the fact is
+    asserted by the tick. So a box over preprinted text cannot support a checkbox-derived claim,
+    even though the value provably "appears on the page".
+
+    Lives here, beside :class:`BoundingBox`, because a box's evidence travels with it onto
+    :class:`Citation`; the geometry package imports it from here (never the reverse).
+
+    Named ``BoxEvidence``, not ``Evidence``: :class:`copilot.schemas.Evidence` is the sidebar's
+    guideline source card.
+    """
+
+    PRINTED_VALUE = "printed_value"  # the value itself is written on the page
+    CHECKED_MARK = "checked_mark"  # a mark in a box asserts this option
+
+
 class Citation(BaseModel):
     """Machine-readable citation for one extracted fact — the W2 citation contract (§3.3).
 
@@ -140,6 +160,13 @@ class Citation(BaseModel):
         default=None,
         description="Box locating the value on the page (PDF points). Required for lab_pdf facts.",
     )
+    evidence: BoxEvidence | None = Field(
+        default=None,
+        description=(
+            "What the box PROVES — a printed value, or a tick asserting a checkbox option. "
+            "Recorded by code from the locator that found it; never model-authored."
+        ),
+    )
     source_type: SourceType | None = Field(
         default=None,
         description="Leave empty — the system stamps this from the document's category.",
@@ -155,6 +182,21 @@ class Citation(BaseModel):
     field_or_chunk_id: str | None = Field(
         default=None,
         description="Leave empty — the system stamps the schema field path this fact populates.",
+    )
+
+
+class CitedText(BaseModel):
+    """A single free-text intake value with its source citation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    value: str = Field(min_length=1, description="The value verbatim as printed on the form.")
+    citation: Citation = Field(description="Where on the form this value was read from.")
+    confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 
@@ -193,15 +235,30 @@ class LabResult(BaseModel):
         min_length=1,
         description="Result value verbatim, e.g. '8.2' or 'Positive'. Never round or convert.",
     )
-    unit: str | None = Field(
+    # Cited, not bare strings: LabDetail stamps these onto the sidebar as system-authored fact, and
+    # a wrong reference range flips a normal value to abnormal — so each carries its own box and is
+    # checkable in its own column. One the locator cannot place still ships, boxless, so the UI can
+    # mark it unverified rather than imply it was read off the page (see extractor._secondary).
+    unit: CitedText | None = Field(
         default=None, description="Unit as printed, e.g. '%'. Null if unitless/qualitative."
     )
-    reference_range: str | None = Field(
+    reference_range: CitedText | None = Field(
         default=None, description="Reference range verbatim, e.g. '4.0-5.6'. Null if not printed."
     )
     collection_date: date | None = Field(
         default=None,
         description="Specimen collection date if printed (ISO 8601). Null if absent — never infer.",
+    )
+    # Geometry for the two IDENTITY fields, kept beside them rather than folded into their type.
+    # `unit`/`reference_range` are CitedText because their VALUE is what a citation qualifies; the
+    # test name and LOINC instead identify WHICH test this is — they are matched on, displayed, and
+    # (for the code) written to `procedure_result.result_code` — so they stay bare and only their
+    # box is optional. Null when the field is absent or could not be placed.
+    test_name_citation: Citation | None = Field(
+        default=None, description="Where the test name sits on the page. System-set."
+    )
+    loinc_citation: Citation | None = Field(
+        default=None, description="Where the LOINC code sits on the page. System-set."
     )
     abnormal_flag: AbnormalFlag = Field(
         description="Abnormal indicator; use 'no' if the report shows none."
@@ -211,16 +268,22 @@ class LabResult(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
     @model_validator(mode="after")
     def _require_bounding_box(self) -> "LabResult":
         """Enforce that every lab_pdf fact resolves to a pixel location on the source.
 
-        A lab value with no bounding box cannot back the required click-to-source overlay, so it
-        is a schema violation — surfaced upstream as a low-confidence refusal, never shipped with
-        a fabricated rectangle (PRD Core Req 5; W2_ARCHITECTURE §3.3).
+        A lab value with no bounding box cannot back the required click-to-source overlay (PRD Core
+        Req 5; W2_ARCHITECTURE §3.3), so it must not exist.
+
+        A backstop, not the live path: ``map_lab_report`` already drops an unlocatable row (and one
+        below the precision floor) before it ever reaches this constructor, logging a warning. That
+        drop is silent to the physician — there is no "low-confidence refusal" surfaced upstream,
+        and no confidence threshold anywhere; the shipping decision is the
+        :class:`~copilot.ingestion.geometry.boxes.BoxPrecision` floor. This validator only
+        guarantees the invariant cannot be broken by a future caller.
 
         Raises:
             ValueError: If the citation carries no bounding box.
@@ -246,19 +309,21 @@ class LabReport(BaseModel):
     )
 
 
-class CitedText(BaseModel):
-    """A single free-text intake value with its source citation."""
 
-    model_config = ConfigDict(frozen=True)
+def printed_text(cited: CitedText | None) -> str | None:
+    """The printed text of an optional cited value, dropping its geometry.
 
-    value: str = Field(min_length=1, description="The value verbatim as printed on the form.")
-    citation: Citation = Field(description="Where on the form this value was read from.")
-    confidence: float | None = Field(
-        default=None,
-        ge=0,
-        le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
-    )
+    Secondary fields carry a box so they can be checked on the page, but the write-back payload and
+    the model-facing fact handles want the bare text. One helper so every consumer flattens the same
+    way instead of spelling the None-check out again.
+
+    Args:
+        cited: The cited value, or None when the document does not state it.
+
+    Returns:
+        The verbatim text, or None.
+    """
+    return cited.value if cited is not None else None
 
 
 class Demographics(BaseModel):
@@ -284,10 +349,14 @@ class Medication(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1, description="Medication name as printed, e.g. 'Metformin'.")
-    dose: str | None = Field(
+    # Cited, not bare strings: a dose is the value a transcription error is most dangerous in
+    # ("500 mg" vs "5000 mg"), so it carries its own box and is checkable against the page. A dose
+    # the locator could not place still ships — with a boxless citation, so the UI can mark it
+    # unverified rather than imply it was read off the page (see extractor._secondary).
+    dose: CitedText | None = Field(
         default=None, description="Dose/strength as printed, e.g. '500 mg'. Null if not given."
     )
-    frequency: str | None = Field(
+    frequency: CitedText | None = Field(
         default=None, description="Frequency as printed, e.g. 'twice daily'. Null if not given."
     )
     citation: Citation = Field(description="Where on the document this medication was read from.")
@@ -295,7 +364,7 @@ class Medication(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 
@@ -307,7 +376,7 @@ class Allergy(BaseModel):
     substance: str = Field(
         min_length=1, description="Allergen/substance as printed, e.g. 'Penicillin'."
     )
-    reaction: str | None = Field(
+    reaction: CitedText | None = Field(
         default=None, description="Reaction as printed, e.g. 'hives'. Null if not given."
     )
     citation: Citation = Field(description="Where on the form this allergy was read from.")
@@ -315,7 +384,7 @@ class Allergy(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 
@@ -327,7 +396,7 @@ class FamilyHistoryItem(BaseModel):
     condition: str = Field(
         min_length=1, description="Condition as printed, e.g. 'Type 2 diabetes'."
     )
-    relation: str | None = Field(
+    relation: CitedText | None = Field(
         default=None, description="Affected relative, e.g. 'mother'. Null if not given."
     )
     citation: Citation = Field(description="Where on the form this entry was read from.")
@@ -335,7 +404,7 @@ class FamilyHistoryItem(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Extractor per-field confidence (0-1). System-set from the extractor.",
+        description="Extractor per-field confidence (0-1). Recorded, never thresholded.",
     )
 
 

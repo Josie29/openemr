@@ -217,8 +217,7 @@ async def test_resolve_and_extract_extracts_a_known_document() -> None:
     # ExtractedDocument whose doc_type came from the discovered record (never a caller input).
     fhir = FixtureFhirClient.from_seed({DocType.LAB_PDF: _LAB_PDF})
     extractor = DocumentExtractor(FixtureOcrBackend({DocType.LAB_PDF: _LAB_OCR}))
-    documents = await fhir.get_documents(_PATIENT)
-    result = await resolve_and_extract(_LAB_DOC_ID, documents, extractor, fhir)
+    result = await resolve_and_extract(_LAB_DOC_ID, _PATIENT, extractor, fhir)
     assert isinstance(result, ExtractedDocument)
     assert result.doc_type is DocType.LAB_PDF
     assert result.document_id == _LAB_DOC_ID
@@ -229,8 +228,7 @@ async def test_resolve_and_extract_returns_none_for_an_unknown_id() -> None:
     # no OCR), so neither the tool nor the endpoint extracts a hallucinated document.
     fhir = FixtureFhirClient.from_seed({DocType.LAB_PDF: _LAB_PDF})
     extractor = DocumentExtractor(FixtureOcrBackend({DocType.LAB_PDF: _LAB_OCR}))
-    documents = await fhir.get_documents(_PATIENT)
-    assert await resolve_and_extract("ghost", documents, extractor, fhir) is None
+    assert await resolve_and_extract("ghost", _PATIENT, extractor, fhir) is None
 
 
 async def test_resolve_and_extract_propagates_extraction_failures() -> None:
@@ -238,6 +236,5 @@ async def test_resolve_and_extract_propagates_extraction_failures() -> None:
     # logs and the endpoint maps to 502), not return empty facts that read as "nothing on file".
     fhir = FixtureFhirClient.from_seed({DocType.LAB_PDF: _LAB_PDF})
     extractor = DocumentExtractor(FixtureOcrBackend({}))  # no OCR fixture for any type
-    documents = await fhir.get_documents(_PATIENT)
     with pytest.raises(ExtractionError):
-        await resolve_and_extract(_LAB_DOC_ID, documents, extractor, fhir)
+        await resolve_and_extract(_LAB_DOC_ID, _PATIENT, extractor, fhir)

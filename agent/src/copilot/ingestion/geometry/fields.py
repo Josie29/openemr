@@ -27,6 +27,10 @@ class FieldId(StrEnum):
     """
 
     LAB_RESULT_VALUE = "lab.result.value"
+    LAB_RESULT_TEST_NAME = "lab.result.test_name"
+    LAB_RESULT_LOINC = "lab.result.loinc"
+    LAB_RESULT_UNIT = "lab.result.unit"
+    LAB_RESULT_REFERENCE_RANGE = "lab.result.reference_range"
     DEMOGRAPHICS_FULL_NAME = "demographics.full_name"
     DEMOGRAPHICS_DATE_OF_BIRTH = "demographics.date_of_birth"
     DEMOGRAPHICS_SEX = "demographics.sex"
@@ -34,8 +38,12 @@ class FieldId(StrEnum):
     DEMOGRAPHICS_PHONE = "demographics.phone"
     CHIEF_CONCERN = "chief_concern"
     CURRENT_MEDICATIONS = "current_medications[]"
+    CURRENT_MEDICATIONS_DOSE = "current_medications[].dose"
+    CURRENT_MEDICATIONS_FREQUENCY = "current_medications[].frequency"
     ALLERGIES = "allergies[]"
+    ALLERGIES_REACTION = "allergies[].reaction"
     FAMILY_HISTORY = "family_history[]"
+    FAMILY_HISTORY_RELATION = "family_history[].relation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +75,13 @@ def _chain(*locators: ValueLocator) -> LocatorChain:
     return LocatorChain(locators=tuple(locators))
 
 
+# SECONDARY fields (a dose, a reference range) are exact-or-nothing. A coarse fallback box is worse
+# than none for them: the whole point is to prove THIS cell, and a row-wide band claims to prove a
+# cell it does not. Missing the floor costs only the box — extractor._secondary keeps the parent
+# fact and cites the value without one, which the UI shows as unverified.
+_SECONDARY_FLOOR = BoxPrecision.EXACT
+
+
 # The lab chain, in the order lab extraction has always tried: the exact text-layer join first, the
 # coarse OCR row band when the PDF has no text layer, and the page as a last resort.
 #
@@ -86,6 +101,63 @@ LAB_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
                 PageBoxLocator(),
             ),
             floor=BoxPrecision.PAGE,
+        ),
+        # The test name and its LOINC identify WHICH test a value belongs to. The name was already
+        # being located — it is the anchor the value's own locator scans for — and the box was then
+        # thrown away, even though the sidebar shows the name as fact and a name bound to the wrong
+        # row is how a value gets attributed to the wrong test. The LOINC is what write-back stamps
+        # as `procedure_result.result_code`, so a wrong one files the result under the wrong test.
+        # Both are anchored on the name, which is the row's left-most token.
+        FieldId.LAB_RESULT_TEST_NAME: FieldSpec(
+            field=FieldId.LAB_RESULT_TEST_NAME,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0),
+                    max_span_words=5,
+                    cursor_key="lab.test_name",
+                    include_anchor=True,
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        FieldId.LAB_RESULT_LOINC: FieldSpec(
+            field=FieldId.LAB_RESULT_LOINC,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0), max_span_words=2, cursor_key="lab.loinc"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        # The two qualifiers around the value, anchored on the row's test name like the value is.
+        # LabDetail stamps both onto the sidebar as system-authored fact — a wrong reference range
+        # flips a normal value to abnormal — so each must be checkable in its own column rather than
+        # transported as unlocatable text. `abnormal_flag` is deliberately NOT located: it is a
+        # single character ("H"/"L") matching everywhere on the page, and what it asserts derives
+        # from the value and the range, which are both boxed here.
+        FieldId.LAB_RESULT_REFERENCE_RANGE: FieldSpec(
+            field=FieldId.LAB_RESULT_REFERENCE_RANGE,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0),
+                    max_span_words=3,
+                    cursor_key="lab.reference_range",
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        FieldId.LAB_RESULT_UNIT: FieldSpec(
+            field=FieldId.LAB_RESULT_UNIT,
+            labels=(),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 200.0), max_span_words=2, cursor_key="lab.unit"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
         ),
     }
 )
@@ -165,6 +237,30 @@ INTAKE_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             chain=_chain(CheckboxLocator(), SectionSpanLocator(), LineBandLocator()),
             floor=_INTAKE_FLOOR,
         ),
+        # SECONDARY, anchored on the entry each qualifies — the allergen, the condition — so a
+        # reaction is read from ITS allergy's row and not from the next one. Anchoring is what makes
+        # one spec serve both fixtures: v1 renders these as table rows, v2 as "Peanuts — hives" on a
+        # line, and in each the qualifier sits after its anchor on the same row.
+        FieldId.ALLERGIES_REACTION: FieldSpec(
+            field=FieldId.ALLERGIES_REACTION,
+            labels=("reaction", "reaction / severity"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=8, cursor_key="allergy.reaction"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        FieldId.FAMILY_HISTORY_RELATION: FieldSpec(
+            field=FieldId.FAMILY_HISTORY_RELATION,
+            labels=("relation", "relative", "who"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=6, cursor_key="family.relation"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
     }
 )
 
@@ -186,6 +282,31 @@ MEDICATION_LIST_SPECS: Mapping[FieldId, FieldSpec] = MappingProxyType(
             ),
             chain=_chain(SectionSpanLocator(), LineBandLocator()),
             floor=_MEDICATION_LIST_FLOOR,
+        ),
+        # Dose and frequency are SECONDARY: each qualifies a medication whose name is already
+        # located, so both are anchored on that name and searched within its row — the same
+        # anchor-then-match shape the lab value uses against its test name. They are the values a
+        # transcription error is most dangerous in ("500 mg" vs "5000 mg"), so they must be
+        # checkable on the page rather than transported as unlocatable text.
+        FieldId.CURRENT_MEDICATIONS_DOSE: FieldSpec(
+            field=FieldId.CURRENT_MEDICATIONS_DOSE,
+            labels=("dose / strength", "dose", "strength", "sig"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=6, cursor_key="medication.dose"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
+        ),
+        FieldId.CURRENT_MEDICATIONS_FREQUENCY: FieldSpec(
+            field=FieldId.CURRENT_MEDICATIONS_FREQUENCY,
+            labels=("frequency", "how often", "directions"),
+            chain=_chain(
+                RowSpanLocator(
+                    anchor_region=(0.0, 300.0), max_span_words=8, cursor_key="medication.frequency"
+                )
+            ),
+            floor=_SECONDARY_FLOOR,
         ),
     }
 )

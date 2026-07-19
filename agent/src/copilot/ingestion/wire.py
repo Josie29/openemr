@@ -4,6 +4,7 @@ from copilot.ingestion.extractor import ExtractedDocument
 from copilot.ingestion.schemas import (
     Allergy,
     BoundingBox,
+    Citation,
     CitedText,
     Demographics,
     FamilyHistoryItem,
@@ -12,10 +13,16 @@ from copilot.ingestion.schemas import (
     LabResult,
     Medication,
     MedicationList,
+    printed_text,
 )
 
 # The Demographics attributes projected to the wire, in the persist endpoint's field vocabulary.
 _DEMOGRAPHIC_FIELDS = ("full_name", "date_of_birth", "sex", "address", "phone")
+
+
+def _cite(cited: CitedText | None) -> Citation | None:
+    """The citation of an optional cited value — the qualifier half of the field-box input."""
+    return cited.citation if cited is not None else None
 
 
 def _box_payload(box: BoundingBox) -> dict[str, Any]:
@@ -49,18 +56,29 @@ def _lab_fact(result: LabResult) -> dict[str, Any] | None:
     box = result.citation.bounding_box
     if result.loinc is None or box is None:
         return None
-    return {
+    fact: dict[str, Any] = {
         "type": "lab",
         "loinc": result.loinc,
         "label": result.test_name,
         "value": result.value,
-        "units": result.unit or "",
-        "range": result.reference_range or "",
+        "units": printed_text(result.unit) or "",
+        "range": printed_text(result.reference_range) or "",
         "abnormal": result.abnormal_flag.value,
         "page": box.page,
         "bbox": _box_payload(box),
         "confidence": result.confidence,
     }
+    _attach_field_boxes(
+        fact,
+        {
+            # The row entire: what test this is, its code, and the two qualifiers around the value.
+            "test_name": result.test_name_citation,
+            "loinc": result.loinc_citation,
+            "unit": _cite(result.unit),
+            "reference_range": _cite(result.reference_range),
+        },
+    )
+    return fact
 
 
 def _allergy_fact(allergy: Allergy) -> dict[str, Any]:
@@ -78,10 +96,11 @@ def _allergy_fact(allergy: Allergy) -> dict[str, Any]:
     fact: dict[str, Any] = {
         "type": "allergy",
         "substance": allergy.substance,
-        "reaction": allergy.reaction,
+        "reaction": printed_text(allergy.reaction),
         "confidence": allergy.confidence,
     }
     _attach_optional_box(fact, allergy.citation.bounding_box)
+    _attach_field_boxes(fact, {"reaction": _cite(allergy.reaction)})
     return fact
 
 
@@ -97,11 +116,17 @@ def _medication_fact(medication: Medication) -> dict[str, Any]:
     fact: dict[str, Any] = {
         "type": "medication",
         "name": medication.name,
-        "dose": medication.dose,
-        "frequency": medication.frequency,
+        # Flattened to the printed text: the persist endpoint writes these into
+        # `drug_dosage_instructions`, so the wire contract with PHP is unchanged by the model
+        # gaining per-field geometry.
+        "dose": printed_text(medication.dose),
+        "frequency": printed_text(medication.frequency),
         "confidence": medication.confidence,
     }
     _attach_optional_box(fact, medication.citation.bounding_box)
+    _attach_field_boxes(
+        fact, {"dose": _cite(medication.dose), "frequency": _cite(medication.frequency)}
+    )
     return fact
 
 
@@ -119,15 +144,17 @@ def _family_history_fact(item: FamilyHistoryItem) -> dict[str, Any] | None:
     Returns:
         The wire dict, or None when the entry has no relation to place it on.
     """
-    if item.relation is None or item.relation.strip() == "":
+    relation = printed_text(item.relation)
+    if relation is None or relation.strip() == "":
         return None
     fact: dict[str, Any] = {
         "type": "family_history",
         "condition": item.condition,
-        "relation": item.relation,
+        "relation": relation,
         "confidence": item.confidence,
     }
     _attach_optional_box(fact, item.citation.bounding_box)
+    _attach_field_boxes(fact, {"relation": _cite(item.relation)})
     return fact
 
 
@@ -176,6 +203,33 @@ def _demographic_facts(demographics: Demographics) -> list[dict[str, Any]]:
         _attach_optional_box(fact, cited.citation.bounding_box)
         facts.append(fact)
     return facts
+
+
+def _attach_field_boxes(fact: dict[str, Any], fields: dict[str, Citation | None]) -> None:
+    """Attach ``field_boxes`` — where each SECONDARY value of this fact sits on the page.
+
+    Mutates ``fact`` in place, and only when at least one qualifier was located. The fact's own
+    ``bbox``/``page`` stay exactly as they were: they are the primary value's box, the one the
+    persist endpoint reads, and the only box the sidebar draws by default. These entries are what
+    let the UI prove a *specific* cell on demand — the reference range behind an abnormal flag, the
+    dose behind a medication — without blanketing the page in rectangles.
+
+    A qualifier the locator could not place is deliberately absent rather than sent with a null box:
+    its text still ships above, and the UI marks it unverified instead of drawing a rectangle that
+    proves nothing.
+
+    Args:
+        fact: The wire dict to extend.
+        fields: The fact's secondary values, keyed by the field name the UI labels them with.
+    """
+    entries = []
+    for name, citation in fields.items():
+        box = citation.bounding_box if citation is not None else None
+        if box is None:
+            continue
+        entries.append({"field": name, "page": box.page, "bbox": _box_payload(box)})
+    if entries:
+        fact["field_boxes"] = entries
 
 
 def _attach_optional_box(fact: dict[str, Any], box: BoundingBox | None) -> None:

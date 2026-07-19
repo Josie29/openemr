@@ -260,7 +260,11 @@ def test_medication_list_happy_path_and_empty_section() -> None:
     """
     filled = MedicationList(
         medications=[
-            Medication(name="Metformin", dose="500 mg", citation=_valid_citation(box=False))
+            Medication(
+                name="Metformin",
+                dose=CitedText(value="500 mg", citation=_valid_citation(box=False)),
+                citation=_valid_citation(box=False),
+            )
         ]
     )
     assert filled.medications[0].name == "Metformin"

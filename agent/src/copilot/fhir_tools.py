@@ -106,7 +106,7 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
     @agent.tool
     async def get_lab_observations(
         ctx: RunContext[D], code: str | None = None
-    ) -> list[LabObservation]:
+    ) -> list[LabObservation] | str:
         """Read the open patient's laboratory results from the record, oldest first.
 
         Use for "what is their <lab>" and for trends over time. Returns only laboratory results —
@@ -119,11 +119,22 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
             code: Optional LOINC code to narrow to one analyte, e.g. "787-2" for MCV. Omit to read
                 every lab result. Prefer filtering by code over matching on the analyte's name —
                 several distinct LOINC codes share similar names (three read as "Platelet...").
+
+        Returns:
+            The matching results, or a sentence saying the record holds none. Stated in words
+            rather than returned as ``[]``, which reads like a failed read and invites hunting
+            through other LOINC codes for a value the patient simply does not have.
         """
-        return _track(ctx, await ctx.deps.fhir.get_lab_observations(ctx.deps.patient_id, code=code))
+        observations = _track(
+            ctx, await ctx.deps.fhir.get_lab_observations(ctx.deps.patient_id, code=code)
+        )
+        if not observations:
+            scope = f" for LOINC code {code}" if code else ""
+            return f"This patient's record contains no laboratory results{scope}."
+        return observations
 
     @agent.tool
-    async def get_encounter_note(ctx: RunContext[D], encounter_id: str) -> list[NoteContent]:
+    async def get_encounter_note(ctx: RunContext[D], encounter_id: str) -> list[NoteContent] | str:
         """Read the free-text clinical note(s) for one encounter — the narrative behind a visit.
 
         Use for "why"/"what did the note say" questions the structured lists can't answer. Find the
@@ -132,7 +143,15 @@ def register_fhir_read_tools[D: FhirReadDeps](agent: Agent[D, Any]) -> None:
         Args:
             ctx: The run context.
             encounter_id: The Encounter id whose note to read (from get_patient_summary).
+
+        Returns:
+            The visit's note(s), or a sentence saying it has none. Many visits are recorded with no
+            narrative at all, so this is an ordinary outcome rather than a failed read — and saying
+            so is what stops the model working through other encounters looking for one.
         """
-        return _track(
+        notes = _track(
             ctx, await ctx.deps.fhir.get_encounter_note(ctx.deps.patient_id, encounter_id)
         )
+        if not notes:
+            return f"Encounter {encounter_id} has no clinical note recorded."
+        return notes

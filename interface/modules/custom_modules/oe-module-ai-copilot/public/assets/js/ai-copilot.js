@@ -1164,7 +1164,21 @@
                 doc_type: group.doc_type,
                 page: fact.page,
                 value: fact.value,
-                bounding_box: { page: fact.page, x: box.x, y: box.y, width: box.w, height: box.h }
+                bounding_box: { page: fact.page, x: box.x, y: box.y, width: box.w, height: box.h },
+                // Where this fact's QUALIFIERS sit (unit, reference range) — carried through but not
+                // drawn by default, which is what keeps the page as calm as it is today. They are
+                // what a per-cell "prove this one" affordance highlights on demand; a qualifier the
+                // locator could not place is simply absent, never a rectangle proving nothing.
+                field_boxes: (fact.field_boxes || []).map(function (entry) {
+                    return {
+                        field: entry.field,
+                        page: entry.page,
+                        x: entry.bbox.x,
+                        y: entry.bbox.y,
+                        width: entry.bbox.w,
+                        height: entry.bbox.h
+                    };
+                })
             },
             citations: [{
                 source_type: 'lab_pdf',
@@ -1276,9 +1290,23 @@
 
         var head = document.createElement('thead');
         var headRow = document.createElement('tr');
-        [labels.labAnalyte, labels.labValue, labels.labRef].forEach(function (heading) {
+        // Every column is proof of something, including the analyte: the test name is boxed too, and
+        // a name bound to the wrong row is exactly how a value gets attributed to the wrong test.
+        var columns = [
+            { heading: labels.labAnalyte, field: 'test_name' },
+            { heading: labels.labValue, field: 'value' },
+            { heading: labels.labUnits, field: 'unit' },
+            { heading: labels.labRef, field: 'reference_range' }
+        ];
+        columns.forEach(function (column) {
             var th = document.createElement('th');
-            th.textContent = heading;
+            th.textContent = column.heading;
+            if (column.field) {
+                // "Show me every reference range you read." Costs the same rectangle count as the
+                // default result column, so auditing one dimension across the panel is no more
+                // cluttered than what the card already opens with.
+                makeColumnProvable(th, claims, boxed, column.field);
+            }
             headRow.appendChild(th);
         });
         head.appendChild(headRow);
@@ -1292,7 +1320,12 @@
             var analyte = document.createElement('td');
             analyte.className = 'ai-copilot__labs-analyte';
             analyte.appendChild(buildFactNumber(claim, boxed));
-            analyte.appendChild(document.createTextNode(detail.test_name));
+            // The name sits in its own span so the badge beside it keeps its own click target: the
+            // badge proves the whole row, the name proves just which test this is.
+            var analyteName = document.createElement('span');
+            analyteName.textContent = detail.test_name;
+            makeCellProvable(analyteName, claim, boxed, 'test_name');
+            analyte.appendChild(analyteName);
             row.appendChild(analyte);
 
             var value = document.createElement('td');
@@ -1301,20 +1334,197 @@
             if (detail.abnormal_flag === 'high' || detail.abnormal_flag === 'low') {
                 value.classList.add('ai-copilot__labs-value--abnormal');
             }
-            value.textContent = detail.unit
-                ? claim.source.value + ' ' + detail.unit
-                : claim.source.value;
+            // The unit used to be concatenated onto the value, which made it impossible to click or
+            // column-scope even once it had a box of its own. It gets its own cell now.
+            value.textContent = claim.source.value;
+            makeCellProvable(value, claim, boxed, 'value');
             row.appendChild(value);
+
+            var units = document.createElement('td');
+            units.className = 'ai-copilot__labs-units';
+            units.textContent = detail.unit || '';
+            makeCellProvable(units, claim, boxed, 'unit');
+            row.appendChild(units);
 
             var ref = document.createElement('td');
             ref.className = 'ai-copilot__labs-ref';
             ref.textContent = detail.reference_range || '';
+            // The range is stamped here as system-authored fact, and a wrong one flips a normal
+            // value to abnormal — so it has to be checkable in its own right, not just displayed.
+            makeCellProvable(ref, claim, boxed, 'reference_range');
             row.appendChild(ref);
 
             body.appendChild(row);
         });
         table.appendChild(body);
         return table;
+    }
+
+    /**
+     * The box proving ONE field of a fact: the primary box for `value`, else a qualifier's.
+     *
+     * @param {object} claim The fact.
+     * @param {string} field Which value to prove — 'value', 'reference_range', 'unit', ...
+     * @returns {object|null} A `{page, x, y, width, height}` box, or null when that value was never
+     *                        located (it still displays, it just cannot be pointed at).
+     */
+    function boxForField(claim, field) {
+        var source = claim.source || {};
+        if (field === 'value') {
+            return source.bounding_box || null;
+        }
+        var matches = (source.field_boxes || []).filter(function (entry) {
+            return entry.field === field;
+        });
+        return matches.length ? matches[0] : null;
+    }
+
+    /**
+     * Every located box backing ONE fact — its value plus each qualifier that resolved.
+     *
+     * All of them carry the same badge number on purpose: they are three proofs of a single fact,
+     * so the overlay reads "everything numbered 7 supports result 7" rather than renumbering each
+     * rectangle as if it were a separate finding.
+     *
+     * @param {object} claim The fact.
+     * @param {number} ordinal Its badge number in the list.
+     * @returns {Array<object>} Boxes in the overlay's packing shape; empty when nothing located.
+     */
+    function boxesForFact(claim, ordinal) {
+        var source = claim.source || {};
+        var boxes = [];
+        if (source.bounding_box) {
+            boxes.push(source.bounding_box);
+        }
+        (source.field_boxes || []).forEach(function (entry) {
+            boxes.push(entry);
+        });
+        return boxes.map(function (box) {
+            return { x: box.x, y: box.y, width: box.width, height: box.height, n: ordinal };
+        });
+    }
+
+    /**
+     * One field's box across EVERY fact on the page — the column view.
+     *
+     * Each rectangle keeps its own fact's number, so a column of ranges lines up with the list above
+     * it. Facts whose value for that field was never located are simply absent, which is what makes
+     * the column honest: the gaps show what could not be placed.
+     *
+     * @param {Array<object>} boxed The page's boxed facts, in badge order.
+     * @param {string} field Which value to show for each — 'value', 'reference_range', 'unit'.
+     * @returns {Array<object>} Boxes in the overlay's packing shape.
+     */
+    function boxesForColumn(boxed, field) {
+        var boxes = [];
+        boxed.forEach(function (claim, index) {
+            var box = boxForField(claim, field);
+            if (box) {
+                boxes.push({
+                    x: box.x, y: box.y, width: box.width, height: box.height, n: index + 1
+                });
+            }
+        });
+        return boxes;
+    }
+
+    /**
+     * Open the scan showing a specific set of boxes, or do nothing when there are none.
+     *
+     * @param {object} source A source carrying the document id (any fact on the page will do).
+     * @param {Array<object>} boxes The rectangles to draw, already packed.
+     * @param {number} page The 1-based page they sit on.
+     */
+    function openBoxes(source, boxes, page) {
+        if (!boxes.length || !source || !source.document_id) {
+            return;
+        }
+        openSourceInChartTab(String(source.document_id), page, boxes, docKindLabel(source));
+    }
+
+    /**
+     * Make a column header show that field across every fact on the page.
+     *
+     * Inert when nothing in the column was located — a header that opens an empty overlay would
+     * imply the page was checked and found wanting, rather than never placed.
+     *
+     * @param {HTMLElement} th The header cell.
+     * @param {Array<object>} claims The document page's facts.
+     * @param {Array<object>} boxed The boxed subset, defining the badge numbering.
+     * @param {string} field Which value the column shows.
+     */
+    function makeColumnProvable(th, claims, boxed, field) {
+        var boxes = boxesForColumn(boxed, field);
+        if (!boxes.length || !claims.length) {
+            return;
+        }
+        th.classList.add('ai-copilot__labs-col--provable');
+        th.setAttribute('role', 'button');
+        th.setAttribute('tabindex', '0');
+        th.title = labels.checkSource;
+        var source = claims[0].source;
+        var open = function () {
+            openBoxes(source, boxes, normalizePage(source));
+        };
+        th.addEventListener('click', open);
+        th.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                open();
+            }
+        });
+    }
+
+    /**
+     * Make one table cell prove itself against the scan, when that value was located.
+     *
+     * This is the progressive part of click-to-source: the page stays as calm as it was — one box
+     * per fact — until the physician interrogates a SPECIFIC value, which highlights exactly that
+     * cell and nothing else. Verifying a reference range is a targeted question ("where did 0.70-1.30
+     * come from?"), not a reason to outline all 112 cells of a 28-row report.
+     *
+     * A cell whose value was never located silently stays inert rather than offering a click that
+     * would highlight something which does not support it.
+     *
+     * @param {HTMLElement} cell The cell to wire.
+     * @param {object} claim The fact the cell belongs to.
+     * @param {Array<object>} boxed The document page's boxed facts, defining the badge numbering.
+     * @param {string} field Which of the fact's values this cell shows.
+     */
+    function makeCellProvable(cell, claim, boxed, field) {
+        var box = boxForField(claim, field);
+        var source = claim.source || {};
+        if (!box || !source.document_id) {
+            return;
+        }
+        cell.classList.add('ai-copilot__labs-cell--provable');
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('tabindex', '0');
+        cell.title = labels.checkSource;
+        // Carry the fact's own badge number so the overlay labels this rectangle the same way the
+        // list above does, rather than restarting at 1 for a single-box view.
+        var ordinal = boxed.indexOf(claim) + 1;
+        var open = function () {
+            openSourceInChartTab(
+                String(source.document_id),
+                box.page,
+                [{
+                    x: box.x,
+                    y: box.y,
+                    width: box.width,
+                    height: box.height,
+                    n: ordinal > 0 ? ordinal : null
+                }],
+                docKindLabel(source)
+            );
+        };
+        cell.addEventListener('click', open);
+        cell.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                open();
+            }
+        });
     }
 
     /**
@@ -1361,6 +1571,27 @@
         }
         badge.className = 'ai-copilot__doc-num';
         badge.textContent = String(index + 1);
+
+        // The number is the handle for the whole fact: clicking it shows everything backing this
+        // one result at once — the value, the range that makes it abnormal, and its unit. That is
+        // the evidence behind "why is this flagged", which a single cell cannot answer alone.
+        var boxes = boxesForFact(claim, index + 1);
+        if (boxes.length > 1) {
+            badge.classList.add('ai-copilot__doc-num--provable');
+            badge.setAttribute('role', 'button');
+            badge.setAttribute('tabindex', '0');
+            badge.title = labels.checkSource;
+            var open = function () {
+                openBoxes(claim.source, boxes, normalizePage(claim.source));
+            };
+            badge.addEventListener('click', open);
+            badge.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    open();
+                }
+            });
+        }
         return badge;
     }
 
@@ -1384,8 +1615,11 @@
             : labels.checkSource;
         button.dataset.documentId = String(source.document_id);
         button.dataset.page = String(normalizePage(source));
-        button.dataset.boxes = JSON.stringify(boxed.map(function (claim) {
-            return claim.source.bounding_box;
+        // Stamp each box with the badge number its fact shows in the list above (buildFactNumber
+        // uses the same 1-based index into `boxed`), so the overlay and the sidebar cannot drift.
+        button.dataset.boxes = JSON.stringify(boxed.map(function (claim, index) {
+            var box = claim.source.bounding_box;
+            return { x: box.x, y: box.y, width: box.width, height: box.height, n: index + 1 };
         }));
         button.dataset.docTitle = docKindLabel(source);
         button.addEventListener('click', onCheckAllClick);
@@ -1690,9 +1924,19 @@
         // One scalar param rather than boxes[]: the viewer reads its input with filter_input, which
         // takes scalars. Note the field-name shift — JS boxes are {x, y, width, height}, the URL and
         // PHP both speak x/y/w/h.
+        // A box may carry `n`, the badge number the sidebar gave its fact. It is packed as a fifth
+        // field rather than left to the viewer to infer from array position: position only matched
+        // the sidebar while every fact contributed exactly one box, so it desynchronises as soon as
+        // one fact owns several. Omitted when absent, which keeps the four-field URL valid.
         var packed = (boxes || [])
             .filter(Boolean)
-            .map(function (box) { return [box.x, box.y, box.width, box.height].join(','); })
+            .map(function (box) {
+                var fields = [box.x, box.y, box.width, box.height];
+                if (box.n != null) {
+                    fields.push(box.n);
+                }
+                return fields.join(',');
+            })
             .join(';');
         if (packed !== '') {
             url += '&boxes=' + encodeURIComponent(packed);
@@ -2342,6 +2586,7 @@
             page: els.sidebar.dataset.labelPage || 'p.',
             labAnalyte: els.sidebar.dataset.labelLabAnalyte || 'Analyte',
             labValue: els.sidebar.dataset.labelLabValue || 'Value',
+            labUnits: els.sidebar.dataset.labelLabUnits || 'Units',
             labRef: els.sidebar.dataset.labelLabRef || 'Reference',
             tierGuidelines: els.sidebar.dataset.labelTierGuidelines || 'Guidelines',
             tierGuidelinesShort: els.sidebar.dataset.labelTierGuidelinesShort || 'guideline',

@@ -30,20 +30,19 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "reaction": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Reaction as printed, e.g. 'hives'. Null if not given.",
-            "title": "Reaction"
+            "description": "Reaction as printed, e.g. 'hives'. Null if not given."
           },
           "substance": {
             "description": "Allergen/substance as printed, e.g. 'Penicillin'.",
@@ -103,6 +102,15 @@
         "title": "BoundingBox",
         "type": "object"
       },
+      "BoxEvidence": {
+        "description": "What a located box PROVES \u2014 not where it is.\n\nThe distinction that stops a box laundering a hallucination. On a form an option's text is\n*preprinted*: \"Male\" and \"Female\" are both on the page, and \"Asthma\" is printed whether or\nnot it is ticked. Boxing that text proves only that the form offers the option \u2014 the fact is\nasserted by the tick. So a box over preprinted text cannot support a checkbox-derived claim,\neven though the value provably \"appears on the page\".\n\nLives here, beside :class:`BoundingBox`, because a box's evidence travels with it onto\n:class:`Citation`; the geometry package imports it from here (never the reverse).\n\nNamed ``BoxEvidence``, not ``Evidence``: :class:`copilot.schemas.Evidence` is the sidebar's\nguideline source card.",
+        "enum": [
+          "printed_value",
+          "checked_mark"
+        ],
+        "title": "BoxEvidence",
+        "type": "string"
+      },
       "ChatRequest": {
         "description": "The inbound ``POST /chat`` payload for a single agent turn.",
         "properties": {
@@ -149,6 +157,17 @@
               }
             ],
             "description": "Box locating the value on the page (PDF points). Required for lab_pdf facts."
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoxEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the box PROVES \u2014 a printed value, or a tick asserting a checkbox option. Recorded by code from the locator that found it; never model-authored."
           },
           "field_or_chunk_id": {
             "anyOf": [
@@ -228,7 +247,7 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "value": {
@@ -488,20 +507,19 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "relation": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Affected relative, e.g. 'mother'. Null if not given.",
-            "title": "Relation"
+            "description": "Affected relative, e.g. 'mother'. Null if not given."
           }
         },
         "required": [
@@ -620,7 +638,7 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "loinc": {
@@ -635,17 +653,27 @@
             "description": "The LOINC code printed beside the analyte, e.g. '2823-3'. Null when the report prints none. Read it off the page \u2014 never supply a code from memory.",
             "title": "Loinc"
           },
-          "reference_range": {
+          "loinc_citation": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/Citation"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Reference range verbatim, e.g. '4.0-5.6'. Null if not printed.",
-            "title": "Reference Range"
+            "description": "Where the LOINC code sits on the page. System-set."
+          },
+          "reference_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reference range verbatim, e.g. '4.0-5.6'. Null if not printed."
           },
           "test_name": {
             "description": "Analyte/test name exactly as printed, e.g. 'Hemoglobin A1c'.",
@@ -653,17 +681,27 @@
             "title": "Test Name",
             "type": "string"
           },
-          "unit": {
+          "test_name_citation": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/Citation"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Unit as printed, e.g. '%'. Null if unitless/qualitative.",
-            "title": "Unit"
+            "description": "Where the test name sits on the page. System-set."
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CitedText"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit as printed, e.g. '%'. Null if unitless/qualitative."
           },
           "value": {
             "description": "Result value verbatim, e.g. '8.2' or 'Positive'. Never round or convert.",
@@ -699,32 +737,30 @@
                 "type": "null"
               }
             ],
-            "description": "Extractor per-field confidence (0-1). System-set from the extractor.",
+            "description": "Extractor per-field confidence (0-1). Recorded, never thresholded.",
             "title": "Confidence"
           },
           "dose": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Dose/strength as printed, e.g. '500 mg'. Null if not given.",
-            "title": "Dose"
+            "description": "Dose/strength as printed, e.g. '500 mg'. Null if not given."
           },
           "frequency": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CitedText"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Frequency as printed, e.g. 'twice daily'. Null if not given.",
-            "title": "Frequency"
+            "description": "Frequency as printed, e.g. 'twice daily'. Null if not given."
           },
           "name": {
             "description": "Medication name as printed, e.g. 'Metformin'.",

@@ -113,6 +113,19 @@ tooling, evals). Integrate them on `qa/integration`, test locally, then promote 
   prod row got `patient/Observation.read`). Run it as the **last step of the promotion**:
   `interface/modules/custom_modules/oe-module-ai-copilot/scripts/sync-copilot-scopes.sh --prod`
   (add `--dry-run` first to preview). Then re-launch to confirm a fresh token carries the scope.
+- **Run the module SQL migration in prod whenever the promotion changes
+  `oe-module-ai-copilot/sql/*.sql`.** Module install/upgrade SQL runs on install/upgrade, **not** on
+  a code redeploy — so `railway redeploy -s openemr` ships the new code but never creates a new
+  table/column, leaving the write silently broken. This already broke prod write-back once: adding
+  `ai_copilot_document_facts` (the citation sidecar every write-back inserts into) shipped in the
+  code but not the DB, so the citation `INSERT` rolled back the whole transaction → "Could not save
+  some facts — nothing was added." Because `recordCitation()` is on every write path, a missing
+  sidecar table breaks **all** write-back (labs, meds, intake), not just the new type. Run it as a
+  **promotion step after the openemr redeploy**: the correct path is Admin → Modules → the Co-Pilot
+  module → run its install/upgrade SQL (records the module schema version); the fast unblock is
+  applying the file's `CREATE TABLE` directly against the prod DB (the file is `#IfNotTable`
+  idempotent). Confirm with
+  `railway ssh -s openemr 'mariadb --skip-ssl -h "$MYSQL_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASS" openemr -N -e "SHOW TABLES LIKE '\''ai\_copilot%'\''"'`.
 
 ### Which worktree tool — depends on whether the component needs OpenEMR
 

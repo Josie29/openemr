@@ -26,6 +26,7 @@ from copilot.correlation import CorrelationIdMiddleware, current_correlation_id
 from copilot.fhir.client import FhirClient, FhirError, HttpFhirClient
 from copilot.fhir.fixtures import FixtureFhirClient
 from copilot.fhir.models import LabObservation
+from copilot.graph.budget import tool_budgets
 from copilot.graph.deps import GraphDeps
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import ANSWERER_PROMPT, ANSWERER_PROMPT_NAME
@@ -550,6 +551,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 fetched=session.fetched,
                 chunks=session.chunks,
                 documents=session.documents,
+                tool_budgets=tool_budgets(settings),
             )
 
             with observe_turn(
@@ -712,6 +714,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         correlation_id = current_correlation_id()
         settings = request.app.state.settings
+        # Auth before service-state: an unauthenticated caller gets 401, never a 503 that would leak
+        # whether extraction is configured (mirrors /documents and /evidence — this handler's auth
+        # otherwise rides on _resolve_request_fhir below, which runs after the 503 check).
+        denied = _require_token(request, settings, correlation_id)
+        if denied is not None:
+            return denied
         extractor = request.app.state.extractor
         if extractor is None:
             return _json_error(correlation_id, 503, "document extraction is not available")
@@ -721,11 +729,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         fhir, per_request_client = resolved
         extracted = None
         try:
-            # get_documents is also the security control: only a document the patient actually has,
-            # whose category maps to a schema, is extractable (no raw by-id path that would bypass
-            # the discovery filter).
-            summaries = await fhir.get_documents(patient_id)
-            extracted = await resolve_and_extract(document_id, summaries, extractor, fhir)
+            # resolve_and_extract reads the patient's documents itself; that listing IS the
+            # security control (only a document the patient actually has, whose category maps to a
+            # schema, is extractable — no raw by-id path bypasses the discovery filter).
+            extracted = await resolve_and_extract(document_id, patient_id, extractor, fhir)
         except ExtractionError:
             logger.warning(
                 "document extraction failed",

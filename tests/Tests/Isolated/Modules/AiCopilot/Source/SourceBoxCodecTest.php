@@ -103,11 +103,48 @@ final class SourceBoxCodecTest extends TestCase
             'overflow to INF' => ['1e999,20,100,12'],
             'NaN literal' => ['NaN,20,100,12'],
             'too few edges' => ['10,20,100'],
-            'too many edges' => ['10,20,100,12,99'],
+            // Five fields is the LABELLED form (x,y,w,h,n); six is still malformed.
+            'too many edges' => ['10,20,100,12,99,7'],
+            'fractional label' => ['10,20,100,12,1.5'],
+            'zero label' => ['10,20,100,12,0'],
+            'negative label' => ['10,20,100,12,-1'],
             'zero width' => ['10,20,0,12'],
             'negative height' => ['10,20,100,-12'],
             'negative origin' => ['-10,20,100,12'],
         ];
+    }
+
+    /**
+     * A fifth field carries the badge number the sidebar assigned the box's fact.
+     *
+     * The viewer used to derive that number from the box's position in the array, which agreed with
+     * the sidebar only while every fact contributed exactly one box. Carrying it explicitly is what
+     * lets one fact own several boxes -- a value and the reference range qualifying it -- without
+     * every badge after it renumbering itself.
+     */
+    public function testDecodesTheBadgeLabelFromAFifthField(): void
+    {
+        $boxes = SourceBoxCodec::decode('10,20,100,12,3;30,60,50,14,7');
+
+        $this->assertCount(2, $boxes);
+        $this->assertSame(3, $boxes[0]->label);
+        $this->assertSame(7, $boxes[1]->label);
+        $this->assertSame(['x' => 10.0, 'y' => 20.0, 'w' => 100.0, 'h' => 12.0, 'n' => 3], $boxes[0]->toViewArray());
+    }
+
+    /**
+     * An unlabelled four-field box still decodes, and omits `n` entirely.
+     *
+     * The single-box `View source` path and any older link still pack four fields, so the legacy
+     * contract has to keep producing exactly the array the viewer consumed before.
+     */
+    public function testUnlabelledBoxesKeepTheLegacyViewShape(): void
+    {
+        $boxes = SourceBoxCodec::decode('10,20,100,12');
+
+        $this->assertCount(1, $boxes);
+        $this->assertNull($boxes[0]->label);
+        $this->assertSame(['x' => 10.0, 'y' => 20.0, 'w' => 100.0, 'h' => 12.0], $boxes[0]->toViewArray());
     }
 
     /**

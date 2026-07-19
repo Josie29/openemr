@@ -215,6 +215,19 @@ class Settings(BaseSettings):
     # answer rather than looping worker calls. See copilot.graph.supervisor.run_graph.
     agent_max_hops: int = 4
 
+    # Per-TOOL call budgets for one turn, distinct from agent_tool_calls_limit (which is turn-wide
+    # and shared, so one looping tool starves every other). Enforced by hiding the tool from the
+    # model once spent — see copilot.graph.budget.
+    #
+    # Both are set to the number of calls that can do NEW work, not that number plus slack. The
+    # document list is read once and memoized, so a second call is definitionally a retry. Guideline
+    # snippets come back ranked best-first over a fixed corpus: one query establishes whether the
+    # topic is covered, a second allows one genuine reformulation, and beyond that the corpus is the
+    # limit rather than the phrasing — the observed runaway rephrased nine times and never found
+    # what was not there.
+    agent_max_searches_per_run: int = 2
+    agent_max_document_lists_per_run: int = 1
+
     # Browser origins allowed to call /chat directly (ARCHITECTURE.md §4: the chat XHR goes from the
     # physician's browser to this service, not proxied through PHP). Empty means no browser may call
     # us — fail closed rather than defaulting to "*", which would let any page spend a stolen token.

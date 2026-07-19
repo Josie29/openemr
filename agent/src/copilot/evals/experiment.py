@@ -129,6 +129,12 @@ async def eval_factually_consistent(*, output: dict[str, Any], **_: Any) -> Eval
 def _mean_run_evaluator(metric: str, out_name: str) -> Callable[..., Evaluation]:
     """Build a run-level evaluator that averages one item metric across the dataset run.
 
+    **These run-level scores land in ``environment=default``, not ``sdk-experiment``.** They are
+    attached to the dataset RUN, not to a trace, so the SDK's tracing environment (which does tag
+    the per-item traces — verified live) never applies to them. A dashboard widget or monitor that
+    filters ``environment = production`` **or** ``= sdk-experiment`` will therefore render empty
+    against ``mean_*``. Filter on the score name alone, or on ``environment = default``.
+
     Args:
         metric: The per-item evaluation name to average (e.g. ``"safe_refusal"``).
         out_name: The run-level score name to emit (e.g. ``"mean_safe_refusal"``).

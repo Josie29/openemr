@@ -36,6 +36,12 @@ place it by asking which of these it is:
 - `context/planning/` — cross-cutting project ops that isn't deliverable evidence
   (cost tracking, team workflow/tooling decisions).
 
+**The one sanctioned exception in `/docs/`: the per-week deliverables index.**
+`docs/DELIVERABLES-week-<n>.md` is a grader-facing map — one row per PRD
+requirement, with where it lives, how to verify it, and its status. It sits in
+`/docs/` rather than `/context/` because it is *navigation for an outside reader*,
+not evidence for a decision:
+
 ## Project Structure
 
 ```

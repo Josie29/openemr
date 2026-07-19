@@ -261,7 +261,7 @@ class TurnTrace:
             yield
 
     @contextmanager
-    def routing(self, route: str, reason: str) -> Iterator[None]:
+    def routing(self, route: str, reason: str) -> Iterator["WorkerSpan"]:
         """Open one hand-off span, held open for the duration of the work it dispatches.
 
         Nesting the dispatched worker inside this span is what makes the hand-off chain
@@ -269,9 +269,17 @@ class TurnTrace:
         its tool calls, and its wall-clock duration is what that hand-off actually cost — where a
         closed marker span would report zero.
 
+        Because this span already wraps exactly one worker's run, it is also where that worker's own
+        cost belongs (JOS-64) — hence the yielded :class:`WorkerSpan`. Attributing cost here rather
+        than to a second span of our own keeps one span per hand-off instead of two competing
+        hierarchies.
+
         Args:
             route: The chosen route (e.g. ``"extract_intake"``).
             reason: The supervisor's one-line justification for the hand-off.
+
+        Yields:
+            A :class:`WorkerSpan` for recording the dispatched worker's usage and cost.
         """
         with self._child_span(f"route:{route}") as span:
             if span is not None:
@@ -281,7 +289,29 @@ class TurnTrace:
                     )
                 except Exception:  # noqa: BLE001 - a tracing failure must not affect routing
                     logger.warning("Langfuse route span update failed", exc_info=True)
-            yield
+            yield WorkerSpan(span)
+
+    @contextmanager
+    def worker(self, name: str) -> Iterator["WorkerSpan"]:
+        """Wrap an UN-ROUTED agent run in its own span carrying its latency and cost.
+
+        Routed workers do not use this — their hand-off span (:meth:`routing`) already wraps the run
+        and takes its cost. This is for the answerer, which the supervisor composes directly rather
+        than dispatching, so it has no hand-off span of its own to nest under.
+
+        Args:
+            name: The agent's name (e.g. ``"answerer"``).
+
+        Yields:
+            A :class:`WorkerSpan` to record the run's usage and cost on.
+        """
+        with self._child_span(f"worker:{name}") as span:
+            if span is not None:
+                try:
+                    span.update(metadata={"worker": name})
+                except Exception:  # noqa: BLE001 - a tracing failure must not affect the worker
+                    logger.warning("Langfuse worker span update failed", exc_info=True)
+            yield WorkerSpan(span)
 
     def _apply(self, op: Callable[[Any], None]) -> None:
         """Run a span operation, demoting any failure to a warning (tracing never breaks a turn)."""
@@ -291,6 +321,50 @@ class TurnTrace:
             op(self._span)
         except Exception:  # noqa: BLE001 - a tracing failure must not affect the response
             logger.warning("Langfuse span update failed", exc_info=True)
+
+
+@dataclass
+class WorkerSpan:
+    """Handle to one worker's span; records what that worker alone spent. No-ops when untraced."""
+
+    _span: Any | None
+
+    def spent(self, *, usd: float, tokens: int, tool_calls: int) -> None:
+        """Record this worker's own cost and token usage on its span.
+
+        Args:
+            usd: Cost of this worker's run, priced from its usage delta.
+            tokens: Total tokens this worker's run consumed.
+            tool_calls: Tool calls this worker's run made.
+        """
+        if self._span is None:
+            return
+        try:
+            self._span.update(
+                metadata={"cost_usd": usd, "total_tokens": tokens, "tool_calls": tool_calls}
+            )
+        except Exception:  # noqa: BLE001 - a tracing failure must not affect the response
+            logger.warning("Langfuse worker span update failed", exc_info=True)
+
+
+def score_current_turn(name: str, value: float) -> None:
+    """Attach a numeric score to whatever turn is active, from code that holds no ``TurnTrace``.
+
+    Worker tools run inside the ``chat-turn`` span but are handed ``GraphDeps``, not the trace
+    handle, so they cannot call :class:`TurnTrace`. Langfuse resolves the active trace from the
+    OTel context, which the tool is already executing within — so the score lands on the same turn.
+    Used for ``extraction_error`` (A6): a failed OCR is caught inside the tool and degrades to "no
+    facts", which looks identical to an empty document unless it is scored. See
+    ``context/planning/alerting.md`` (A6).
+
+    Args:
+        name: The numeric score name to emit.
+        value: The score value.
+    """
+    try:
+        get_client().score_current_trace(name=name, value=value)
+    except Exception:  # noqa: BLE001 - a tracing failure must not affect the turn
+        logger.warning("Langfuse score failed", extra={"score": name}, exc_info=True)
 
 
 @contextmanager

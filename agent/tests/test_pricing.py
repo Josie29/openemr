@@ -2,7 +2,7 @@ import pytest
 from pydantic_ai.usage import RunUsage
 
 from copilot.config import ModelTier
-from copilot.pricing import turn_cost_usd
+from copilot.pricing import turn_cost_usd, usage_delta
 
 
 class TestTurnCostUsd:
@@ -37,3 +37,27 @@ class TestTurnCostUsd:
     def test_zero_usage_costs_nothing(self) -> None:
         # A turn that never reached the model (e.g. a pre-model failure) must score $0, not error.
         assert turn_cost_usd(ModelTier.SONNET, RunUsage()) == 0.0
+
+
+class TestUsageDelta:
+    def test_attributes_only_what_one_run_added(self) -> None:
+        # The graph threads ONE shared RunUsage through every agent so the tool-call ceiling is a
+        # per-turn cap, which means a worker's own usage is never directly observable. Without a
+        # correct diff, every worker's span would report the whole turn's tokens and per-worker
+        # cost would be meaningless (each worker looking like it cost the entire turn).
+        before = RunUsage(input_tokens=1000, output_tokens=200, requests=1, tool_calls=2)
+        after = RunUsage(input_tokens=1750, output_tokens=500, requests=2, tool_calls=5)
+
+        spent = usage_delta(before, after)
+
+        assert spent.input_tokens == 750
+        assert spent.output_tokens == 300
+        assert spent.requests == 1
+        assert spent.tool_calls == 3
+
+    def test_a_run_that_spent_nothing_reports_zero(self) -> None:
+        # A router hop that hits cache or a worker that short-circuits must not inherit the
+        # accumulator's running total as its own cost.
+        snapshot = RunUsage(input_tokens=5000, output_tokens=900)
+
+        assert turn_cost_usd(ModelTier.SONNET, usage_delta(snapshot, snapshot)) == 0.0

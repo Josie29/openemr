@@ -1,7 +1,7 @@
 import logging
 import os
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -223,28 +223,65 @@ class TurnTrace:
         """Record the turn's response as the trace output."""
         self._apply(lambda s: s.update(output=data))
 
-    def routed(self, route: str, reason: str) -> None:
-        """Emit one supervisor hand-off as a child span under the turn (JOS-56 logged handoffs).
+    def _child_span(self, name: str) -> AbstractContextManager[Any]:
+        """Open a child span of the turn, degrading to a no-op context on any tracing failure.
 
-        The Week-2 multi-agent surface routes procedurally, so each route decision is recorded as
-        its own short child span carrying the chosen route and the reason. Nested under the active
-        ``chat-turn`` span (and thus the turn's correlation id), the ordered hand-off chain is
-        reconstructable from the trace alone — the acceptance criterion. Like every trace op here,
-        a failure is swallowed so routing is never blocked by observability.
+        Returning a context manager (rather than emitting a closed span) is what lets callers keep
+        the span *open* across the work it describes, so real child spans nest underneath it. A
+        failure to open degrades to :func:`nullcontext`, so the caller's ``with`` body still runs —
+        tracing never blocks the turn. An exception raised inside the body propagates through the
+        live span, which marks it errored rather than swallowing the failure.
+
+        Args:
+            name: The span name.
+
+        Returns:
+            The open span's context manager, or a no-op context yielding None.
+        """
+        if self._span is None:
+            return nullcontext(None)
+        try:
+            return get_client().start_as_current_observation(name=name, as_type="span")
+        except Exception:  # noqa: BLE001 - a tracing failure must not affect the turn
+            logger.warning("Langfuse child span failed", exc_info=True)
+            return nullcontext(None)
+
+    @contextmanager
+    def supervising(self) -> Iterator[None]:
+        """Open the ``supervisor`` span that every routing hand-off and worker run nests under.
+
+        The Week-2 graph routes procedurally, so without an explicit span the router, its hand-offs
+        and the workers would all sit flat under ``chat-turn`` — indistinguishable from Week 1's
+        single-agent shape. Wrapping the routing loop gives the trace a supervisor subtree whose
+        duration is the orchestration cost, and makes each worker a descendant of the supervisor
+        that dispatched it (PRD Week 2: "each worker invocation must be a child span of the
+        supervisor span").
+        """
+        with self._child_span("supervisor"):
+            yield
+
+    @contextmanager
+    def routing(self, route: str, reason: str) -> Iterator[None]:
+        """Open one hand-off span, held open for the duration of the work it dispatches.
+
+        Nesting the dispatched worker inside this span is what makes the hand-off chain
+        reconstructable from the trace alone (JOS-56): the span's children *are* the worker run and
+        its tool calls, and its wall-clock duration is what that hand-off actually cost — where a
+        closed marker span would report zero.
 
         Args:
             route: The chosen route (e.g. ``"extract_intake"``).
             reason: The supervisor's one-line justification for the hand-off.
         """
-        if self._span is None:
-            return
-        try:
-            with get_client().start_as_current_observation(
-                name=f"route:{route}", as_type="span"
-            ) as span:
-                span.update(input={"route": route, "reason": reason}, metadata={"route": route})
-        except Exception:  # noqa: BLE001 - a tracing failure must not affect routing
-            logger.warning("Langfuse route span failed", exc_info=True)
+        with self._child_span(f"route:{route}") as span:
+            if span is not None:
+                try:
+                    span.update(
+                        input={"route": route, "reason": reason}, metadata={"route": route}
+                    )
+                except Exception:  # noqa: BLE001 - a tracing failure must not affect routing
+                    logger.warning("Langfuse route span update failed", exc_info=True)
+            yield
 
     def _apply(self, op: Callable[[Any], None]) -> None:
         """Run a span operation, demoting any failure to a warning (tracing never breaks a turn)."""

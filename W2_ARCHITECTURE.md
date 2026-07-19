@@ -105,7 +105,7 @@ so this expansion would be additive.
 | **HTTP surface** | `/health` · `/ready` · `/chat` | + read-only `/documents`, `/documents/{id}/extraction`, `/evidence` — subsystem endpoints for direct testing (same SMART token; no writes), plus a committed OpenAPI spec (§10) |
 | **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, below-floor = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs |
-| **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
+| **Tracing** | Flat spans under one turn | Nested **supervisor → route → worker → sub-call** span tree under the chat-turn root |
 
 **What did not change** (and why that matters): the deployment topology (Option D — PHP module +
 standalone Python agent), the authorization model (patient-scoped SMART token minted in PHP, IDOR
@@ -571,11 +571,10 @@ risk"). We answer that by making routing legible **in the trace**:
   chosen route (`extract_intake` / `retrieve_evidence` / `answer`) plus a one-line reason — logged
   as a structured event with its correlation ID. The PRD requires that handoffs be "logged and
   explainable" — this is that log.
-- **Langfuse child spans.** Each **route decision** is a **child span under the chat-turn root**,
-  and the worker it dispatches is a **sibling instrumented run under the same root** — a flat
-  shape, not nested under a separate supervisor span (§9) — so the full hand-off chain is
-  reconstructable from the correlation ID alone. The routing is inspectable in the trace even
-  though it is expressed in code.
+- **Langfuse child spans.** Each **route decision** opens a **child span under the `supervisor`
+  span**, and the worker it dispatches runs **inside** that hand-off span (§9) — so the trace shows
+  who dispatched whom, and the full chain is reconstructable from the correlation ID alone. The
+  routing is inspectable in the trace even though it is expressed in code.
 - **Escalation path.** If routing later needs an explicit, diagrammable FSM, `pydantic-graph`
   gives one *inside the same framework* — no cross-framework migration
   ([`agent-framework-week2.md`](context/decisions/agent-framework-week2.md)).
@@ -976,16 +975,31 @@ Week 2 **extends** the Week-1 observability seam ([`ARCHITECTURE.md`](ARCHITECTU
 Langfuse, same correlation-ID discipline, same structured-log format. No parallel logging
 convention is introduced; the Week-1 log schema gains new event types.
 
-- **Route-decision and per-worker spans under the chat-turn root — a flat shape (as-built).**
-  Each supervisor **route decision** is emitted as its own **Langfuse child span** under the
-  **chat-turn root**, carrying the chosen route (`extract_intake` / `retrieve_evidence` /
-  `answer`) and its one-line reason; the worker it dispatches (intake-extractor,
-  evidence-retriever) is captured as a **sibling instrumented run under the same chat-turn root**
-  — with the extraction and retrieval sub-calls traceable *within* their worker runs. This is an
-  intended **flat** shape: route events and worker runs both hang off the chat-turn root, **not**
-  nested under a separate "supervisor span" (verified live). The full hand-off chain is
-  reconstructable **from the correlation ID alone** — the PRD's explicit distributed-tracing
-  requirement.
+- **A nested supervisor → hand-off → worker span tree.** The turn's trace mirrors the graph's
+  control flow rather than flattening it:
+
+  ```
+  chat-turn                                 (root; correlation id, session id)
+  └── supervisor                            (the routing loop — its duration is orchestration cost)
+      ├── route:extract_intake              (chosen route + the router's one-line reason)
+      │   └── intake-extractor              (the worker run)
+      │       └── attach_and_extract         (extraction sub-call)
+      ├── route:retrieve_evidence
+      │   └── evidence-retriever
+      │       └── search_guidelines          (retrieval sub-call)
+      └── route:answer
+  ```
+
+  Each **worker invocation is a child span of the supervisor span** that dispatched it, and the
+  extraction/retrieval sub-calls are traceable **within** their worker spans — the PRD's
+  distributed-tracing requirement, met structurally rather than by convention. The hand-off spans
+  are held **open** across the dispatch, so a span's duration is what that hand-off actually cost;
+  an earlier build emitted them as zero-width markers, which left workers as siblings of their own
+  hand-off. The answerer runs after supervision ends and stays a sibling under `chat-turn` — it
+  composes the turn rather than being routed to. Span parentage here is positional (a child is
+  whatever runs while the parent is open), so it is easy to regress silently and is pinned by
+  `test_worker_runs_nest_inside_their_supervisor_and_route_spans`. The full chain remains
+  reconstructable **from the correlation ID alone**.
 - **Prompt-management syncs the answerer prompt.** Prompt-management now syncs the answerer
   prompt `copilot-answerer-prompt` (replacing the Week-1 `copilot-system-prompt`), so the graph's
   final-answer stage is versioned in Langfuse like the Week-1 single agent's system prompt was.

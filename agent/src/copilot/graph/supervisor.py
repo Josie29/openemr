@@ -121,34 +121,43 @@ async def run_graph(
     # makes re-calling a tool that returned nothing.
     dispatched: set[Route] = set()
 
-    for _ in range(max_hops):
-        routing = await graph.router.run(
-            _router_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
-        )
-        decision = routing.output
-        routes.append(decision)
-        turn.routed(decision.route.value, decision.reason)
-        if decision.route is Route.ANSWER:
-            break
-        if decision.route in dispatched:
-            # Nothing left to gather: the router asked for a worker that has already reported, so
-            # compose from what there is instead of burning the turn re-running it.
-            logger.info(
-                "router re-selected a completed worker; composing the answer",
-                extra={"route": decision.route.value, "correlation_id": deps.correlation_id},
+    # The routing loop runs inside the supervisor span, so every hand-off — and the worker each one
+    # dispatches — is a descendant of the supervisor rather than a sibling of it in the trace.
+    with turn.supervising():
+        for _ in range(max_hops):
+            routing = await graph.router.run(
+                _router_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
             )
-            break
-        dispatched.add(decision.route)
-        if decision.route is Route.EXTRACT_INTAKE:
-            extracted = await graph.extractor.run(
-                message, deps=deps, usage=usage, usage_limits=usage_limits
-            )
-            reports.append(("intake-extractor", extracted.output))
-        elif decision.route is Route.RETRIEVE_EVIDENCE:
-            retrieved = await graph.retriever.run(
-                message, deps=deps, usage=usage, usage_limits=usage_limits
-            )
-            reports.append(("evidence-retriever", retrieved.output))
+            decision = routing.output
+            routes.append(decision)
+            # Held open across the dispatch below, so the worker run and its tool calls nest under
+            # this hand-off and the span's duration is what the hand-off actually cost.
+            with turn.routing(decision.route.value, decision.reason):
+                if decision.route is Route.ANSWER:
+                    break
+                if decision.route in dispatched:
+                    # Nothing left to gather: the router asked for a worker that has already
+                    # reported, so compose from what there is instead of burning the turn
+                    # re-running it.
+                    logger.info(
+                        "router re-selected a completed worker; composing the answer",
+                        extra={
+                            "route": decision.route.value,
+                            "correlation_id": deps.correlation_id,
+                        },
+                    )
+                    break
+                dispatched.add(decision.route)
+                if decision.route is Route.EXTRACT_INTAKE:
+                    extracted = await graph.extractor.run(
+                        message, deps=deps, usage=usage, usage_limits=usage_limits
+                    )
+                    reports.append(("intake-extractor", extracted.output))
+                elif decision.route is Route.RETRIEVE_EVIDENCE:
+                    retrieved = await graph.retriever.run(
+                        message, deps=deps, usage=usage, usage_limits=usage_limits
+                    )
+                    reports.append(("evidence-retriever", retrieved.output))
 
     answered = await graph.answerer.run(
         _answerer_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits

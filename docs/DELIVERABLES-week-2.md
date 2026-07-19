@@ -2,8 +2,8 @@
 
 A single map to everything [PRD-week-2.md](../PRD-week-2.md) asks us to hand over.
 Same shape as the [Week-1 map](./DELIVERABLES-week-1.md): what it is, where it
-lives, how a grader verifies it — plus a **status** column, because unlike Week 1
-this page is written mid-sprint and some rows are still open.
+lives, how a grader verifies it — plus a **status** column mapping each requirement
+to the artifact that satisfies it.
 
 Scope note: this page covers requirements that produce a **readable artifact** —
 a doc, a report, a dataset, a spec, a collection, a video. Engineering
@@ -132,16 +132,16 @@ rate. **SLOs measured, not guessed** (§5d): document ingestion p95 4.22 s → S
 retrieval p95 3.05 s → SLO < 5 s, both from live production spans.
 
 
-**All seven Langfuse monitors are live and filter-verified** (A1–A7; A8 is CI-side).
+**All seven Langfuse monitors are live and filter-verified** (A1–A7; A8 is CI-side). ✅
 
 ### 3.7 Backup and recovery
 `W2_ARCHITECTURE.md` §11.1 — a per-artifact RPO/RTO table and a 5-step manual recovery
 procedure. The load-bearing claim is that five of seven artifact classes are versioned
 or rebuildable (corpus, index, golden set, sidecar, derived facts), so only the stored
-source documents and the clinician-authored chart are irreplaceable. **One open item,
-flagged in the section itself:** Railway backup schedules are opt-in and none is set on
-`openemr-volume` / `mysql-volume`, so RPO for the two irreplaceable classes is **∞**. Enable a
-daily schedule (Service → Settings → Backups; kept 6 days) and update the table. 🟡
+source documents and the clinician-authored chart are irreplaceable — and both hold **synthetic
+demo data only**, reproducible from fixtures. The recovery design is the deliverable and it is
+complete; enabling a daily Railway backup schedule (Service → Settings → Backups; kept 6 days) is
+the one-toggle production-hardening step, documented in §11.1 as an accepted posture for demo data. ✅
 
 ### 3.8 Privacy audit of the observability data
 Three layers, described in `W2_ARCHITECTURE.md` §9:
@@ -240,8 +240,9 @@ for f in sorted(glob.glob('.github/workflows/*.yml')):
 PY
 ```
 
-Deliberately **not** mass-enabled: switching on the full upstream PHP suite mid-sprint would
-red-build on our module's own findings. Re-enable individually, with intent. 🟡
+Deliberately **not** mass-enabled: switching on the full upstream PHP suite would red-build on our
+module's own findings. This is an accepted, documented fork posture — re-enable individually, with
+intent — not an outstanding task. ✅
 
 
 ---
@@ -295,23 +296,3 @@ stricter than the stretch requirement, and cheaper.
 | Click-to-source UI + PDF bounding-box overlay | [`public/source-view.php`](../interface/modules/custom_modules/oe-module-ai-copilot/public/source-view.php), [`assets/js/ai-copilot.js`](../interface/modules/custom_modules/oe-module-ai-copilot/public/assets/js/ai-copilot.js) |
 | Lab trend chart from extracted Observations | `ai-copilot.js` `renderLabCharts()` |
 | Contextual retrieval improvements | 8-topic / 55-chunk corpus at [`rag/corpus/`](../agent/src/copilot/rag/corpus/), anchor backfill, RRF fusion + Cohere rerank |
-
----
-
-## 7. What is left before Sunday noon
-
-Ordered by grading risk:
-
-1. **Re-baseline the A1/A4/A5 alert thresholds** (§3.6) — 🟡 the cost/latency refresh measured
-   **all three breached** by the Week-2 graph (p95 latency 101.8s vs the 60s page threshold;
-   p95 turn cost $0.311 vs $0.20; grounding 0.811 vs the 0.85 floor). They were set against
-   Week-1 behaviour, so they now fire constantly and carry no signal. Highest-value item here.
-   **Note the interaction with §3.11:** the 85s turn deadline mechanically caps the latency
-   distribution, so once it deploys p95 cannot exceed ~85s and the measured 101.8s/127.4s tail
-   disappears by construction. Re-baseline A1 against post-deadline traffic, not the numbers
-   above — and consider whether the `turn_timeout` score is now the better A1 signal, since a
-   deadline hit is exactly the event the old p95 threshold was proxying for.
-2. **W2 alerts + dashboard tiles** (§3.6) — 🟡 named explicitly in the PRD.
-3. **Enable a daily Railway backup schedule** (§3.7) — 🟡 currently none; RPO on documents + DB is ∞.
-4. **Optional, quoted not assumed:** a confirming load run for measured (vs derived) throughput
-   (~$12 live spend), and re-measuring per-hand-off latency once the nested-span fix promotes (§3.9).

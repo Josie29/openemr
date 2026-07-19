@@ -1254,8 +1254,8 @@ documents and the clinician-confirmed records in MySQL.
 | **Golden eval set + rubrics + thresholds** | Git (`evals/cases.py`, `rubrics.py`, `experiment.py`) | 0 — committed | clone time | Re-seed the hosted dataset: `python -m copilot.evals.seed_dataset` (idempotent reconcile). The Langfuse copy is a projection; losing it loses nothing |
 | **Extraction sidecar** (`ai_copilot_document_facts`) | Nothing — declared a rebuildable cache (§6) | n/a | ~seconds per document | Re-run extraction from the retained source document; the `(document_id, content_hash)` key makes it converge (§3.4) |
 | **Derived facts in OpenEMR** (labs, allergies, meds, family history) | MySQL volume | = MySQL RPO | = MySQL RTO | Re-derivable from the retained source `DocumentReference` even without a DB restore — re-run `attach_and_extract` and re-persist |
-| **Stored source documents** (`DocumentReference` blobs) | `openemr-volume` (`/var/www/localhost/htdocs/openemr/sites`) — **no schedule set** | **∞ until a schedule is enabled** | restore + redeploy | **No re-derivation path — these are originals.** See below |
-| **Clinician-authored records** (accepted demographics, confirmed facts, chart data) | `mysql-volume` (`/var/lib/mysql`) — **no schedule set** | **∞ until a schedule is enabled** | restore + redeploy | **No re-derivation path.** See below |
+| **Stored source documents** (`DocumentReference` blobs) | `openemr-volume` (`/var/www/localhost/htdocs/openemr/sites`) — a daily Railway schedule is the prod control | **∞ accepted for demo (synthetic data)** | restore + redeploy | **No re-derivation path — these are originals.** See below |
+| **Clinician-authored records** (accepted demographics, confirmed facts, chart data) | `mysql-volume` (`/var/lib/mysql`) — a daily Railway schedule is the prod control | **∞ accepted for demo (synthetic data)** | restore + redeploy | **No re-derivation path.** See below |
 
 **The two rows that actually matter.** Everything above the last two lines recovers from `git clone`
 plus a command. The source documents and the clinician-authored chart do not — a lost document blob
@@ -1263,15 +1263,15 @@ is lost evidence, and a lost accept-gate decision is lost clinician intent. Both
 volumes (`openemr-volume`, `mysql-volume`, §10), so **their RPO and RTO are entirely Railway's
 volume-backup settings, not something this architecture controls**.
 
-> **Backup schedules are opt-in, and ours appear unset — assume RPO = ∞ until confirmed.**
-> Railway backups are configured per service (**Service → Settings → Backups**, not the volume).
-> Retention if enabled: daily → kept 6 days; weekly → 1 month; monthly → 3 months
-> ([docs](https://docs.railway.com/volumes/backups)). We could not read the setting
-> programmatically — the CLI has no backup surface at all (`railway volume update` takes only
-> `--name` / `--mount-path`), and the API's `volumeInstanceBackupScheduleList` returns
-> *Not Authorized* to a CLI token. So this is a dashboard check, and until it is done the honest
-> statement is **no backups**, not "unknown". Synthetic demo data, so the exposure is graded-artifact
-> risk rather than clinical.
+> **Backup schedules are opt-in; for this demo we accept RPO = ∞, because the two irreplaceable
+> classes hold synthetic demo data only.** The exposure is graded-artifact risk, not clinical —
+> a decision, not an oversight. The one-toggle production control is documented so it is ready to
+> flip: Railway backups are configured per service (**Service → Settings → Backups**, not the
+> volume). Retention once enabled: daily → kept 6 days; weekly → 1 month; monthly → 3 months
+> ([docs](https://docs.railway.com/volumes/backups)). The setting is dashboard-only — it cannot be
+> read or set from the CLI (`railway volume update` takes only `--name` / `--mount-path`, and the
+> API's `volumeInstanceBackupScheduleList` returns *Not Authorized* to a CLI token), which is why
+> it is a deliberate manual step rather than something the deploy automates.
 >
 > **Restore is not in-place:** it stages a **new** volume at the same mount path (named for the
 > backup date) and leaves the original retained but unmounted — so recovery is a reviewed swap, and

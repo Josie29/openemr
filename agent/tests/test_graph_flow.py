@@ -18,7 +18,7 @@ from copilot.graph.routing import Route, RouteDecision
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import build_evidence_retriever
 from copilot.ingestion.registry import DocumentFactRegistry
-from copilot.observability import TurnTrace
+from copilot.observability import TurnTrace, WorkerSpan
 from copilot.rag.models import EvidenceSnippet
 from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
 from copilot.schemas import ChatResponse, Claim, GuidelineCitation, SourceRef
@@ -379,10 +379,12 @@ class _RecordingTrace(TurnTrace):
             self.events.append("exit:supervisor")
 
     @contextmanager
-    def routing(self, route: str, reason: str) -> Iterator[None]:
+    def routing(self, route: str, reason: str) -> Iterator[WorkerSpan]:
         self.events.append(f"enter:route:{route}")
         try:
-            yield
+            # A spanless handle: the supervisor records the hand-off's cost on it, which is a no-op
+            # untraced — this double asserts nesting order, not cost.
+            yield WorkerSpan(None)
         finally:
             self.events.append(f"exit:route:{route}")
 
@@ -450,3 +452,49 @@ async def test_worker_runs_nest_inside_their_supervisor_and_route_spans() -> Non
         assert (
             trace.events.index("enter:supervisor") < ran < trace.events.index("exit:supervisor")
         ), f"{worker} ran outside the supervisor span — the PRD requires it to be a child of it"
+@pytest.mark.anyio
+async def test_a_retrieval_that_clears_the_relevance_floor_scores_a_hit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """retrieval_hit is the only signal that says whether RAG is finding anything usable. Without
+    it, a corpus that silently stops matching looks identical to a healthy one — the turn still
+    answers, just without evidence."""
+    scores: dict[str, float] = {}
+    monkeypatch.setattr(
+        "copilot.graph.workers.score_current_turn",
+        lambda name, value: scores.__setitem__(name, value),
+    )
+    retriever = build_evidence_retriever(TestModel())
+    deps = _deps()
+
+    with retriever.override(model=_retriever_model(_GUIDELINE_QUOTE)):
+        await retriever.run("Is he due for diabetes screening?", deps=deps)
+
+    assert scores["retrieval_hit"] == 1.0
+    assert scores["retrieval_top_score"] == _SNIPPET.rerank_score
+
+
+@pytest.mark.anyio
+async def test_a_retrieval_returning_nothing_above_the_floor_scores_a_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The empty list here is POST-floor: the retriever applies settings.retrieval_relevance_floor
+    before returning, so "no snippets" means nothing cleared the relevance bar — a corpus coverage
+    gap, not an error. Nothing else reports that; the turn just answers unevidenced."""
+    scores: dict[str, float] = {}
+    monkeypatch.setattr(
+        "copilot.graph.workers.score_current_turn",
+        lambda name, value: scores.__setitem__(name, value),
+    )
+    retriever = build_evidence_retriever(TestModel())
+    deps = _deps()
+    deps.retriever = StubRetriever(snippets=())
+
+    with (
+        retriever.override(model=_retriever_model(_GUIDELINE_QUOTE)),
+        pytest.raises(UnexpectedModelBehavior),
+    ):
+        await retriever.run("Is he due for diabetes screening?", deps=deps)
+
+    assert scores["retrieval_hit"] == 0.0
+    assert scores["retrieval_top_score"] == 0.0

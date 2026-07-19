@@ -573,6 +573,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         # every note on a 90+-encounter chart) cannot spend up to pydantic-ai's
                         # default. Hitting it degrades to a refusal below, not a 500.
                         usage_limits=UsageLimits(tool_calls_limit=settings.agent_tool_calls_limit),
+                        # Prices each worker's own usage delta onto its span (JOS-64). The turn
+                        # total is still priced below from the shared accumulator.
+                        model_tier=settings.model_tier,
                     )
                     turn.verified(passed=True)
                     turn.costed(usd=turn_cost_usd(settings.model_tier, result.usage))

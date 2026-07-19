@@ -35,6 +35,32 @@ _CACHE_WRITE_MULTIPLIER = 1.25  # ...and a cache write at 125% of it.
 _TOKENS_PER_MTOK = 1_000_000
 
 
+def usage_delta(before: RunUsage, after: RunUsage) -> RunUsage:
+    """The token usage accrued between two snapshots of the same shared accumulator.
+
+    The graph threads ONE ``RunUsage`` through every agent run so the tool-call ceiling is a
+    per-turn cap (see ``supervisor.run_graph``), which means no agent's individual usage is ever
+    observable directly — ``AgentRunResult.usage`` returns that same shared object. Subtracting two
+    snapshots is the only way to attribute usage to one worker, and ``RunUsage`` defines no
+    ``__sub__``, so the field-wise difference lives here beside the pricing that consumes it.
+
+    Args:
+        before: Snapshot taken immediately before the run.
+        after: Snapshot taken immediately after it.
+
+    Returns:
+        A ``RunUsage`` holding only what that run added.
+    """
+    return RunUsage(
+        input_tokens=after.input_tokens - before.input_tokens,
+        cache_write_tokens=after.cache_write_tokens - before.cache_write_tokens,
+        cache_read_tokens=after.cache_read_tokens - before.cache_read_tokens,
+        output_tokens=after.output_tokens - before.output_tokens,
+        requests=after.requests - before.requests,
+        tool_calls=after.tool_calls - before.tool_calls,
+    )
+
+
 def turn_cost_usd(tier: ModelTier, usage: RunUsage) -> float:
     """Compute one turn's model cost in USD from its token usage.
 

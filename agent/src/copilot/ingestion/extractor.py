@@ -3,7 +3,7 @@ import base64
 import json
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
@@ -26,6 +26,7 @@ from copilot.ingestion.schemas import (
     Demographics,
     DocType,
     FamilyHistoryItem,
+    FieldCoverage,
     IntakeForm,
     LabReport,
     LabResult,
@@ -399,10 +400,11 @@ class ExtractedDocument:
     document_id: str
     doc_type: DocType
     report: ExtractedReport
+    coverage: FieldCoverage = field(default_factory=FieldCoverage)
 
 
 def _map_report(
-    doc_type: DocType, raw: dict[str, Any], pdf_bytes: bytes
+    doc_type: DocType, raw: dict[str, Any], pdf_bytes: bytes, state: LocatorState | None = None
 ) -> ExtractedReport:
     """Map a raw OCR response into the strict schema the document's type names.
 
@@ -413,6 +415,8 @@ def _map_report(
         doc_type: The schema to map into, resolved from the document's category.
         raw: The raw OCR response.
         pdf_bytes: The document's bytes, for text-layer geometry.
+        state: Optional locator state to map into, so the caller can read its field-coverage tally
+            afterwards (JOS-64). Defaults to a fresh state, keeping this callable standalone.
 
     Returns:
         The validated report.
@@ -423,11 +427,11 @@ def _map_report(
     geometry = DocumentGeometry.from_document(pdf_bytes, raw)
     match doc_type:
         case DocType.LAB_PDF:
-            return map_lab_report(raw, geometry)
+            return map_lab_report(raw, geometry, state)
         case DocType.INTAKE_FORM:
-            return map_intake_form(raw, geometry)
+            return map_intake_form(raw, geometry, state)
         case DocType.MEDICATION_LIST:
-            return map_medication_list(raw, geometry)
+            return map_medication_list(raw, geometry, state)
 
 
 class DocumentExtractor:
@@ -459,8 +463,19 @@ class DocumentExtractor:
         """
         pdf_bytes = await byte_source.fetch(document_id)
         raw = await self._ocr.process(pdf_bytes, doc_type)
-        report = _map_report(doc_type, raw, pdf_bytes)
-        return ExtractedDocument(document_id=document_id, doc_type=doc_type, report=report)
+        # Own the locator state here so its field-coverage tally survives the mapping call: the
+        # dropped fields it counts are gone from `report` by construction (a field that could not be
+        # placed is absent, not null), so this is the only point the denominator still exists.
+        state = LocatorState()
+        report = _map_report(doc_type, raw, pdf_bytes, state)
+        return ExtractedDocument(
+            document_id=document_id,
+            doc_type=doc_type,
+            report=report,
+            coverage=FieldCoverage(
+                attempted=state.fields_attempted, resolved=state.fields_resolved
+            ),
+        )
 
 
 async def resolve_and_extract(
@@ -574,7 +589,9 @@ def _annotation_dict(ocr: dict[str, Any]) -> dict[str, Any]:
     return annotation if isinstance(annotation, dict) else {}
 
 
-def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport:
+def map_lab_report(
+    ocr: dict[str, Any], geometry: DocumentGeometry, state: LocatorState | None = None
+) -> LabReport:
     """Map a Mistral OCR response + document geometry into a strict ``LabReport`` (boxes in points).
 
     Args:
@@ -602,7 +619,7 @@ def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport
         )
 
     spec = spec_for(DocType.LAB_PDF, FieldId.LAB_RESULT_VALUE)
-    state = LocatorState()
+    state = state if state is not None else LocatorState()
     results: list[LabResult] = []
     for ordinal, raw in enumerate(raw_results):
         if not isinstance(raw, dict):
@@ -628,6 +645,10 @@ def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport
             geometry,
             state,
         )
+        # Counted here, AFTER the blank-row skip above: a spacer/subtotal row is OCR noise, not a
+        # field the document states, so counting it would make this metric read scan quality
+        # instead of locator quality.
+        state.record_field(resolved=located is not None and located.precision.meets(spec.floor))
         if located is None or not located.precision.meets(spec.floor):
             # No text-layer word, no table geometry, no page box — drop rather than fabricate.
             logger.warning("dropping lab result with no locatable box", extra={"test": test_name})
@@ -636,7 +657,9 @@ def map_lab_report(ocr: dict[str, Any], geometry: DocumentGeometry) -> LabReport
     return LabReport(results=results)
 
 
-def map_intake_form(ocr: dict[str, Any], geometry: DocumentGeometry) -> IntakeForm:
+def map_intake_form(
+    ocr: dict[str, Any], geometry: DocumentGeometry, state: LocatorState | None = None
+) -> IntakeForm:
     """Map a Mistral OCR response + document geometry into a strict ``IntakeForm``.
 
     Mirrors :func:`map_lab_report`: schema mode gives the VALUES, the locator chain bound to each
@@ -660,7 +683,7 @@ def map_intake_form(ocr: dict[str, Any], geometry: DocumentGeometry) -> IntakeFo
             but not valid JSON.
     """
     annotation = _annotation_dict(ocr)
-    state = LocatorState()
+    state = state if state is not None else LocatorState()
 
     def cited(field: FieldId, value: Any) -> CitedText | None:
         text = _clean(value)
@@ -684,7 +707,9 @@ def map_intake_form(ocr: dict[str, Any], geometry: DocumentGeometry) -> IntakeFo
     )
 
 
-def map_medication_list(ocr: dict[str, Any], geometry: DocumentGeometry) -> MedicationList:
+def map_medication_list(
+    ocr: dict[str, Any], geometry: DocumentGeometry, state: LocatorState | None = None
+) -> MedicationList:
     """Map a Mistral OCR response + document geometry into a strict ``MedicationList``.
 
     Mirrors :func:`map_intake_form`: schema mode gives the values, the locator chain boxes each; a
@@ -703,7 +728,7 @@ def map_medication_list(ocr: dict[str, Any], geometry: DocumentGeometry) -> Medi
             JSON.
     """
     annotation = _annotation_dict(ocr)
-    state = LocatorState()
+    state = state if state is not None else LocatorState()
     return MedicationList(
         medications=_map_medications(annotation, geometry, state, DocType.MEDICATION_LIST)
     )
@@ -736,6 +761,7 @@ def _locate(
     located = spec.chain.locate(
         LocateRequest(value=value, anchors=spec.labels), geometry, state
     )
+    state.record_field(resolved=located is not None and located.precision.meets(spec.floor))
     if located is None:
         logger.warning(
             "dropping extracted fact the page does not support",
@@ -789,6 +815,11 @@ def _secondary(
     spec = spec_for(doc_type, field)
     located = spec.chain.locate(LocateRequest(value=value, anchors=anchors), geometry, state)
     box = located.box if located is not None and located.precision.meets(spec.floor) else None
+    # A boxless secondary counts as UNRESOLVED even though it deliberately still ships. The metric
+    # answers "can a clinician click this back to the page?", and the answer here is no — so the
+    # rate sits below 1.0 on a healthy document. Counting it resolved would hide a geometry
+    # regression that quietly stripped every secondary box while extraction still "succeeded".
+    state.record_field(resolved=box is not None)
     if box is None:
         logger.info(
             "secondary field not located; citing it without a box",

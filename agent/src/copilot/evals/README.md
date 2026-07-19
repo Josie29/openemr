@@ -65,7 +65,10 @@ from a Haiku run reflect Haiku's behavior, not the deployed tier's.
 
 Each run instruments the agent and the judges (`configure_observability` → `Agent.instrument_all()`),
 so every case's token usage flows to Langfuse and it computes cost. The experiment runner tags these
-traces `environment=sdk-experiment`, so they're segregated from dev/prod. See per-run cost in the
+traces `environment=sdk-experiment`, so they're segregated from dev/prod. **The run-level `mean_*`
+scores are the exception:** they attach to the dataset run rather than a trace, so they carry
+`environment=default`. A dashboard tile filtering `production` or `sdk-experiment` will show nothing
+for them — filter by score name alone. See per-run cost in the
 Langfuse **Experiments** table (Total Cost column) or per-trace in the dataset run. Cost is computed
 server-side during ingestion, so it populates a few seconds after the run finishes.
 

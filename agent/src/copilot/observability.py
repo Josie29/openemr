@@ -192,6 +192,19 @@ class TurnTrace:
         self._apply(lambda s: s.score_trace(name="tool_ceiling", value=1.0))
         self._apply(lambda s: s.update(level="WARNING"))
 
+    def timed_out(self) -> None:
+        """Record that the turn blew its wall-clock deadline before it could answer.
+
+        A distinct ``turn_timeout`` score, for the same reason :meth:`limited` is distinct: a turn
+        that ran out of time never reached the grounding gate, so scoring it as a grounding failure
+        would pollute the A4 refusal rate — a *trust* signal — with a latency signal. It is also
+        separable from ``tool_ceiling``: that means the turn made too many calls, this that it took
+        too long, and the remedies differ. ``WARNING`` rather than ``ERROR`` because the user got a
+        coherent degraded answer, not a 5xx. See ``context/planning/alerting.md``.
+        """
+        self._apply(lambda s: s.score_trace(name="turn_timeout", value=1.0))
+        self._apply(lambda s: s.update(level="WARNING"))
+
     def errored(self, *, tool_failure: bool) -> None:
         """Flag an infrastructure failure on this turn so the alert monitors can count it.
 

@@ -229,8 +229,9 @@ class MistralOcrBackend:
     so it never blocks the event loop serving other turns.
     """
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, timeout_seconds: float = 30.0) -> None:
         self._api_key = api_key
+        self._timeout_seconds = timeout_seconds
 
     async def process(self, pdf_bytes: bytes, doc_type: DocType) -> dict[str, Any]:
         """OCR a document via Mistral schema mode.
@@ -255,7 +256,11 @@ class MistralOcrBackend:
             ) from exc
 
         b64 = base64.b64encode(pdf_bytes).decode()
-        client = Mistral(api_key=self._api_key)
+        # The timeout MUST be an SDK-level one, not an asyncio.wait_for around the to_thread call
+        # below: cancelling the awaitable returns control to the event loop but does NOT cancel the
+        # worker thread, so the HTTP request would keep running and keep billing while we reported
+        # a timeout. Only the SDK's own deadline actually stops the request.
+        client = Mistral(api_key=self._api_key, timeout_ms=int(self._timeout_seconds * 1000))
         try:
             # The SDK call is synchronous/blocking — run it off the event loop.
             resp = await asyncio.to_thread(
@@ -555,7 +560,9 @@ def build_extractor(settings: Settings) -> DocumentExtractor | None:
         if settings.mistral_api_key is None:
             logger.warning("extractor MISTRAL mode without an API key; extraction disabled")
             return None
-        ocr = MistralOcrBackend(settings.mistral_api_key)
+        ocr = MistralOcrBackend(
+            settings.mistral_api_key, timeout_seconds=settings.ocr_timeout_seconds
+        )
     return DocumentExtractor(ocr)
 
 

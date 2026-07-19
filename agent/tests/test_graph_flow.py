@@ -20,6 +20,7 @@ from copilot.graph.workers import build_evidence_retriever
 from copilot.ingestion.registry import DocumentFactRegistry
 from copilot.observability import TurnTrace, WorkerSpan
 from copilot.rag.models import EvidenceSnippet
+from copilot.rag.retriever import RetrievalError
 from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
 from copilot.schemas import ChatResponse, Claim, GuidelineCitation, SourceRef
 from copilot.verification import FetchLog
@@ -498,3 +499,83 @@ async def test_a_retrieval_returning_nothing_above_the_floor_scores_a_miss(
 
     assert scores["retrieval_hit"] == 0.0
     assert scores["retrieval_top_score"] == 0.0
+
+
+@dataclass
+class _FailingRetriever(StubRetriever):
+    """A retriever whose store is down — every query raises, as a dead Qdrant/Cohere would."""
+
+    async def retrieve(
+        self,
+        query: str,
+        *,
+        guideline: str | None = None,
+        source: str | None = None,
+        section: str | None = None,
+        top_n: int | None = None,
+    ) -> list[EvidenceSnippet]:
+        raise RetrievalError("qdrant hybrid query failed")
+
+
+async def test_retrieval_outage_degrades_instead_of_failing_the_turn() -> None:
+    # Guards the fallback asymmetry fix: extraction failure has always degraded gracefully, but a
+    # retrieval failure used to propagate out of the tool and kill the whole turn — so one dead
+    # dependency cost the physician an answer the patient record could fully support. The tool must
+    # now report the outage and let the turn complete.
+    #
+    # It must ALSO not claim the corpus lacks the topic: that wording is a clinical statement a
+    # physician may act on, and asserting it because a service was unreachable is a false negative
+    # dressed as evidence.
+    graph = build_graph(TestModel())
+    deps = _deps()
+    deps.retriever = _FailingRetriever()
+
+    state = {"searched": False}
+
+    def retriever_reports_outage(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> ModelResponse:
+        """Search once, then report the outage with no claims — nothing was retrieved to cite."""
+        if not state["searched"]:
+            state["searched"] = True
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="search_guidelines", args={"query": "diabetes"})]
+            )
+        output = RetrieverOutput(summary="Guideline lookup was unavailable this turn.", claims=[])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=_final_tool_name(info), args=output.model_dump(mode="json"))
+            ]
+        )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            graph.router.override(model=_router_model([Route.RETRIEVE_EVIDENCE, Route.ANSWER]))
+        )
+        stack.enter_context(graph.retriever.override(model=FunctionModel(retriever_reports_outage)))
+        # The answerer cites nothing: with retrieval down there is no chunk to ground a guideline
+        # claim against, and the gate would (correctly) reject one. A claimless "I could not check
+        # the guidelines" IS the right degraded answer.
+        stack.enter_context(graph.answerer.override(model=_claimless_answerer_model()))
+        result = await run_graph(graph, "Is she due for diabetes screening?", deps, TurnTrace(None))
+
+    assert result.answer.summary, "the turn must still produce an answer when retrieval is down"
+    assert [d.route for d in result.routes] == [Route.RETRIEVE_EVIDENCE, Route.ANSWER]
+
+
+def _claimless_answerer_model() -> FunctionModel:
+    """An answerer returning a summary with no claims — the degraded shape when nothing grounds."""
+    final = ChatResponse(
+        summary="I could not check the guideline corpus this turn; the evidence lookup failed.",
+        claims=[],
+        follow_ups=[],
+    )
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=_final_tool_name(info), args=final.model_dump(mode="json"))
+            ]
+        )
+
+    return FunctionModel(respond)

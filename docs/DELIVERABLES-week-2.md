@@ -185,13 +185,40 @@ Coverage via Codecov. Dependency audit:
 upstream would be disabled within a week). ✅
 
 ### 3.11 Timeouts, retries, circuit breakers
-FHIR client: 10s timeout, 2 retries
-([`fhir/client.py`](../agent/src/copilot/fhir/client.py)). Readiness probes: 5s.
-Workers: `retries=2` plus per-tool call budgets
-([`graph/budget.py`](../agent/src/copilot/graph/budget.py)).
-**Open:** Qdrant, Cohere, Mistral OCR, and the LLM provider run on SDK default
-timeouts, and there is no circuit breaker. Decide whether to ship or to record as an
-accepted risk in §12. 🟡
+**Every outbound call is bounded, and so is the turn.** Budget table in
+`W2_ARCHITECTURE.md` §10; values live in [`config.py`](../agent/src/copilot/config.py),
+each set *above* the largest latency observed in production
+([`loadtest-results.md`](../context/planning/loadtest-results.md)) so they cut genuine
+hangs rather than trimming the tail — LLM 60s (max seen 41.3s), Mistral OCR 30s (16.5s),
+Cohere rerank 10s + 2 **SDK** retries that honour 429/5xx (5.2s), Qdrant 5s, FHIR 10s + 2
+transport retries. Workers keep `retries=2` and the per-tool call budgets
+([`graph/budget.py`](../agent/src/copilot/graph/budget.py)); readiness probes 5s.
+
+**Turn deadline 85s**, set deliberately *under* the sidebar's 90s `CHAT_TIMEOUT_MS`.
+Before it, a slow turn ran unbounded server-side while the browser gave up and told the
+physician the assistant "may be offline" — measured p95 is 101.8s, so this was already
+happening on real turns, with the turn still billing and nothing in the trace to tell it
+apart from a healthy one. It now degrades to a plain "took longer than I can spend"
+answer, logs `reason=turn_deadline`, and scores `turn_timeout` distinctly from
+`tool_ceiling` and `verification_grounding`.
+
+**Retrieval failure degrades instead of failing the turn**
+([`graph/workers.py`](../agent/src/copilot/graph/workers.py)), matching what extraction
+already did — and deliberately *not* reusing the empty-corpus wording, because "no
+guideline covers this" is a clinical statement a physician may act on and asserting it
+because a service was unreachable would be a false negative dressed as evidence.
+
+**No circuit breaker — accepted risk, argued in `W2_ARCHITECTURE.md` §12** with the
+tripwires that would reverse it (a sustained dependency failure rate on the A3 monitor,
+or multi-replica deployment). Three external dependencies, one replica, and two of the
+three now degrade gracefully.
+
+Verify: `pytest agent/tests/test_retriever.py test_chat_flow.py test_graph_flow.py`. Each
+new test was confirmed to fail without its fix — the wiring test catches a dropped kwarg
+(`assert 5 == 7`, 5 being the SDK default), the deadline test 500s without the wrapper. ✅
+*(Caveat: `mistralai` is an optional extra excluded from CI, so the OCR timeout is the one
+value with no automated coverage — worth exercising against a real document.)*
+
 ### 3.12 Inherited-workflow branch filters (fork hazard)
 Not a PRD line item, but it decides whether several of the rows above are true. Upstream
 develops on `master`/`rel-*`; this fork develops on `main`/`qa/integration`. Around **30
@@ -231,6 +258,8 @@ These need no artifact of their own; `W2_ARCHITECTURE.md` is where they are expl
 | `/health` + `/ready` with meaningful, degradable probes | [`health.py`](../agent/src/copilot/health.py) — 6 probes incl. document storage, vector index, reranker | §10 |
 | Schema is the source of truth, not VLM output | flat `_*Probe` models → validated Pydantic; geometry placed separately | §3 |
 | Per-turn cost + token accounting | [`pricing.py`](../agent/src/copilot/pricing.py) `turn_cost_usd` | §9 |
+| Timeouts on every outbound call + a turn deadline | [`config.py`](../agent/src/copilot/config.py) budgets, wired at each client; `asyncio.timeout` on the turn | §10 |
+| Graceful degradation when a dependency is down | extraction and retrieval both report the gap and let the turn answer | §10, §12 |
 
 ---
 
@@ -277,6 +306,11 @@ Ordered by grading risk:
    **all three breached** by the Week-2 graph (p95 latency 101.8s vs the 60s page threshold;
    p95 turn cost $0.311 vs $0.20; grounding 0.811 vs the 0.85 floor). They were set against
    Week-1 behaviour, so they now fire constantly and carry no signal. Highest-value item here.
+   **Note the interaction with §3.11:** the 85s turn deadline mechanically caps the latency
+   distribution, so once it deploys p95 cannot exceed ~85s and the measured 101.8s/127.4s tail
+   disappears by construction. Re-baseline A1 against post-deadline traffic, not the numbers
+   above — and consider whether the `turn_timeout` score is now the better A1 signal, since a
+   deadline hit is exactly the event the old p95 threshold was proxying for.
 2. **W2 alerts + dashboard tiles** (§3.6) — 🟡 named explicitly in the PRD.
 3. **Enable a daily Railway backup schedule** (§3.7) — 🟡 currently none; RPO on documents + DB is ∞.
 4. **Optional, quoted not assumed:** a confirming load run for measured (vs derived) throughput

@@ -13,6 +13,7 @@ from copilot.ingestion.extractor import ExtractionError, resolve_and_extract
 from copilot.ingestion.registry import DocumentFactHandle
 from copilot.observability import score_current_turn
 from copilot.rag.models import RetrievedGuideline
+from copilot.rag.retriever import RetrievalError
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
 
@@ -337,7 +338,27 @@ def build_evidence_retriever(model: Model) -> Agent[GraphDeps, RetrieverOutput]:
             Snippets ranked best-first, or a sentence saying the corpus does not cover the topic.
             That sentence names the corpus as CLOSED.
         """
-        snippets = await ctx.deps.retriever.retrieve(query)
+        try:
+            snippets = await ctx.deps.retriever.retrieve(query)
+        except RetrievalError:
+            # Degrade the way extraction already does (see attach_and_extract): one dependency
+            # being down should cost the turn its guideline evidence, not the whole answer — the
+            # record-based claims are still fully groundable. Before this, a dead Qdrant or Cohere
+            # propagated and failed the turn, while the standalone /evidence endpoint returned a
+            # clean 502 — the same failure behaving two different ways by entry point.
+            #
+            # The message deliberately does NOT reuse the empty-corpus wording below: "the corpus
+            # does not cover this" is a clinical statement a physician may act on, and asserting it
+            # because a service was unreachable would be a false negative dressed as evidence.
+            logger.warning(
+                "guideline retrieval unavailable; answering from the record alone",
+                extra={"correlation_id": ctx.deps.correlation_id},
+            )
+            return (
+                "Guideline retrieval is temporarily unavailable, so no guideline evidence could be "
+                "searched for this turn. This is NOT a finding that the corpus lacks the topic — "
+                "say the evidence lookup failed, and answer from the patient record alone."
+            )
         # Record the FULL snippets so the grounding gate can resolve, and the response serializer
         # can stamp provenance for, any chunk the worker cites — even though the model only sees a
         # trimmed view of them.

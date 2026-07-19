@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
@@ -149,3 +150,13 @@ def override_graph(
         if answerer is not None:
             stack.enter_context(graph.answerer.override(model=answerer))
         yield
+
+
+def stalling_model(seconds: float = 60.0) -> FunctionModel:
+    """A model that sleeps far past any test deadline — drives the turn-deadline path."""
+
+    async def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        await asyncio.sleep(seconds)
+        raise AssertionError("the turn deadline should have fired before this model returned")
+
+    return FunctionModel(respond)

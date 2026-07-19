@@ -90,8 +90,54 @@ class Settings(BaseSettings):
             "Authorization header. The PHP module mints a per-request token; see /chat."
         ),
     )
-    fhir_timeout_seconds: float = 10.0
-    fhir_max_retries: int = 2
+    # Outbound-call budgets (W2_ARCHITECTURE.md §10). Every value sits ABOVE the largest latency
+    # observed in production (context/planning/loadtest-results.md), so a call that succeeds today
+    # is never cut short — these bound genuine hangs rather than trimming the tail. All are
+    # constrained: a timeout field that silently accepts -5 is worse than no field at all.
+    fhir_timeout_seconds: float = Field(default=10.0, gt=0, description="Per-request FHIR timeout.")
+    fhir_max_retries: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "httpx transport retries for FHIR. Retries CONNECTION failures only — not read "
+            "timeouts, not 5xx."
+        ),
+    )
+    llm_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        description=(
+            "Per-generation Anthropic timeout (max observed 41.3s). Deliberately below "
+            "turn_deadline_seconds so it can fire on the chat path rather than being dead code; it "
+            "also guards the read endpoints, which have no turn deadline."
+        ),
+    )
+    ocr_timeout_seconds: float = Field(
+        default=30.0, gt=0, description="Mistral OCR timeout (max observed 16.5s)."
+    )
+    rerank_timeout_seconds: float = Field(
+        default=10.0, gt=0, description="Cohere rerank timeout (max observed 5.2s)."
+    )
+    rerank_max_retries: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Cohere SDK-level retries — unlike httpx transport retries, these honour 429/5xx."
+        ),
+    )
+    # int, not float: AsyncQdrantClient types this parameter as ``int | None``.
+    qdrant_timeout_seconds: int = Field(
+        default=5, gt=0, description="Qdrant query timeout (private-network call)."
+    )
+    turn_deadline_seconds: float = Field(
+        default=85.0,
+        gt=0,
+        description=(
+            "Wall-clock ceiling on one /chat turn, set just UNDER the sidebar's 90s "
+            "CHAT_TIMEOUT_MS (ai-copilot.js) so the server degrades before the browser gives up — "
+            "otherwise the physician sees 'may be offline' while the turn runs on and bills."
+        ),
+    )
 
     # Hybrid RAG evidence retrieval (JOS-53 — W2_ARCHITECTURE.md §5). Qdrant holds ONLY the
     # non-PHI guideline corpus and Cohere reranks guideline text against the clinical question; no
@@ -279,6 +325,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "LANGFUSE_TRACING_ENVIRONMENT", "COPILOT_TRACING_ENVIRONMENT"
         ),
+    )
+
+    # PHI must never reach the observability backend (PRD-week-2, HIPAA-minded development).
+    # On by default so a missing env var fails closed; turn it off only to debug locally against
+    # synthetic data, never where real records are in play.
+    phi_masking_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("COPILOT_PHI_MASKING_ENABLED", "PHI_MASKING_ENABLED"),
     )
 
     @property

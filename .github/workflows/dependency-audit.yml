@@ -1,0 +1,67 @@
+name: Dependency audit
+
+# Known-vulnerability scan of the dependency tree, the counterpart to semgrep.yml's code scan
+# (PRD Week-2: "Dependency audit and security scan must run on every PR").
+#
+# Severity is scoped by ownership, deliberately:
+#   - agent/ Python deps are OURS — small tree, we control the versions, so a finding BLOCKS.
+#   - PHP/npm deps come from the upstream OpenEMR fork. We cannot patch them without diverging
+#     from upstream, so they are reported as an advisory job summary and never block. A gate
+#     nobody can act on gets switched off, which is worse than no gate.
+#
+# No path filter: this runs on every PR, per the requirement.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python (agent) — blocking
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Audits the resolved environment, so it covers transitive deps too. Installing with the
+      # dev extras matches what agent-tests.yml runs against.
+      - name: Install agent with dev extras
+        run: pip install -e ".[dev]"
+
+      # Pinned so a refreshed advisory database cannot red-build an unrelated PR without a
+      # visible version bump. Dependabot moves this line.
+      - name: Install pip-audit
+        run: pip install pip-audit==2.7.3
+
+      # --skip-editable excludes agentforge-copilot itself, which is installed editable and has no
+      # PyPI release to look up; without it every run fails on our own package rather than on a
+      # real advisory. Deliberately NOT --strict: strict fails on any unauditable distribution,
+      # which the editable install always is. Exit is non-zero when an advisory is found, which is
+      # the gate we want.
+      - name: Audit
+        run: pip-audit --skip-editable
+
+  upstream:
+    name: PHP + npm (upstream) — advisory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # composer and npm are preinstalled on ubuntu-latest, and both audit commands read the
+      # lock file directly — no vendor/ or node_modules install needed.
+      - name: Composer audit
+        continue-on-error: true
+        run: composer audit --locked --format=summary | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: npm audit
+        continue-on-error: true
+        run: npm audit --audit-level=high | tee -a "$GITHUB_STEP_SUMMARY"

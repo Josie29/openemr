@@ -11,7 +11,9 @@ from copilot.graph.gate import enforce_claim_grounding
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.ingestion.extractor import ExtractionError, resolve_and_extract
 from copilot.ingestion.registry import DocumentFactHandle
+from copilot.observability import score_current_turn
 from copilot.rag.models import RetrievedGuideline
+from copilot.rag.retriever import RetrievalError
 from copilot.schemas import ChatResponse
 from copilot.verification import CompositeResolver
 
@@ -248,6 +250,10 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
                 extra={"document_id": document_id},
                 exc_info=True,
             )
+            # SCORE IT TOO. The log line above is invisible to a monitor; the extraction-failure
+            # alert (A6) counts this score. Same reasoning as turn_error/tool_error: the failure is
+            # caught inside the span, so the span closes clean and would read as a success.
+            score_current_turn("extraction_error", 1.0)
             return []
         if extracted is None:
             # Not one of the patient's uploaded documents (a guessed id) — no facts.
@@ -258,6 +264,12 @@ def build_intake_extractor(model: Model) -> Agent[GraphDeps, ExtractorOutput]:
         # Retain the full typed extraction for the write-back payload: record() keeps only what
         # grounding needs and drops the LOINC code, units, and range the persist endpoint requires.
         ctx.deps.extractions[document_id] = extracted
+        # Field-coverage score (JOS-64). Emitted per document, so a multi-document turn produces
+        # several scores and Langfuse averages them — per-document granularity is what makes the
+        # metric actionable. None (a document stating no fields) emits nothing rather than 0.0.
+        pass_rate = extracted.coverage.pass_rate
+        if pass_rate is not None:
+            score_current_turn("extraction_field_pass_rate", pass_rate)
         return handles
 
     @agent.output_validator
@@ -326,11 +338,46 @@ def build_evidence_retriever(model: Model) -> Agent[GraphDeps, RetrieverOutput]:
             Snippets ranked best-first, or a sentence saying the corpus does not cover the topic.
             That sentence names the corpus as CLOSED.
         """
-        snippets = await ctx.deps.retriever.retrieve(query)
+        try:
+            snippets = await ctx.deps.retriever.retrieve(query)
+        except RetrievalError:
+            # Degrade the way extraction already does (see attach_and_extract): one dependency
+            # being down should cost the turn its guideline evidence, not the whole answer — the
+            # record-based claims are still fully groundable. Before this, a dead Qdrant or Cohere
+            # propagated and failed the turn, while the standalone /evidence endpoint returned a
+            # clean 502 — the same failure behaving two different ways by entry point.
+            #
+            # The message deliberately does NOT reuse the empty-corpus wording below: "the corpus
+            # does not cover this" is a clinical statement a physician may act on, and asserting it
+            # because a service was unreachable would be a false negative dressed as evidence.
+            logger.warning(
+                "guideline retrieval unavailable; answering from the record alone",
+                extra={"correlation_id": ctx.deps.correlation_id},
+            )
+            return (
+                "Guideline retrieval is temporarily unavailable, so no guideline evidence could be "
+                "searched for this turn. This is NOT a finding that the corpus lacks the topic — "
+                "say the evidence lookup failed, and answer from the patient record alone."
+            )
         # Record the FULL snippets so the grounding gate can resolve, and the response serializer
         # can stamp provenance for, any chunk the worker cites — even though the model only sees a
         # trimmed view of them.
         ctx.deps.chunks.record_all(snippets)
+        # Retrieval scores (JOS-64), per CALL — the prompt permits several searches per turn, so a
+        # turn can miss then hit and Langfuse averages them. `retrieve` returns the POST-FLOOR list
+        # (retriever._above_floor, settings.retrieval_relevance_floor), so an empty result means
+        # nothing cleared the relevance bar — the codebase's own definition of "relevant enough",
+        # not a new threshold invented here.
+        #
+        # Scored BEFORE the empty-corpus early return below: a miss is the case this metric exists
+        # for, so returning first would record only the hits and read as a permanent 1.0.
+        score_current_turn("retrieval_hit", 1.0 if snippets else 0.0)
+        # The top score alongside it separates the two failure modes a bare hit rate conflates: a
+        # miss with a near-floor top score means the floor is miscalibrated; a miss with a low one
+        # means the corpus does not cover the question.
+        score_current_turn(
+            "retrieval_top_score", max((s.rerank_score for s in snippets), default=0.0)
+        )
         if not snippets:
             return (
                 "No guideline in this corpus covers that topic. The corpus is a small fixed set of "

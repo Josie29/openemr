@@ -6,6 +6,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage, UsageLimits
 
+from copilot.config import ModelTier
 from copilot.graph.deps import GraphDeps
 from copilot.graph.outputs import ExtractorOutput, RetrieverOutput
 from copilot.graph.routing import Route, RouteDecision, build_supervisor_router
@@ -14,7 +15,8 @@ from copilot.graph.workers import (
     build_evidence_retriever,
     build_intake_extractor,
 )
-from copilot.observability import TurnTrace
+from copilot.observability import TurnTrace, WorkerSpan
+from copilot.pricing import turn_cost_usd, usage_delta
 from copilot.schemas import ChatResponse
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,7 @@ async def run_graph(
     *,
     max_hops: int = 4,
     usage_limits: UsageLimits | None = None,
+    model_tier: ModelTier | None = None,
 ) -> GraphResult:
     """Run one turn through the supervisor: route, dispatch workers, then compose the answer.
 
@@ -99,6 +102,9 @@ async def run_graph(
             terminates and composes an answer rather than looping.
         usage_limits: Per-run usage limits (e.g. a tool-call ceiling) applied to every agent run,
             so a worker that loops a tool is stopped and the turn degrades to a refusal upstream.
+        model_tier: The deployed model tier, used to price each worker's own usage onto its span.
+            None (the default, used by tests) leaves per-worker cost unpriced; the turn's total
+            cost is unaffected either way, since the caller prices ``GraphResult.usage``.
 
     Returns:
         A :class:`GraphResult` carrying the composed answer, the ordered routing trail, and the
@@ -121,39 +127,81 @@ async def run_graph(
     # makes re-calling a tool that returned nothing.
     dispatched: set[Route] = set()
 
-    for _ in range(max_hops):
-        routing = await graph.router.run(
-            _router_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
-        )
-        decision = routing.output
-        routes.append(decision)
-        turn.routed(decision.route.value, decision.reason)
-        if decision.route is Route.ANSWER:
-            break
-        if decision.route in dispatched:
-            # Nothing left to gather: the router asked for a worker that has already reported, so
-            # compose from what there is instead of burning the turn re-running it.
-            logger.info(
-                "router re-selected a completed worker; composing the answer",
-                extra={"route": decision.route.value, "correlation_id": deps.correlation_id},
+    # The routing loop runs inside the supervisor span, so every hand-off — and the worker each one
+    # dispatches — is a descendant of the supervisor rather than a sibling of it in the trace.
+    with turn.supervising():
+        for _ in range(max_hops):
+            routing = await graph.router.run(
+                _router_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
             )
-            break
-        dispatched.add(decision.route)
-        if decision.route is Route.EXTRACT_INTAKE:
-            extracted = await graph.extractor.run(
-                message, deps=deps, usage=usage, usage_limits=usage_limits
-            )
-            reports.append(("intake-extractor", extracted.output))
-        elif decision.route is Route.RETRIEVE_EVIDENCE:
-            retrieved = await graph.retriever.run(
-                message, deps=deps, usage=usage, usage_limits=usage_limits
-            )
-            reports.append(("evidence-retriever", retrieved.output))
+            decision = routing.output
+            routes.append(decision)
+            # Held open across the dispatch below, so the worker run and its tool calls nest under
+            # this hand-off and the span's duration is what the hand-off actually cost.
+            with turn.routing(decision.route.value, decision.reason) as hop:
+                if decision.route is Route.ANSWER:
+                    break
+                if decision.route in dispatched:
+                    # Nothing left to gather: the router asked for a worker that has already
+                    # reported, so compose from what there is instead of burning the turn
+                    # re-running it.
+                    logger.info(
+                        "router re-selected a completed worker; composing the answer",
+                        extra={
+                            "route": decision.route.value,
+                            "correlation_id": deps.correlation_id,
+                        },
+                    )
+                    break
+                dispatched.add(decision.route)
+                # Snapshot the shared accumulator so this hand-off's span can carry the cost of the
+                # worker it dispatches, and only that worker's.
+                before = usage_delta(RunUsage(), usage)
+                if decision.route is Route.EXTRACT_INTAKE:
+                    extracted = await graph.extractor.run(
+                        message, deps=deps, usage=usage, usage_limits=usage_limits
+                    )
+                    reports.append(("intake-extractor", extracted.output))
+                elif decision.route is Route.RETRIEVE_EVIDENCE:
+                    retrieved = await graph.retriever.run(
+                        message, deps=deps, usage=usage, usage_limits=usage_limits
+                    )
+                    reports.append(("evidence-retriever", retrieved.output))
+                _record_spend(hop, before, usage, model_tier)
 
-    answered = await graph.answerer.run(
-        _answerer_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
-    )
+    # The answerer is composed directly rather than dispatched, so it has no hand-off span to nest
+    # under and takes one of its own.
+    before_answer = usage_delta(RunUsage(), usage)
+    with turn.worker("answerer") as span:
+        answered = await graph.answerer.run(
+            _answerer_input(message, reports), deps=deps, usage=usage, usage_limits=usage_limits
+        )
+        _record_spend(span, before_answer, usage, model_tier)
     return GraphResult(answer=answered.output, routes=routes, usage=usage)
+
+
+def _record_spend(
+    span: WorkerSpan, before: RunUsage, usage: RunUsage, model_tier: ModelTier | None
+) -> None:
+    """Attribute one agent run's own token usage and cost to its span.
+
+    The graph threads ONE shared accumulator so the tool-call ceiling stays a per-TURN cap (see
+    :func:`run_graph`), which means no single run's usage is directly observable —
+    ``AgentRunResult.usage`` returns that same shared object. Diffing a before/after snapshot is
+    the only way to attribute usage to one run without regressing the ceiling.
+
+    Args:
+        span: The run's span handle.
+        before: The accumulator snapshot taken immediately before the run.
+        usage: The shared accumulator, now including the run.
+        model_tier: The deployed tier, for pricing. None leaves cost unpriced (0.0).
+    """
+    spent = usage_delta(before, usage)
+    span.spent(
+        usd=turn_cost_usd(model_tier, spent) if model_tier is not None else 0.0,
+        tokens=spent.input_tokens + spent.output_tokens,
+        tool_calls=spent.tool_calls,
+    )
 
 
 def _router_input(message: str, reports: list[WorkerReport]) -> str:

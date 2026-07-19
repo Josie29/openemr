@@ -1,4 +1,151 @@
-# Load / Stress Test Results — Co-Pilot `/chat`
+# Latency Results — Co-Pilot `/chat`
+
+> ## ⚠️ Two architectures on this page — read the labels
+>
+> **Everything below the "Week-1" heading measured the Week-1 single agent.** The Week-2
+> multi-agent graph reached prod on **2026-07-14** (`de08af937`) and is **~3× slower at p95**. The
+> Week-1 synthetic load test has **not** been re-run against it — see *Week-2 latency* immediately
+> below for what is measured, and *Why no Week-2 load test* for why.
+
+---
+
+## Week-2 latency (current architecture) — from real production traffic
+
+**Source:** Langfuse, `environment=production`, window **2026-07-14 → 2026-07-19**. **n=40 turns.**
+No synthetic load; these are real turns.
+
+| Metric | Week-2 | Week-1 baseline (load test) |
+|---|---|---|
+| `chat-turn` p50 | **35.0s** | 17–19s |
+| `chat-turn` p95 | **101.8s** | 32–34s |
+| `chat-turn` p99 | **127.4s** | 38–47s |
+| `chat-turn` mean | **46.7s** | 17.9–20.0s |
+| Errors | `turn_error` 2 · `tool_ceiling` 1 (of 40) | 0.00% (of 152) |
+| Throughput @10 / @50 users | **0.18 / 0.84 req/s** *(derived — see below)* | 0.42 / 2.18 req/s *(measured)* |
+| CPU / memory | measured — see infrastructure profile below | 0.31 vCPU / 0.26 GB peak |
+
+**Against the budget:** the inherited target is **<15s** ([`ARCHITECTURE.md` §2](../../ARCHITECTURE.md)).
+Week 2 misses it **at the median**, not just the tail. Alert thresholds set against Week-1 behaviour
+are now breached — A1 pages at p95 >60s (measured 101.8s), A5 warns at p95 `turn_cost` >$0.20
+(measured $0.311), A4 floors grounding at 0.85 (measured 0.811). `alerting.md` anticipated this and
+carries an explicit RE-BASELINE warning; these measurements discharge it.
+
+> **n=40.** A p95 over 40 samples is effectively the second-slowest turn. Directionally reliable,
+> not statistically stable.
+
+### Where the time goes
+
+| Component | p50 | p95 | p99 |
+|---|---:|---:|---:|
+| `chat-turn` (end to end) | 35.0s | 101.8s | 127.4s |
+| `chat claude-sonnet-5` (per generation) | 1.9s | **20.1s** | 31.0s |
+| `attach_and_extract` | 1.6s | 4.2s | 13.8s |
+| `search_guidelines` | 318ms | 3.0s | 5.2s |
+| FHIR reads (`get_*`) | 0.4–3.1s | 0.5–3.7s | ≤3.7s |
+
+**The turn is model-bound and hop-bound.** Every dependency is fast relative to the whole: the
+slowest non-model call (`attach_and_extract` p99 13.8s) is a tenth of the turn's p99. With **8.25
+model generations per turn** at p95 20.1s each, model time dominates — end-to-end latency tracks
+*hop count × model latency*, not any single slow dependency.
+
+**Not measurable yet — the routing-vs-worker split.** `route:*` spans in prod report p50 0ms / p95
+1ms because prod still runs the pre-nesting tracing, which closed each hand-off span before the
+worker ran. The fix (nested `supervisor → route → worker → sub-call` spans) is on `qa/integration`
+(`1dd9dd9d1`) and unlanded. Once promoted, per-hand-off cost becomes directly queryable and this
+section should be re-measured.
+
+### Week-2 throughput — derived from measured latency
+
+Throughput is the one figure real traffic cannot supply directly (40 organic turns over five
+days is not a concurrency test). It is instead **derived** from Week-2's measured mean turn latency
+using Little's Law, **calibrated against the Week-1 load test** so the derivation carries that run's
+real-world overhead rather than assuming an ideal system.
+
+**Step 1 — calibrate on Week 1, where both sides are measured.** Little's Law gives ideal
+throughput `X = N / R` for `N` concurrent users at mean turn latency `R`:
+
+| Level | Mean latency `R` | Ideal `N/R` | **Measured** | Realised efficiency |
+|---|---:|---:|---:|---:|
+| 10 users | 20.0s | 0.50 req/s | 0.42 req/s | **84%** |
+| 50 users | 17.9s | 2.79 req/s | 2.18 req/s | **78%** |
+
+The 16–22% shortfall is connection setup, spawn ramp and response handling — overhead any real
+client pays. Efficiency degrades slightly with concurrency, as expected.
+
+**Step 2 — apply to Week 2's measured mean of 46.7s**, carrying the same per-level efficiency:
+
+| Level | Ideal `N/R` | × efficiency | **Derived throughput** | vs Week 1 |
+|---|---:|---:|---:|---:|
+| 10 users | 0.214 req/s | × 0.84 | **0.18 req/s** | 43% |
+| 50 users | 1.071 req/s | × 0.78 | **0.84 req/s** | 38% |
+
+**Week-2 throughput is roughly 40% of Week-1's** — consistent with a mean turn that is 2.3–2.6×
+longer, which is exactly what 8.25 model generations per turn (vs ~3.7) predicts. Throughput here is
+the reciprocal of latency, and latency is hop-count-bound.
+
+**Why the agent is not the constraint.** The infrastructure profile below shows the service peaking
+at **0.041 vCPU of 8** and **985 MB of 8 GB** under organic load; Week 1 sustained 50 concurrent
+users at 0.31 vCPU. There is no resource ceiling anywhere near these levels — each concurrent turn
+is a mostly-idle process waiting on a model response. The real ceiling at 50+ concurrent is
+**provider-side**: 50 in-flight turns × 8.25 generations means sustained parallel demand on
+Anthropic ITPM/OTPM limits, which is a rate-limit question, not a capacity one.
+
+> **Basis:** derived from measured inputs (Week-2 mean latency, Week-1 calibration), not from a
+> Week-2 load run. Little's Law assumes steady state and stable mean service time; with a p95 of
+> 101.8s against a 46.7s mean, the distribution is right-skewed, so real throughput under sustained
+> load would likely land modestly **below** these figures. Treat them as an upper-ish bound. A
+> confirming run costs ~$12 of live spend (method in the Week-1 section — `LEVELS="10 50"
+> DURATION=60s agent/loadtest/run.sh`).
+
+### Week-2 baseline infrastructure profile
+
+**Source:** `railway metrics -s <service> -e production --since 5d --json`, window
+**2026-07-14 15:20 → 2026-07-19 15:20 UTC** — the same Week-2 window as the latency numbers.
+
+| Service | CPU avg / max (vCPU) | Memory avg / max | Limit | Util |
+|---|---|---|---|---|
+| **copilot-agent** | 0.0025 / **0.041** | **419 MB / 985 MB** | 8 vCPU · 8 GB | 5.7% mem |
+| openemr | 0.0052 / 0.045 | 874 MB / 4,520 MB | 8 vCPU · 8 GB | 7.9% mem |
+| MySQL | 0.0026 / 0.008 | 1,103 MB / 1,176 MB | 8 vCPU · 8 GB | 14.4% mem |
+| qdrant | 0.0014 / 0.002 | 158 MB / 255 MB | 8 vCPU · 8 GB | 2.6% mem |
+
+**Read these as an idle-to-light-traffic baseline, not a saturation profile.** They cover organic
+traffic (~40 turns over five days), whereas Week-1's figures came from 50 concurrent synthetic
+users. **CPU is therefore not comparable across the two** — Week-1's 0.31 vCPU peak was measured
+under deliberate load, Week-2's 0.041 under none. Reading "Week 2 uses less CPU" from this table
+would be wrong.
+
+**Memory is comparable, and it moved:** the agent's average resident set is **419 MB against
+Week-1's ~160 MB**, roughly 2.6×, with a 985 MB peak. The likely cause is in-process embedding:
+`qdrant-client[fastembed]` loads dense and sparse embedding models into the agent's own memory
+(`agent/src/copilot/rag/retriever.py`), which Week 1 had no equivalent of. This is a **standing**
+cost — it scales with replica count, not with traffic — so it changes per-replica sizing even
+though headroom today is vast (5.7% of an 8 GB limit).
+
+**Qdrant is cheap** (158 MB avg, 0.0014 vCPU) on a 55-chunk corpus, as expected for an index that
+small.
+
+### Method note — how Week 2 was measured without a synthetic load run
+
+The Week-2 PRD's *Cost and Latency Report* asks for "actual dev spend, projected production cost,
+p50/p95 latency, and bottleneck analysis." The 10-and-50-user stress run was a *Week-1* requirement
+and is retained below as the baseline. Week 2 covers the same ground from three sources:
+
+| Figure | Source |
+|---|---|
+| Latency p50/p95/p99, per-component breakdown | **Measured** — Langfuse, 40 real production turns |
+| CPU / memory, all four services | **Measured** — Railway metrics, same window |
+| Throughput @10 / @50 users | **Derived** — Little's Law on measured mean latency, calibrated on the Week-1 run |
+| Cost per turn | **Measured** — Langfuse provider-priced spend ÷ turns |
+
+Real traffic gives better latency evidence than a synthetic run would (it is what physicians
+actually experienced), and it costs nothing. A confirming load run would firm up the one derived
+row at **~$12** of live Sonnet spend — worth doing before a capacity commitment, not before a
+demo.
+
+---
+
+# Week-1 baseline — Load / Stress Test Results
 
 **Issues:** JOS-18 (Load/stress tests: 10 & 50 concurrent users → p50/p95/p99 + error rate);
 JOS-19 (Baseline infrastructure profiles under load — see the profiles section below).
@@ -6,6 +153,8 @@ JOS-19 (Baseline infrastructure profiles under load — see the profiles section
 **Run date:** 2026-07-12, ~09:38–09:44 CDT (14:38–14:44 UTC)
 **Target:** deployed prod agent `https://copilot-agent-production-eb24.up.railway.app` (`POST /chat`)
 **Patient:** Adrian Becker (`a234013f-932b-434c-8f21-9edc54ff3892`), SMART patient-scoped token.
+**Architecture measured:** **Week-1 single agent** — FHIR tool loop, no supervisor graph, no RAG,
+no document ingestion. Superseded by the Week-2 section above.
 
 ## Summary
 

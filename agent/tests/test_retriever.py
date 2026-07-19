@@ -161,3 +161,31 @@ async def test_build_retriever_constructs_live_retriever_when_configured() -> No
     retriever = build_retriever(settings)
     assert isinstance(retriever, QdrantEvidenceRetriever)
     await retriever.aclose()  # release the Qdrant client pool built for this assertion
+
+
+async def test_live_retriever_clients_carry_configured_timeouts() -> None:
+    # Guards the failure mode this whole change exists to prevent: a timeout that is configured but
+    # never reaches its client. Both SDKs accept the budget only at construction, so a dropped kwarg
+    # is invisible — the setting reads as set, every call still hangs forever, and nothing fails
+    # until a dependency stalls in production.
+    settings = Settings(
+        fhir_client_mode=FhirClientMode.FIXTURE,
+        retrieval_mode=RetrievalMode.QDRANT,
+        qdrant_url="http://qdrant.railway.internal:6333",
+        qdrant_api_key="k",
+        cohere_api_key="ck",
+        anthropic_api_key=None,
+        qdrant_timeout_seconds=7,
+        rerank_timeout_seconds=11.0,
+        rerank_max_retries=3,
+    )
+    retriever = build_retriever(settings)
+    assert isinstance(retriever, QdrantEvidenceRetriever)
+    try:
+        # Qdrant surfaces its budget on the underlying REST client rather than the wrapper.
+        assert retriever._qdrant._client._timeout == 7  # type: ignore[attr-defined]
+        cohere_wrapper = retriever._cohere._client_wrapper
+        assert cohere_wrapper.get_timeout() == 11.0
+        assert cohere_wrapper._max_retries == 3
+    finally:
+        await retriever.aclose()

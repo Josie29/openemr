@@ -6,7 +6,30 @@ An AI Clinical Co-Pilot built on OpenEMR (Gauntlet AI case study).
 
 Project docs: [PRD — Week 1](PRD-week-1.md) · [PRD — Week 2](PRD-week-2.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [W2_ARCHITECTURE.md](W2_ARCHITECTURE.md) · [USERS.md](USERS.md) · [AUDIT.md](AUDIT.md)
 
-Week-1 deliverables: [production & ops evidence](docs/DELIVERABLES-week-1.md) — health/ready endpoints, API collection, dashboards, alerts, load tests, evals.
+Deliverables — one row per requirement, with where it lives and how to verify it:
+[**Week 1**](docs/DELIVERABLES-week-1.md) (production & ops evidence) ·
+[**Week 2**](docs/DELIVERABLES-week-2.md) (multimodal evidence agent).
+
+## Week 1 baseline vs Week 2
+
+Week 2 is additive — it extends the Week-1 agent rather than replacing it. Full delta in [W2_ARCHITECTURE.md §2](W2_ARCHITECTURE.md).
+
+| | Week 1 (baseline) | Week 2 (adds) |
+|---|---|---|
+| **Agents** | One conversational agent | Supervisor + intake-extractor + evidence-retriever |
+| **Inputs** | Structured FHIR reads only | + lab PDF, intake form, medication list (document extraction with per-field citations) |
+| **Retrieval** | None — patient record only | Hybrid RAG over a guideline corpus (Qdrant dense+sparse → Cohere rerank) |
+| **HTTP surface** | `/health` · `/ready` · `/chat` | + read-only `/documents`, `/documents/{id}/extraction`, `/evidence`; committed OpenAPI spec |
+| **Eval harness** | 7 cases, report-only | 53 cases, 5 boolean rubrics, **PR-blocking** |
+
+## Running the Week-2 flow
+
+- **Branch:** `main` (production; `qa/integration` is staging).
+- **Services:** `openemr`, `copilot-agent`, MySQL, and **Qdrant** (new in Week 2), plus two external APIs — Cohere Rerank and Mistral OCR.
+- **Credentials** (native SDK names; `COPILOT_`-prefixed forms also accepted): `ANTHROPIC_API_KEY`, `QDRANT_URL` + `QDRANT_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY`, `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`.
+- **No API keys? Run the whole flow offline.** Set `COPILOT_FHIR_CLIENT_MODE=fixture`, `COPILOT_RETRIEVAL_MODE=fixture`, and `COPILOT_EXTRACTOR_MODE=fixture` — bundled FHIR seed data, an in-process retriever, and recorded OCR responses stand in for every external service, and `/ready` returns 200. This is the fastest path for a reviewer.
+
+Full setup, env-var reference, and the API collection: [`agent/README.md`](agent/README.md).
 
 > The live deployment runs on Railway with synthetic demo data. The upstream OpenEMR README follows below.
 

@@ -63,7 +63,7 @@ new capabilities, each a controlled expansion of a Week-1 seam rather than a rep
 | Vector store | **Qdrant** (dedicated Railway service, private networking) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Hybrid retrieval | FastEmbed dense + sparse → Qdrant Universal Query API `Fusion.RRF` | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
 | Reranker | **Cohere Rerank** (`rerank-v4.0-fast`) | [`vector-db-week2.md`](context/decisions/vector-db-week2.md) |
-| Eval gate | 52-case golden set · 5 boolean rubrics · **PR-blocking**, fails below an absolute rubric floor | §7 |
+| Eval gate | 53-case golden set · 5 boolean rubrics · **PR-blocking**, fails below an absolute rubric floor | §7 |
 | Grounding | Week-1 `output_validator` + `ModelRetry` **ported to each worker + the final answer** | §4; [`ARCHITECTURE.md`](ARCHITECTURE.md) §7 |
 
 **The through-line.** Week 2 is deliberately *narrower than the original spec* — three document
@@ -103,9 +103,9 @@ so this expansion would be additive.
 | **Services on Railway** | OpenEMR · agent · MySQL | + **Qdrant** service · Cohere API · document storage |
 | **`/ready`** | Pings FHIR, Claude, Langfuse | + vector index & reranker; returns **degraded**, not binary |
 | **HTTP surface** | `/health` · `/ready` · `/chat` | + read-only `/documents`, `/documents/{id}/extraction`, `/evidence` — subsystem endpoints for direct testing (same SMART token; no writes), plus a committed OpenAPI spec (§10) |
-| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **52 cases, 5 boolean rubrics, PR-blocking, below-floor = fail** |
+| **Eval harness** | 7 cases, report-only, runs on promotion PRs | **53 cases, 5 boolean rubrics, PR-blocking, below-floor = fail** |
 | **Correlation ID** | Threads one turn's tool loop | + ingestion, extraction call, retrieval, handoffs |
-| **Tracing** | Flat spans under one turn | Per-route child spans + worker runs, all **under the chat-turn root** (flat, not under a supervisor span) |
+| **Tracing** | Flat spans under one turn | Nested **supervisor → route → worker → sub-call** span tree under the chat-turn root |
 
 **What did not change** (and why that matters): the deployment topology (Option D — PHP module +
 standalone Python agent), the authorization model (patient-scoped SMART token minted in PHP, IDOR
@@ -114,11 +114,48 @@ itself. Those are load-bearing and stable; see [`ARCHITECTURE.md`](ARCHITECTURE.
 extends them; it does not touch them.
 
 **Migration note (schema evolution).** Week 2 introduces new persisted artifacts (derived lab
-results, guideline chunks, citation records) but **changes no Week-1 schema** — the six FHIR read
-tools and their typed return models are untouched. The new writes are ordinary rows in OpenEMR's
-existing clinical tables plus **one new module-owned table** (the extraction sidecar, installed by
-the module's own SQL), so there is no Week-1→Week-2 data migration and no backwards-compatibility
-break in the existing tool contracts.
+results, guideline chunks, citation records) but **changes no Week-1 database schema**: the new
+writes are ordinary rows in five of OpenEMR's existing clinical tables (`procedure_*` — the 4-row
+lab chain, `lists`, `patient_data`, `history_data`, `form_encounter`) plus **one new module-owned
+table**, the extraction sidecar. Repo-wide there is exactly one `CREATE TABLE` and zero
+`ALTER`/`DROP`, so there is **no Week-1→Week-2 data migration** — nothing backfills or reshapes an
+existing row.
+
+**The agent's tool surface did change, and that is worth stating plainly.** Week 1's six read tools
+were consolidated in Week 2: `get_patient`, `get_problems`, `get_medications`, `get_allergies` and
+`get_encounters` became a single `get_patient_summary`, and a new `get_lab_observations` was added;
+only `get_encounter_note` is unchanged. The motive was **tool budget** — a broad turn used to spend
+roughly five of its tool calls re-reading the chart before reasoning, and now spends one. Three
+things make this a safe consolidation rather than a breaking change:
+
+- **The typed return models are genuinely untouched.** `PatientDemographics`, `Problem`,
+  `Medication`, `Allergy`, `Encounter` and `NoteContent` survive verbatim — they became *fields of*
+  `PatientSummary` instead of tool return types.
+- **Grounding is preserved.** `fhir_tools.py` records each sub-resource in the FetchLog
+  individually, never the wrapper, so the verification seam still resolves a claim to the specific
+  resource it came from (§4.3).
+- **Blast radius is nil.** These tools are model-facing, not an HTTP contract — nothing outside the
+  agent process ever called them by name. The **sidebar/HTTP contract is additive-only**: Week-1
+  response models gained optional fields and new types, with no field removed or renamed.
+
+**How the sidecar table reaches an install — the part that has actually bitten us.** Module SQL runs
+on **install/upgrade, not on code deploy**. A promotion that ships the module's code without running
+its SQL leaves the table absent, and because `recordCitation()` sits on *every* write path, the
+citation `INSERT` rolls back the whole transaction and **all** write-back fails — labs, medications
+and intake alike — surfacing to the clinician as "Could not save some facts." This is not
+hypothetical; it happened in prod. The mechanics:
+
+- **Versioning** — `$v_database` in the module's `version.php` is the schema revision. Bump it
+  whenever `sql/table.sql` changes so the Module Manager re-runs the script. (This is the deliberate
+  exception to the repo's "new schema uses Doctrine Migrations" rule: a custom module must carry its
+  own installable schema.)
+- **Applying it** — Admin → Modules → the Co-Pilot module → run its install/upgrade SQL, as a
+  promotion step *after* the code redeploy. The file is `#IfNotTable`-guarded, so re-running it is
+  idempotent; note OpenEMR's `installSQLWithLineSplitter` splits on semicolons, which constrains how
+  statements may be written.
+- **Rollback** — the sidecar is a **rebuildable derived cache**, not a system of record (§6), so
+  reverting is safe: truncate it and re-run extraction. `scripts/reset-derived-facts.sh` and
+  `scripts/reset-patient-facts.php` are the teardown path.
 
 ---
 
@@ -571,11 +608,10 @@ risk"). We answer that by making routing legible **in the trace**:
   chosen route (`extract_intake` / `retrieve_evidence` / `answer`) plus a one-line reason — logged
   as a structured event with its correlation ID. The PRD requires that handoffs be "logged and
   explainable" — this is that log.
-- **Langfuse child spans.** Each **route decision** is a **child span under the chat-turn root**,
-  and the worker it dispatches is a **sibling instrumented run under the same root** — a flat
-  shape, not nested under a separate supervisor span (§9) — so the full hand-off chain is
-  reconstructable from the correlation ID alone. The routing is inspectable in the trace even
-  though it is expressed in code.
+- **Langfuse child spans.** Each **route decision** opens a **child span under the `supervisor`
+  span**, and the worker it dispatches runs **inside** that hand-off span (§9) — so the trace shows
+  who dispatched whom, and the full chain is reconstructable from the correlation ID alone. The
+  routing is inspectable in the trace even though it is expressed in code.
 - **Escalation path.** If routing later needs an explicit, diagrammable FSM, `pydantic-graph`
   gives one *inside the same framework* — no cross-framework migration
   ([`agent-framework-week2.md`](context/decisions/agent-framework-week2.md)).
@@ -857,7 +893,7 @@ evaluators, in a **report-only** CI workflow that ran only on `qa → main` prom
 ([`ARCHITECTURE.md`](ARCHITECTURE.md) §11, `should_fail_on_regression: false`). Week 2 hardens
 this into the gate the PRD demands:
 
-- **52-case golden set** exercising extraction, evidence retrieval, citations, refusals, and
+- **53-case golden set** exercising extraction, evidence retrieval, citations, refusals, and
   missing-data behavior — including one both-tools synthesis case (`angulo-lab-ckd-nsaid`) that
   fires the vision extractor (`attach_and_extract`) and the retriever (`search_guidelines`) in a
   single turn.
@@ -897,7 +933,7 @@ this into the gate the PRD demands:
   > ratchet — degradation cannot normalize below them.
 
 > **As-built (JOS-50).** The eval harness now runs the **supervisor graph** (§4); the Week-1 single
-> agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **52-case golden
+> agent is **deleted** (`agent.py` removed — the graph was its last consumer). The **53-case golden
 > set** lives in `agent/src/copilot/evals/cases.py`, scored by the five rubrics above across the four
 > fixture patients and the 8-topic guideline corpus. Every case is **falsifiable** (a plausible
 > failure tied to a primary rubric — each rubric has a floor of cases that *can* fail it),
@@ -906,7 +942,7 @@ this into the gate the PRD demands:
 > (fixture FHIR + fixture retriever + fixture OCR extractor — the one case with an uploaded lab
 > document replays a recorded OCR response, so extraction is exercised with no live API call), and
 > **non-redundant** (unique primary-rubric × mechanism × patient × topic). **Cost discipline:** the
-> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 52
+> CI gate runs only the **3-case subset** (`copilot-golden-ci`, ~$0.10/run); the full 53
 > (`copilot-golden-v1`) is an on-demand, approval-gated run (~$2).
 >
 > **The gate is now enforcing.** `should_fail_on_regression: true` — a rubric below its threshold
@@ -953,8 +989,8 @@ LLM and Mistral OCR 4 extractor responses against fixture documents.
 | **Integration** | Full **ingestion→answer path** with fixture PDFs/form images and a **stubbed Mistral OCR 4 extractor** (fixture schema-mode responses — typed fields + native bboxes + confidence) | The store→extract→derive→cite chain breaking at a seam (e.g. a derived result losing its `document_id` / sidecar link back to the source, §6; a native bbox failing to thread into the citation record). The write-back arm is covered separately by DB-backed tests — including the **silent-vanish trap**: a chain written without `procedure_order_code` must fail loudly rather than return zero Observations (§3.1) |
 | **Integration** | RAG pipeline: FastEmbed → Qdrant hybrid → Cohere rerank, against a fixture corpus | Retrieval returning wrong/empty results, or fusion/rerank silently degrading |
 | **Integration** | Supervisor↔worker **contract tests** (typed handoff payloads) | A handoff payload drifting from its Pydantic contract — the interface breaking undetected |
-| **Eval (golden set)** | Agent *behavior* — the 5 rubrics over 52 cases (§7) | The behavioral regressions the hard gate exists to catch |
-| **CI meta** | Dependency audit + security scan on every PR; **PHI-detection check** on logs/traces/eval data | Vulnerable dependencies shipping; PHI leaking into observability (§9) |
+| **Eval (golden set)** | Agent *behavior* — the 5 rubrics over 53 cases (§7) | The behavioral regressions the hard gate exists to catch |
+| **CI meta** | Dependency audit ([`dependency-audit.yml`](.github/workflows/dependency-audit.yml)) + code security scan ([`semgrep.yml`](.github/workflows/semgrep.yml)) on every PR; **PHI-detection check** on answer prose via the `no_phi_in_logs` rubric | Vulnerable dependencies shipping; PHI leaking into observability (§9) |
 
 **Not tested, and why:**
 
@@ -967,6 +1003,9 @@ LLM and Mistral OCR 4 extractor responses against fixture documents.
   integration against them (with stubs in CI, live only in the eval run).
 - **Framework-enforced invariants** are not re-asserted — if Pydantic guarantees a required field,
   we don't write a test proving it's required (that tests the framework, not our code).
+- **Upstream PHP/npm advisories do not block a PR.** The dependency audit blocks on `agent/`
+  Python deps — our tree, our upgrades — and reports the fork's inherited PHP/npm advisories as a
+  job summary instead (the npm tree alone carries 14 at time of writing, 3 critical).
 
 ---
 
@@ -976,16 +1015,31 @@ Week 2 **extends** the Week-1 observability seam ([`ARCHITECTURE.md`](ARCHITECTU
 Langfuse, same correlation-ID discipline, same structured-log format. No parallel logging
 convention is introduced; the Week-1 log schema gains new event types.
 
-- **Route-decision and per-worker spans under the chat-turn root — a flat shape (as-built).**
-  Each supervisor **route decision** is emitted as its own **Langfuse child span** under the
-  **chat-turn root**, carrying the chosen route (`extract_intake` / `retrieve_evidence` /
-  `answer`) and its one-line reason; the worker it dispatches (intake-extractor,
-  evidence-retriever) is captured as a **sibling instrumented run under the same chat-turn root**
-  — with the extraction and retrieval sub-calls traceable *within* their worker runs. This is an
-  intended **flat** shape: route events and worker runs both hang off the chat-turn root, **not**
-  nested under a separate "supervisor span" (verified live). The full hand-off chain is
-  reconstructable **from the correlation ID alone** — the PRD's explicit distributed-tracing
-  requirement.
+- **A nested supervisor → hand-off → worker span tree.** The turn's trace mirrors the graph's
+  control flow rather than flattening it:
+
+  ```
+  chat-turn                                 (root; correlation id, session id)
+  └── supervisor                            (the routing loop — its duration is orchestration cost)
+      ├── route:extract_intake              (chosen route + the router's one-line reason)
+      │   └── intake-extractor              (the worker run)
+      │       └── attach_and_extract         (extraction sub-call)
+      ├── route:retrieve_evidence
+      │   └── evidence-retriever
+      │       └── search_guidelines          (retrieval sub-call)
+      └── route:answer
+  ```
+
+  Each **worker invocation is a child span of the supervisor span** that dispatched it, and the
+  extraction/retrieval sub-calls are traceable **within** their worker spans — the PRD's
+  distributed-tracing requirement, met structurally rather than by convention. The hand-off spans
+  are held **open** across the dispatch, so a span's duration is what that hand-off actually cost;
+  an earlier build emitted them as zero-width markers, which left workers as siblings of their own
+  hand-off. The answerer runs after supervision ends and stays a sibling under `chat-turn` — it
+  composes the turn rather than being routed to. Span parentage here is positional (a child is
+  whatever runs while the parent is open), so it is easy to regress silently and is pinned by
+  `test_worker_runs_nest_inside_their_supervisor_and_route_spans`. The full chain remains
+  reconstructable **from the correlation ID alone**.
 - **Prompt-management syncs the answerer prompt.** Prompt-management now syncs the answerer
   prompt `copilot-answerer-prompt` (replacing the Week-1 `copilot-system-prompt`), so the graph's
   final-answer stage is versioned in Langfuse like the Week-1 single agent's system prompt was.
@@ -1001,6 +1055,28 @@ convention is introduced; the Week-1 log schema gains new event types.
   case ID / event ID / correlation ID. Dashboard gains: ingestion count & latency, extraction
   field-level pass rate, **bbox-presence rate** (the extractor-quality metric that trips the
   fallback, §12), retrieval hit rate, routing-decision breakdown, eval pass/fail per category.
+- **As-built, for the bullet above (JOS-64 complete).** Emitted today: per-tool spans by name
+  (`attach_and_extract`, `search_guidelines`, `list_documents`), the `route:*` hand-off spans,
+  **`worker:<name>` spans wrapping each worker run** (so per-worker latency is real, and each
+  carries its own `cost_usd` / `total_tokens` / `tool_calls` from a usage delta against the shared
+  accumulator), and the numeric scores `verification_grounding`, `turn_error`, `tool_error`,
+  `tool_ceiling`, `turn_cost`, `extraction_error`, **`extraction_field_pass_rate`**,
+  **`retrieval_hit`**, and **`retrieval_top_score`**. The last two extraction/retrieval scores are
+  the PRD's "extraction field-level pass rate" and "RAG retrieval hit rate"; both are tiled and
+  deliberately **unthresholded** until a baseline exists.
+- **Still not emitted, by decision rather than omission.** A single **routing-distribution** metric
+  (the `route:*` spans are countable per name, but no one score aggregates them); a **bbox-presence
+  rate** (`precision`/`locator` are discarded at the `Citation` boundary, so surfacing it is a
+  wire-schema change with a UI contract behind it — the cheap version later is one more int on
+  `FieldCoverage`); and **extraction field-level confidence**, which does not exist because there is
+  no confidence threshold anywhere in the pipeline — the shipping gate is geometric
+  (`BoxPrecision`), and `extraction_field_pass_rate` already integrates it.
+- **Coverage semantics worth knowing before reading the tile.** `extraction_field_pass_rate` counts
+  a deliberately boxless secondary field as unresolved, so it measures "share of extracted fields a
+  clinician can click back to source" and **sits below 1.0 on a healthy document** (measured on the
+  demo fixtures: lab 1.00, medication list 1.00, intake 0.917). Alerts A1–A8, their thresholds and
+  on-call responses, the as-built monitor configuration (§5b), and the measured SLOs (§5d) are in
+  [`alerting.md`](context/planning/alerting.md).
 - **New cost drivers, watched.** Week 2 adds a document-extraction pass (Mistral OCR 4), embedding,
   reranking, and extra inference hops. Tiered Claude routing (Haiku / Sonnet / Opus) on the agent
   side is the lever that keeps the <15s budget and the cost curve defensible
@@ -1013,6 +1089,28 @@ convention is introduced; the Week-1 log schema gains new event types.
   *coordinates* are safe to trace, the underlying text and images are not. The `no_phi_in_logs`
   rubric (§7) plus a CI PHI-detection check (§8) verify it mechanically — logging PHI to a SaaS
   observability tool is the named disqualifying failure.
+
+  **Enforced at export, not by convention** ([`masking.py`](agent/src/copilot/masking.py), wired
+  in `configure_observability`). Langfuse exposes **two** masking hooks covering different
+  surfaces, and only installing both actually scrubs anything:
+
+  | Hook | Covers | Why it is required |
+  |---|---|---|
+  | `mask` | payloads this service sets — the `route:*` span, the turn output | Keeps `route` (the routing-decisions tile reads it), redacts `reason`, which is model-generated prose that can quote the chart. Default-deny against an allow-list, so a new field is redacted until explicitly permitted |
+  | `mask_otel_spans` | Pydantic AI's auto-instrumented spans, at export | **This is where the PHI actually is.** Deletes `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`, `pydantic_ai.all_messages`, `tool_arguments`, `tool_response`. Tool results are raw FHIR records — names, DOBs, clinical values |
+
+  Installing only `mask` would have produced a system that *reports* scrubbing while shipping
+  every chart read verbatim — the failure this section exists to prevent. Latency, token counts,
+  cost, model, tool and route names all survive, so §9's dashboards and A1–A7 are unaffected.
+  **Fails closed twice:** masking is on by default (`COPILOT_PHI_MASKING_ENABLED` disables it only
+  for local debugging against synthetic data), and a hook that raises mid-batch patches every span
+  in that batch rather than exporting it untouched.
+
+  **Residual risk, stated rather than glossed:** `logfire.msg` is retained for span readability.
+  For tool spans it is normally just the tool name, but it has not been proven never to embed an
+  argument value. The masks are also a *denylist of exact attribute keys*, so an upstream rename
+  in Pydantic AI would silently un-mask that field — `tests/test_masking.py` pins the two most
+  important keys and fails the build if they disappear.
 
 ---
 
@@ -1060,11 +1158,48 @@ the same schema boundary.
 
 **`/ready` becomes dependency-aware — degraded, not binary.** Week 1's `/ready` pinged FHIR,
 Claude, and Langfuse ([`ARCHITECTURE.md`](ARCHITECTURE.md) §10). Week 2 adds probes for **document
-storage**, the **Qdrant vector index** (ping its private URL), **Cohere reranker reachability**, and
-**Mistral OCR 4 extractor reachability**. `/ready` returns a **per-dependency degraded status**, not
-a binary up/down: if the reranker is unreachable but Qdrant, the extractor, and FHIR are up, the
-system reports *degraded* (retrieval works, reranking doesn't) rather than a blanket 503. `/health`
-is unchanged — 200 if the process is alive. The two endpoints stay genuinely separate.
+storage**, the **vector index** (ping Qdrant's private URL) and the **reranker** — six in total:
+`fhir`, `llm`, `langfuse`, `document_storage`, `vector_index`, `reranker`. `/ready` returns a
+**per-dependency degraded status**, not a binary up/down: if the reranker is unreachable but Qdrant
+and FHIR are up, the system reports *degraded* (retrieval works, reranking doesn't) rather than a
+blanket 503. `/health` is unchanged — 200 if the process is alive. The two endpoints stay genuinely
+separate.
+
+**Mistral OCR 4 is deliberately not probed.** Extraction is exercised per document, not per turn, so
+a readiness probe would spend an API call on every health check to answer a question no caller is
+about to ask. An extractor outage surfaces where it matters — as a typed error on the extraction
+span, with the agent reporting "couldn't read the document" rather than guessing (§11). In
+`fixture` retrieval/extractor mode the `vector_index` and `reranker` probes report ready without a
+network call, since no external service is in play.
+
+**Timeout budget — every outbound call bounded, and the turn bounded under the client.** Each value
+sits above the largest latency observed in production
+([`loadtest-results.md`](context/planning/loadtest-results.md)), so these cut genuine hangs rather
+than trimming the tail; all are settings, not literals (`config.py`).
+
+| Bound | Value | Set against |
+|---|---:|---|
+| FHIR read | 10s + 2 transport retries | (existing) |
+| Anthropic, per generation | 60s | max observed 41.3s |
+| Mistral OCR | 30s | max observed 16.5s |
+| Cohere rerank | 10s + 2 **SDK** retries | max observed 5.2s |
+| Qdrant query | 5s | private-network call |
+| **Whole `/chat` turn** | **85s** | **under the sidebar's 90s `CHAT_TIMEOUT_MS`** |
+
+The turn deadline is the one that matters most, and it is deliberately set *below* the browser's.
+Before it existed a slow turn ran unbounded server-side while the sidebar aborted at 90s and told
+the physician the assistant "may be offline" — so the user saw an outage, the turn kept spending
+tokens after nobody was listening, and the trace recorded nothing to distinguish it from a healthy
+turn. The server now stops first, returns a plain "this took longer than I can spend" answer, logs
+`reason=turn_deadline`, and scores `turn_timeout` on the span (§9) — separately from `tool_ceiling`
+(too many calls) and `verification_grounding` (a trust signal), because the three have different
+remedies.
+
+Two notes on the mechanics. The per-generation LLM timeout (60s) is set *below* the turn deadline
+on purpose: any per-call budget above it could never fire on the chat path. And the OCR timeout is
+an **SDK-level** `timeout_ms`, not an `asyncio.wait_for` — the Mistral SDK call is blocking and runs
+via `asyncio.to_thread`, so cancelling the awaitable returns control to the event loop but leaves
+the HTTP request running and billing. Only the SDK's own deadline actually stops it.
 
 **Read-only subsystem endpoints + a committed OpenAPI contract.** Alongside `/chat`, Week 2
 exposes three **GET** endpoints that call the same subsystem services directly, **bypassing the
@@ -1104,21 +1239,65 @@ logs** and **the recovery action** (PRD Engineering Requirements).
 | **Empty retrieval** (hybrid RAG returns no grounded evidence) | `retrieval hit=false` / zero candidates on the evidence-retriever span; retrieval-hit-rate metric drops | The evidence-retriever returns "no supporting guideline found"; the grounding gate (§4.3) blocks any evidence *claim* without a chunk citation, so the answer separates "record says X" from "no guideline evidence retrieved" rather than inventing a guideline. |
 | **Supervisor routing error** (routes to the wrong worker, or loops) | The structured route event (which worker, why) diverges from the request intent; per-worker span pattern is anomalous (e.g. extractor invoked on a pure-question turn) | Routing decisions are logged as inspectable events (§4.2); a per-turn worker-invocation ceiling bounds loops (extending Week-1's tool-call ceiling, [`ARCHITECTURE.md`](ARCHITECTURE.md) §8); the contract tests (§8) catch routing regressions pre-merge. |
 
-**Backup & recovery.** The design keeps every Week-2 artifact recoverable:
+### 11.1 Backup & recovery
 
-- **Guideline corpus + Qdrant index** — the corpus lives in the **repo** (versioned); the Qdrant
-  index is a *rebuildable derivative*, re-indexed from the repo by a single command. **RPO for the
-  index ≈ 0** (nothing unique lives only in Qdrant); **RTO** = the re-index run time (minutes on a
-  small corpus).
-- **Golden eval set** — lives in the repo, **reproducible from the repo alone** (PRD requirement);
-  it does not depend on any database with no recovery path.
-- **Stored documents + derived FHIR records** — persist on the OpenEMR volume / MySQL and inherit
-  OpenEMR's backup path; derived Observations are re-derivable from the retained source
-  `DocumentReference` if lost (re-run `attach_and_extract`), because the source is stored first and
-  immutably (§3, §6).
-- **Manual recovery** — if automated backup fails: re-index Qdrant from the repo corpus; re-run
-  extraction from the retained source documents; the eval set and schemas need no recovery (they
-  are the repo).
+The architecture does most of the work here: **five of the seven Week-2 artifact classes are
+derivable or versioned**, so they need no backup at all — only a rebuild command. That is a
+deliberate consequence of §6's authority model (one source of truth, everything else a rebuildable
+derivative), not a happy accident. Exactly **one** class is irreplaceable: the stored source
+documents and the clinician-confirmed records in MySQL.
+
+| Artifact | Backed up by | RPO | RTO | Recovery |
+|---|---|---|---|---|
+| **Guideline corpus** | Git (versioned in the repo) | 0 — committed | clone time | Nothing to restore; it *is* the repo |
+| **Qdrant index** | Nothing — rebuildable derivative | 0 (nothing unique lives here) | ~minutes (55 chunks) | `railway ssh -s copilot-agent 'python -m copilot.rag.index'` |
+| **Golden eval set + rubrics + thresholds** | Git (`evals/cases.py`, `rubrics.py`, `experiment.py`) | 0 — committed | clone time | Re-seed the hosted dataset: `python -m copilot.evals.seed_dataset` (idempotent reconcile). The Langfuse copy is a projection; losing it loses nothing |
+| **Extraction sidecar** (`ai_copilot_document_facts`) | Nothing — declared a rebuildable cache (§6) | n/a | ~seconds per document | Re-run extraction from the retained source document; the `(document_id, content_hash)` key makes it converge (§3.4) |
+| **Derived facts in OpenEMR** (labs, allergies, meds, family history) | MySQL volume | = MySQL RPO | = MySQL RTO | Re-derivable from the retained source `DocumentReference` even without a DB restore — re-run `attach_and_extract` and re-persist |
+| **Stored source documents** (`DocumentReference` blobs) | `openemr-volume` (`/var/www/localhost/htdocs/openemr/sites`) — a daily Railway schedule is the prod control | **∞ accepted for demo (synthetic data)** | restore + redeploy | **No re-derivation path — these are originals.** See below |
+| **Clinician-authored records** (accepted demographics, confirmed facts, chart data) | `mysql-volume` (`/var/lib/mysql`) — a daily Railway schedule is the prod control | **∞ accepted for demo (synthetic data)** | restore + redeploy | **No re-derivation path.** See below |
+
+**The two rows that actually matter.** Everything above the last two lines recovers from `git clone`
+plus a command. The source documents and the clinician-authored chart do not — a lost document blob
+is lost evidence, and a lost accept-gate decision is lost clinician intent. Both live on Railway
+volumes (`openemr-volume`, `mysql-volume`, §10), so **their RPO and RTO are entirely Railway's
+volume-backup settings, not something this architecture controls**.
+
+> **Backup schedules are opt-in; for this demo we accept RPO = ∞, because the two irreplaceable
+> classes hold synthetic demo data only.** The exposure is graded-artifact risk, not clinical —
+> a decision, not an oversight. The one-toggle production control is documented so it is ready to
+> flip: Railway backups are configured per service (**Service → Settings → Backups**, not the
+> volume). Retention once enabled: daily → kept 6 days; weekly → 1 month; monthly → 3 months
+> ([docs](https://docs.railway.com/volumes/backups)). The setting is dashboard-only — it cannot be
+> read or set from the CLI (`railway volume update` takes only `--name` / `--mount-path`, and the
+> API's `volumeInstanceBackupScheduleList` returns *Not Authorized* to a CLI token), which is why
+> it is a deliberate manual step rather than something the deploy automates.
+>
+> **Restore is not in-place:** it stages a **new** volume at the same mount path (named for the
+> backup date) and leaves the original retained but unmounted — so recovery is a reviewed swap, and
+> RTO includes a redeploy.
+
+**Manual recovery procedure**, in dependency order, if automated backup fails entirely:
+
+1. **Repo** — `git clone`. This restores the corpus, the golden set, the rubrics and thresholds, the
+   schemas, and both services' source. No step below depends on a database.
+2. **Qdrant** — redeploy the service, then re-index from the repo corpus (one command, above).
+   Verify with `curl <agent>/ready | jq` — the vector-index probe goes green.
+3. **Langfuse datasets** — re-seed from `cases.py`. Historical run *scores* are not recoverable and
+   are not needed; the gate's absolute floors (§7) work without a baseline, degrading to
+   floors-only until one run establishes a new comparison point.
+4. **MySQL / documents** — restore the volume backup (stages a new volume at the same mount path;
+   review, then redeploy). Only possible if a schedule was enabled — see the callout. This is the
+   only step with real data-loss exposure; everything after it is derived.
+5. **Derived facts** — for any document whose facts were lost with the DB, re-run extraction and
+   re-persist. Because store-once and idempotent derivation hold (§6), this converges on the same
+   rows rather than duplicating them.
+
+**What is deliberately not backed up:** the Qdrant index, the extraction sidecar, and the hosted
+eval dataset — each is a derivative with a one-command rebuild, and backing them up would create a
+second thing that can drift from its source. Traces in Langfuse are also unbacked: they are
+diagnostic telemetry with a retention window, and the eval scores that gate releases are recomputed
+per run, not read from history.
 
 ---
 
@@ -1137,6 +1316,7 @@ verbal talking points from the architecture defense, recorded here as the risk r
 | **Black-box supervisor** | Delegation-via-tool-call is procedural, not a rendered graph — routing could read as opaque | Every route decision is a structured, logged event + a Langfuse child span (§4.2); `pydantic-graph` is the in-framework escalation to an explicit FSM if needed |
 | **Scope creep** | The pull to support five document types before the core ones work reliably | Shipped the **two** core document types and **two** workers first; the **`medication_list`** third type was then added as the PRD-*optional* extension — deliberately reusing the intake schema's `Medication` sub-model, the existing locator chain, and the existing write path (no new PHP), so it is an additive seam, not a fourth and fifth type piled on |
 | **Multi-agent latency vs. <15s** | Extra inference hops (supervisor + workers + extraction + rerank) threaten the Week-1 <15s budget ([`ARCHITECTURE.md`](ARCHITECTURE.md) §2) | Routing discipline (only consult the worker the request needs); SSE streaming to first token; tiered Claude routing keeps cost and latency defensible; RRF/rerank latency measured in the cost/latency report |
+| **No circuit breaker (accepted)** | The PRD's engineering heading names circuit breakers; we ship timeouts, retries and degradation instead. A dependency that fails *persistently* is therefore retried on every turn rather than being short-circuited after N failures — wasted latency during a sustained outage | **Deliberate, on the measured shape of this system:** three external dependencies, one replica, ~40 turns in five days. Two of the three already degrade gracefully — extraction failure reports the gap (§3), and retrieval failure now answers from the record alone rather than failing the turn — so a breaker would add state, a half-open probe path and its own failure modes to save retry latency that nothing has yet measured as a problem. **Tripwires that flip this:** a sustained dependency failure rate visible on the A3 tool-failure monitor, or multi-replica deployment (where per-replica breaker state starts to matter). Timeouts (§10) bound every call meanwhile, so a hang cannot become an outage |
 | **PHI leakage into observability** | The **disqualifying** failure — raw document text, identifiers, or extracted values reaching traces/logs/evals | Extend the single de-identification seam ([`ARCHITECTURE.md`](ARCHITECTURE.md) §9) to the new PHI surfaces; `no_phi_in_logs` rubric + CI PHI-detection check verify it mechanically (§§7–9) |
 
 **Rejected alternatives** (brief — full reasoning in the decision docs):

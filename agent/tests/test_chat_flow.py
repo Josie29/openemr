@@ -14,6 +14,7 @@ from graph_script import (
     override_graph,
     raising_model,
     route_model,
+    stalling_model,
     worker_model,
 )
 
@@ -194,3 +195,27 @@ def test_refusal_still_returns_a_conversation_id(settings: Settings) -> None:
 
     assert response.status_code == 200
     assert response.json()["conversation_id"]
+
+
+def test_turn_that_blows_its_deadline_degrades_instead_of_hanging(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Guards the wall-clock ceiling. Before it, a slow turn ran unbounded server-side while the
+    # sidebar gave up at CHAT_TIMEOUT_MS (90s) and told the physician the assistant "may be
+    # offline" -- so the user saw an outage, the turn kept billing tokens, and the trace recorded
+    # nothing distinguishable. The turn must now stop itself and say so.
+    #
+    # It must also be distinguishable from the tool-ceiling refusal, which degrades identically to
+    # a 200: same shape, different cause, different remedy.
+    bounded = settings.model_copy(update={"turn_deadline_seconds": 0.25})
+    app = create_app(bounded)
+    with caplog.at_level(logging.WARNING), override_graph(
+        app.state.graph, router=stalling_model()
+    ):
+        response = _post(app)
+
+    assert response.status_code == 200, "a slow turn must degrade, never 500"
+    body = response.json()
+    assert body["claims"] == []
+    assert "longer than i can spend" in body["summary"].lower()
+    assert _failure_reason(caplog) == ChatFailureReason.TURN_DEADLINE

@@ -569,3 +569,61 @@ def test_a_report_without_codes_still_yields_usable_facts() -> None:
     assert potassium.loinc is None
     assert potassium.value == "5.4"
     assert potassium.citation.bounding_box is not None
+
+
+def test_a_clean_report_resolves_every_field_it_states() -> None:
+    """The field-coverage baseline (JOS-64). Without a healthy 1.0 on a known-good fixture the
+    metric has no meaning — a permanently-degraded rate is indistinguishable from a broken one."""
+    state = LocatorState()
+    map_lab_report(_ocr(), _geometry(), state)
+
+    assert state.fields_attempted > 0
+    assert state.fields_resolved == state.fields_attempted
+
+
+def test_a_field_the_page_cannot_place_counts_against_coverage() -> None:
+    """The metric exists for exactly this: a geometry regression that silently stops locating
+    fields is invisible today — extraction still "succeeds" and extraction_error stays 0, because
+    an unplaceable field is DROPPED from the report rather than reported as a failure."""
+    state = LocatorState()
+    # No text layer and no table geometry, so nothing can be placed off the page.
+    map_lab_report(_ocr(), DocumentGeometry.from_parts(_ocr(), []), state)
+
+    assert state.fields_attempted > 0
+    assert state.fields_resolved < state.fields_attempted
+
+
+def test_blank_spacer_rows_are_not_counted_as_coverage_failures() -> None:
+    """A spacer/subtotal row is OCR noise, not a field the document states. Counting it would make
+    this metric read scan quality instead of locator quality, and every degraded scan would look
+    like a geometry bug."""
+    ocr = copy.deepcopy(_ocr())
+    annotation = json.loads(ocr["document_annotation"])
+    # A spacer row as the extractor actually receives one: present in the annotation, blank where
+    # the analyte and value belong.
+    annotation["results"].extend(
+        [
+            {"test_name": "", "value": ""},
+            {"test_name": "Subtotal", "value": ""},
+            {"test_name": "", "value": "12"},
+        ]
+    )
+    ocr["document_annotation"] = json.dumps(annotation)
+
+    state = LocatorState()
+    map_lab_report(ocr, _geometry(), state)
+
+    baseline = LocatorState()
+    map_lab_report(_ocr(), _geometry(), baseline)
+    assert state.fields_attempted == baseline.fields_attempted
+
+
+def test_a_document_stating_no_fields_reports_no_rate_rather_than_zero() -> None:
+    """A patient who left the form blank is not an extraction failure. Emitting 0.0 here would drag
+    the fleet average down and page someone for a blank form."""
+    empty = ExtractedDocument(
+        document_id="doc-1", doc_type=DocType.LAB_PDF, report=LabReport(results=[])
+    )
+
+    assert empty.coverage.attempted == 0
+    assert empty.coverage.pass_rate is None

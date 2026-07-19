@@ -1,4 +1,5 @@
-from contextlib import ExitStack
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 
 import pytest
@@ -17,8 +18,9 @@ from copilot.graph.routing import Route, RouteDecision
 from copilot.graph.supervisor import build_graph, run_graph
 from copilot.graph.workers import build_evidence_retriever
 from copilot.ingestion.registry import DocumentFactRegistry
-from copilot.observability import TurnTrace
+from copilot.observability import TurnTrace, WorkerSpan
 from copilot.rag.models import EvidenceSnippet
+from copilot.rag.retriever import RetrievalError
 from copilot.retrieval import GUIDELINE_RESOURCE_TYPE, ChunkRegistry
 from copilot.schemas import ChatResponse, Claim, GuidelineCitation, SourceRef
 from copilot.verification import FetchLog
@@ -102,6 +104,11 @@ def _router_model(routes: list[Route]) -> FunctionModel:
 
 def _extractor_model() -> FunctionModel:
     """An extractor that reads the record once, then cites the patient's birth date."""
+    return FunctionModel(_extractor_respond())
+
+
+def _extractor_respond() -> Callable[[list[ModelMessage], AgentInfo], ModelResponse]:
+    """The extractor's scripted respond fn, exposed so a test can wrap it (see _marking_model)."""
     state = {"fetched": False}
     output = ExtractorOutput(
         summary="68F.",
@@ -120,11 +127,16 @@ def _extractor_model() -> FunctionModel:
         args = output.model_dump(mode="json")
         return ModelResponse(parts=[ToolCallPart(tool_name=_final_tool_name(info), args=args)])
 
-    return FunctionModel(respond)
+    return respond
 
 
 def _retriever_model(quote: str) -> FunctionModel:
     """A retriever that searches once, then cites a guideline chunk with ``quote``."""
+    return FunctionModel(_retriever_respond(quote))
+
+
+def _retriever_respond(quote: str) -> Callable[[list[ModelMessage], AgentInfo], ModelResponse]:
+    """The retriever's scripted respond fn, exposed so a test can wrap it (see _marking_model)."""
     state = {"searched": False}
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -147,7 +159,7 @@ def _retriever_model(quote: str) -> FunctionModel:
         args = output.model_dump(mode="json")
         return ModelResponse(parts=[ToolCallPart(tool_name=_final_tool_name(info), args=args)])
 
-    return FunctionModel(respond)
+    return respond
 
 
 def _answerer_model() -> FunctionModel:
@@ -345,3 +357,225 @@ async def test_evidence_worker_gate_rejects_ungrounded_quote() -> None:
         pytest.raises(UnexpectedModelBehavior),
     ):
         await retriever.run("Is she due for diabetes screening?", deps=deps)
+
+
+class _RecordingTrace(TurnTrace):
+    """A TurnTrace that records span enter/exit order instead of talking to Langfuse.
+
+    Subclassing rather than mocking the Langfuse client keeps the assertion on the contract the
+    supervisor actually depends on — that ``supervising`` and ``routing`` are context managers held
+    *open* across the work they describe — with no credentials and no network.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(None)
+        self.events: list[str] = []
+
+    @contextmanager
+    def supervising(self) -> Iterator[None]:
+        self.events.append("enter:supervisor")
+        try:
+            yield
+        finally:
+            self.events.append("exit:supervisor")
+
+    @contextmanager
+    def routing(self, route: str, reason: str) -> Iterator[WorkerSpan]:
+        self.events.append(f"enter:route:{route}")
+        try:
+            # A spanless handle: the supervisor records the hand-off's cost on it, which is a no-op
+            # untraced — this double asserts nesting order, not cost.
+            yield WorkerSpan(None)
+        finally:
+            self.events.append(f"exit:route:{route}")
+
+
+def _marking_model(
+    inner: Callable[[list[ModelMessage], AgentInfo], ModelResponse],
+    events: list[str],
+    name: str,
+) -> FunctionModel:
+    """Wrap a worker's scripted respond fn so it records the moment the worker actually runs.
+
+    Takes the raw function rather than a built ``FunctionModel`` because ``FunctionModel.function``
+    is typed as an optional sync-or-stream union, which no amount of narrowing makes clean here.
+    """
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        events.append(f"ran:{name}")
+        return inner(messages, info)
+
+    return FunctionModel(respond)
+
+
+async def test_worker_runs_nest_inside_their_supervisor_and_route_spans() -> None:
+    # Guards the PRD Week-2 tracing contract: "each worker invocation must be a child span of the
+    # supervisor span." Parentage in OTel is positional — a child is whatever runs while the parent
+    # span is open — so if `routing` ever reverts to emitting an open-and-immediately-closed marker
+    # (what it did before this change), every worker silently flattens into a sibling of its own
+    # hand-off and the trace stops showing who dispatched whom. No other test would fail.
+    graph = build_graph(TestModel())
+    deps = _deps()
+    trace = _RecordingTrace()
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            graph.router.override(
+                model=_router_model([Route.EXTRACT_INTAKE, Route.RETRIEVE_EVIDENCE, Route.ANSWER])
+            )
+        )
+        stack.enter_context(graph.answerer.override(model=_answerer_model()))
+        # Each worker marks the event log the moment it runs, so ordering alone proves the nesting.
+        stack.enter_context(
+            graph.extractor.override(
+                model=_marking_model(_extractor_respond(), trace.events, "intake-extractor")
+            )
+        )
+        stack.enter_context(
+            graph.retriever.override(
+                model=_marking_model(
+                    _retriever_respond(_GUIDELINE_QUOTE), trace.events, "evidence-retriever"
+                )
+            )
+        )
+        await run_graph(graph, "Is she due for diabetes screening?", deps, trace)
+
+    for worker, route in (
+        ("intake-extractor", "extract_intake"),
+        ("evidence-retriever", "retrieve_evidence"),
+    ):
+        ran = trace.events.index(f"ran:{worker}")
+        assert (
+            trace.events.index(f"enter:route:{route}")
+            < ran
+            < trace.events.index(f"exit:route:{route}")
+        ), f"{worker} ran outside its route span — it cannot be that hand-off's child in the trace"
+        assert (
+            trace.events.index("enter:supervisor") < ran < trace.events.index("exit:supervisor")
+        ), f"{worker} ran outside the supervisor span — the PRD requires it to be a child of it"
+@pytest.mark.anyio
+async def test_a_retrieval_that_clears_the_relevance_floor_scores_a_hit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """retrieval_hit is the only signal that says whether RAG is finding anything usable. Without
+    it, a corpus that silently stops matching looks identical to a healthy one — the turn still
+    answers, just without evidence."""
+    scores: dict[str, float] = {}
+    monkeypatch.setattr(
+        "copilot.graph.workers.score_current_turn",
+        lambda name, value: scores.__setitem__(name, value),
+    )
+    retriever = build_evidence_retriever(TestModel())
+    deps = _deps()
+
+    with retriever.override(model=_retriever_model(_GUIDELINE_QUOTE)):
+        await retriever.run("Is he due for diabetes screening?", deps=deps)
+
+    assert scores["retrieval_hit"] == 1.0
+    assert scores["retrieval_top_score"] == _SNIPPET.rerank_score
+
+
+@pytest.mark.anyio
+async def test_a_retrieval_returning_nothing_above_the_floor_scores_a_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The empty list here is POST-floor: the retriever applies settings.retrieval_relevance_floor
+    before returning, so "no snippets" means nothing cleared the relevance bar — a corpus coverage
+    gap, not an error. Nothing else reports that; the turn just answers unevidenced."""
+    scores: dict[str, float] = {}
+    monkeypatch.setattr(
+        "copilot.graph.workers.score_current_turn",
+        lambda name, value: scores.__setitem__(name, value),
+    )
+    retriever = build_evidence_retriever(TestModel())
+    deps = _deps()
+    deps.retriever = StubRetriever(snippets=())
+
+    with (
+        retriever.override(model=_retriever_model(_GUIDELINE_QUOTE)),
+        pytest.raises(UnexpectedModelBehavior),
+    ):
+        await retriever.run("Is he due for diabetes screening?", deps=deps)
+
+    assert scores["retrieval_hit"] == 0.0
+    assert scores["retrieval_top_score"] == 0.0
+
+
+@dataclass
+class _FailingRetriever(StubRetriever):
+    """A retriever whose store is down — every query raises, as a dead Qdrant/Cohere would."""
+
+    async def retrieve(
+        self,
+        query: str,
+        *,
+        guideline: str | None = None,
+        source: str | None = None,
+        section: str | None = None,
+        top_n: int | None = None,
+    ) -> list[EvidenceSnippet]:
+        raise RetrievalError("qdrant hybrid query failed")
+
+
+async def test_retrieval_outage_degrades_instead_of_failing_the_turn() -> None:
+    # Guards the fallback asymmetry fix: extraction failure has always degraded gracefully, but a
+    # retrieval failure used to propagate out of the tool and kill the whole turn — so one dead
+    # dependency cost the physician an answer the patient record could fully support. The tool must
+    # now report the outage and let the turn complete.
+    #
+    # It must ALSO not claim the corpus lacks the topic: that wording is a clinical statement a
+    # physician may act on, and asserting it because a service was unreachable is a false negative
+    # dressed as evidence.
+    graph = build_graph(TestModel())
+    deps = _deps()
+    deps.retriever = _FailingRetriever()
+
+    state = {"searched": False}
+
+    def retriever_reports_outage(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> ModelResponse:
+        """Search once, then report the outage with no claims — nothing was retrieved to cite."""
+        if not state["searched"]:
+            state["searched"] = True
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="search_guidelines", args={"query": "diabetes"})]
+            )
+        output = RetrieverOutput(summary="Guideline lookup was unavailable this turn.", claims=[])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=_final_tool_name(info), args=output.model_dump(mode="json"))
+            ]
+        )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            graph.router.override(model=_router_model([Route.RETRIEVE_EVIDENCE, Route.ANSWER]))
+        )
+        stack.enter_context(graph.retriever.override(model=FunctionModel(retriever_reports_outage)))
+        # The answerer cites nothing: with retrieval down there is no chunk to ground a guideline
+        # claim against, and the gate would (correctly) reject one. A claimless "I could not check
+        # the guidelines" IS the right degraded answer.
+        stack.enter_context(graph.answerer.override(model=_claimless_answerer_model()))
+        result = await run_graph(graph, "Is she due for diabetes screening?", deps, TurnTrace(None))
+
+    assert result.answer.summary, "the turn must still produce an answer when retrieval is down"
+    assert [d.route for d in result.routes] == [Route.RETRIEVE_EVIDENCE, Route.ANSWER]
+
+
+def _claimless_answerer_model() -> FunctionModel:
+    """An answerer returning a summary with no claims — the degraded shape when nothing grounds."""
+    final = ChatResponse(
+        summary="I could not check the guideline corpus this turn; the evidence lookup failed.",
+        claims=[],
+        follow_ups=[],
+    )
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=_final_tool_name(info), args=final.model_dump(mode="json"))
+            ]
+        )
+
+    return FunctionModel(respond)

@@ -120,6 +120,34 @@ class LabDetail(BaseModel):
     )
 
 
+class FieldCoverage(BaseModel):
+    """How many fields a document stated vs how many shipped click-to-source verifiable (JOS-64).
+
+    The observability counterpart to the drop-rather-than-fabricate rule: a field the page cannot
+    prove is *absent* from the extracted report, so the report alone cannot say whether extraction
+    read a sparse document or quietly lost half of it. This carries the denominator out.
+
+    ``resolved`` counts fields placed on the page; a dropped primary and a deliberately boxless
+    secondary both count as unresolved, so this reads as "share of extracted fields a clinician can
+    click back to source" rather than "share that succeeded". It therefore sits below 1.0 on a
+    healthy document — baseline it before thresholding.
+    """
+
+    attempted: int = Field(default=0, ge=0, description="Fields the document stated.")
+    resolved: int = Field(default=0, ge=0, description="Fields placed on the page with a box.")
+
+    @property
+    def pass_rate(self) -> float | None:
+        """``resolved / attempted``, or None when the document stated no fields at all.
+
+        None rather than 0.0 on purpose: a patient who left an intake form blank is not an
+        extraction failure, and scoring it 0.0 would drag the fleet average and page someone.
+        """
+        if self.attempted == 0:
+            return None
+        return self.resolved / self.attempted
+
+
 class BoxEvidence(StrEnum):
     """What a located box PROVES — not where it is.
 

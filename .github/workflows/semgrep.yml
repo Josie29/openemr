@@ -1,14 +1,20 @@
 name: Semgrep Security Scan
 
+# FORK NOTE: `main` and `qa/integration` are this fork's branches (upstream develops on
+# `master`/`rel-*`). Without them here the scan never ran on a single AgentForge PR. Keep the
+# upstream branches so the file stays mergeable on the next upstream sync.
 on:
   push:
     branches:
     - master
     - rel-*
+    - main
   pull_request:
     branches:
     - master
     - rel-*
+    - main
+    - qa/integration
   schedule:
     # Run weekly on Monday at 9am UTC
   - cron: 0 9 * * 1

@@ -58,6 +58,10 @@ class LocatorState:
     """
 
     _cursors: dict[str, int] = field(default_factory=dict)
+    # Field-coverage tally (JOS-64). Rides the cursor state because it has the same lifetime — one
+    # mapping run over one document — so counting needs no new parameter on any mapper signature.
+    fields_attempted: int = 0
+    fields_resolved: int = 0
 
     def cursor(self, key: str) -> int:
         """The current index for ``key``, or 0 when it has not been walked yet."""
@@ -66,6 +70,21 @@ class LocatorState:
     def advance(self, key: str, index: int) -> None:
         """Move ``key``'s cursor past ``index``. Forward-only; never rewinds."""
         self._cursors[key] = max(self._cursors.get(key, 0), index)
+
+    def record_field(self, *, resolved: bool) -> None:
+        """Tally one field the document stated, and whether it shipped with a box.
+
+        One method rather than paired attempt/resolve calls: two counters bumped from two places
+        drift, and a coverage metric that silently under-counts its own denominator is worse than
+        no metric. Every field crosses exactly one call site.
+
+        Args:
+            resolved: Whether the field was placed on the page (and, for primaries, met its
+                precision floor). A dropped primary and a boxless secondary are both False.
+        """
+        self.fields_attempted += 1
+        if resolved:
+            self.fields_resolved += 1
 
 
 class ValueLocator(Protocol):

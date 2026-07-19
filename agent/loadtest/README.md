@@ -56,6 +56,18 @@ Locust measures **wall-clock latency of the full `/chat` call** (the endpoint
 returns a single JSON body, not a stream), which is the number the cost analysis
 and infra profile care about.
 
+Two stats rows, on purpose: **`/chat`** is the chart-only turn and
+**`/chat [document]`** is the turn that OCRs a document. Document turns pay a
+Mistral OCR round-trip the chart turns never touch, so blending them would hide
+the ingestion p95 the SLO is written against (`alerting.md` §6).
+
+**Document turns cost real OCR spend.** The task weighting is 4:1 chart:document
+(`CHART_TASK_WEIGHT` / `DOCUMENT_TASK_WEIGHT`), so roughly **one turn in five**
+runs an extraction — a 200-turn run does ~40, not 200. Scale that before running
+at high concurrency, and note the router decides routing, so a document question
+makes extraction likely, not certain; confirm the real count from the
+`attach_and_extract` spans in Langfuse over the run window.
+
 ## Cross-checking in Langfuse
 
 The agent is instrumented (OTel + Pydantic AI); every load request lands as a

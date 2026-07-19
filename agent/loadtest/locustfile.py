@@ -49,6 +49,24 @@ CLINICAL_QUESTIONS: list[str] = [
     "Which of this patient's medications treat their documented conditions?",
 ]
 
+# Questions that route the supervisor to the intake-extractor, so the turn actually
+# OCRs a document. Kept separate from CLINICAL_QUESTIONS (and reported under their own
+# Locust name) because document turns are a different latency population: they pay a
+# Mistral OCR round-trip the chart-only turns never touch, and averaging the two hides
+# exactly the number the ingestion SLO needs.
+DOCUMENT_QUESTIONS: list[str] = [
+    "What does his uploaded lab report show?",
+    "What did the patient report on their intake form?",
+    "What medications are on his uploaded medication list?",
+    "Are any values on the uploaded lab report abnormal?",
+    "What allergies did the patient list at intake?",
+]
+
+# Weight of chart-only turns against document turns (4:1). Document turns cost real OCR
+# spend per call, so this bounds it: a 200-turn run does ~40 extractions, not 200.
+CHART_TASK_WEIGHT = 4
+DOCUMENT_TASK_WEIGHT = 1
+
 # The LLM turn can legitimately take many seconds; cap it so a genuinely hung
 # request eventually counts as a failure instead of pinning a user forever.
 REQUEST_TIMEOUT_SECONDS = 120
@@ -90,7 +108,7 @@ class ChatUser(HttpUser):
             "Content-Type": "application/json",
         }
 
-    @task
+    @task(CHART_TASK_WEIGHT)
     def ask(self) -> None:
         """Post one clinical question and validate the answer.
 
@@ -99,15 +117,32 @@ class ChatUser(HttpUser):
         HTTP 200 and carries a ``summary`` field; anything else is recorded as a
         failure so the error rate reflects real answer quality, not just status.
         """
-        payload = {
-            "patient_id": self.patient_id,
-            "message": random.choice(CLINICAL_QUESTIONS),  # noqa: S311 (not security-sensitive)
-        }
+        self._ask(random.choice(CLINICAL_QUESTIONS), "/chat")  # noqa: S311 (not security-sensitive)
+
+    @task(DOCUMENT_TASK_WEIGHT)
+    def ask_about_document(self) -> None:
+        """Post one question that forces a document extraction, timed separately.
+
+        Reported under ``/chat [document]`` so the ingestion SLO can be read straight
+        off the Locust stats rather than inferred from a blended p95. Whether the turn
+        truly extracted is confirmed from the ``attach_and_extract`` spans in Langfuse
+        over the same window — the router decides routing, so this only makes it likely.
+        """
+        self._ask(random.choice(DOCUMENT_QUESTIONS), "/chat [document]")  # noqa: S311
+
+    def _ask(self, message: str, name: str) -> None:
+        """Post one turn and record success only on a 200 carrying a ``summary``.
+
+        Args:
+            message: The question to ask.
+            name: The Locust stats bucket to report under.
+        """
+        payload = {"patient_id": self.patient_id, "message": message}
         with self.client.post(
             "/chat",
             json=payload,
             headers=self.headers,
-            name="/chat",
+            name=name,
             timeout=REQUEST_TIMEOUT_SECONDS,
             catch_response=True,
         ) as response:

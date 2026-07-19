@@ -139,11 +139,20 @@ defaults to `guidelines` (`COPILOT_QDRANT_COLLECTION`). Credentials use their na
 ## Making `/ready` green
 
 `/ready` returns 503 until every dependency probe passes, and 200 only when all do (that is
-the point — it must never return an unconditional 200). It reports each dependency's status
-in the body, e.g. `{"fhir": true, "llm": false, "langfuse": false, "qdrant": true, "cohere": true}`.
-The LLM and Langfuse probes fail out of the box because no credentials are set. The `qdrant` and
-`cohere` probes report ready **without a network call** in `fixture` retrieval mode (they aren't
-used); in `qdrant` mode they probe the live services and need the keys below.
+the point — it must never return an unconditional 200). Six dependencies are probed —
+`fhir`, `llm`, `langfuse`, `document_storage`, `vector_index`, `reranker` — and each reports
+its own status in the body:
+
+```json
+{"ready": false, "dependencies": [{"name": "llm", "ok": false, "detail": "unreachable"}, ...]}
+```
+
+The LLM and Langfuse probes fail out of the box because no credentials are set. `document_storage`
+rides the FHIR client, so it needs no credential of its own. The `vector_index` and `reranker`
+probes report ready **without a network call** in `fixture` retrieval mode (`"detail": "fixture
+mode"` — they aren't used); in `qdrant` mode they probe the live services and need the keys below.
+Mistral OCR is deliberately **not** probed: extraction runs per document, so a probe would spend an
+API call per health check (see [`W2_ARCHITECTURE.md`](../W2_ARCHITECTURE.md) §10).
 
 > **Secrets never go in this file.** Set the variables below in your gitignored `.env`
 > (locally) or as Railway service variables (prod) — `.env.example` lists them with empty
@@ -157,8 +166,9 @@ Credentials use their **native SDK names** (copy them straight from each vendor)
 | `ANTHROPIC_API_KEY` | LLM probe (`GET api.anthropic.com/v1/models` — metadata, not a completion) | Claude Console |
 | `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` | Langfuse probe (`GET {host}/api/public/health`) — **both** required, or tracing stays disabled | Langfuse → Settings → API Keys (free Hobby tier is enough) |
 | `LANGFUSE_BASE_URL` | *(optional)* defaults to EU Cloud; **must match your project region** — US is `https://us.cloud.langfuse.com` | your Langfuse instance URL |
-| `QDRANT_URL` + `QDRANT_API_KEY` | Qdrant probe (`GET {url}/readyz`) — **only in `qdrant` retrieval mode**; skipped (reported ready) in `fixture` mode | your Qdrant service (Railway internal URL in prod) |
-| `COHERE_API_KEY` | Cohere probe (`GET api.cohere.com/v1/models`) — **only in `qdrant` retrieval mode**; skipped in `fixture` mode | Cohere dashboard (native `CO_API_KEY` also accepted) |
+| `QDRANT_URL` + `QDRANT_API_KEY` | `vector_index` probe (`GET {url}/readyz`) — **only in `qdrant` retrieval mode**; skipped (reported ready) in `fixture` mode | your Qdrant service (Railway internal URL in prod) |
+| `COHERE_API_KEY` | `reranker` probe (`GET api.cohere.com/v1/models`) — **only in `qdrant` retrieval mode**; skipped in `fixture` mode | Cohere dashboard (native `CO_API_KEY` also accepted) |
+| *(none needed)* | `document_storage` probe — reuses the FHIR client's connection | n/a |
 
 With those set in `.env`:
 
@@ -166,10 +176,14 @@ With those set in `.env`:
 curl -s localhost:8000/ready | jq       # 200, every dependency "ok": true
 ```
 
-The same five probes back `/ready` whether run locally or on Railway — setting these as
+The same six probes back `/ready` whether run locally or on Railway — setting these as
 Railway service variables is what makes the deployed `/ready` report healthy. In `fixture`
 retrieval mode only the `fhir`, `llm`, and `langfuse` probes need credentials; `qdrant` mode
-adds the `qdrant` and `cohere` probes.
+adds live `vector_index` and `reranker` probes.
+
+**Fully offline:** with `COPILOT_FHIR_CLIENT_MODE=fixture`, `COPILOT_RETRIEVAL_MODE=fixture` and
+`COPILOT_EXTRACTOR_MODE=fixture`, all six probes pass and `/ready` returns 200 with no credentials
+set at all — the fastest way for a reviewer to exercise the Week-2 flow.
 
 ## Quality gates
 

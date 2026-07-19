@@ -1,7 +1,7 @@
 import logging
 import os
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -230,28 +230,95 @@ class TurnTrace:
         """Record the turn's response as the trace output."""
         self._apply(lambda s: s.update(output=data))
 
-    def routed(self, route: str, reason: str) -> None:
-        """Emit one supervisor hand-off as a child span under the turn (JOS-56 logged handoffs).
+    def _child_span(self, name: str) -> AbstractContextManager[Any]:
+        """Open a child span of the turn, degrading to a no-op context on any tracing failure.
 
-        The Week-2 multi-agent surface routes procedurally, so each route decision is recorded as
-        its own short child span carrying the chosen route and the reason. Nested under the active
-        ``chat-turn`` span (and thus the turn's correlation id), the ordered hand-off chain is
-        reconstructable from the trace alone — the acceptance criterion. Like every trace op here,
-        a failure is swallowed so routing is never blocked by observability.
+        Returning a context manager (rather than emitting a closed span) is what lets callers keep
+        the span *open* across the work it describes, so real child spans nest underneath it. A
+        failure to open degrades to :func:`nullcontext`, so the caller's ``with`` body still runs —
+        tracing never blocks the turn. An exception raised inside the body propagates through the
+        live span, which marks it errored rather than swallowing the failure.
+
+        Args:
+            name: The span name.
+
+        Returns:
+            The open span's context manager, or a no-op context yielding None.
+        """
+        if self._span is None:
+            return nullcontext(None)
+        try:
+            return get_client().start_as_current_observation(name=name, as_type="span")
+        except Exception:  # noqa: BLE001 - a tracing failure must not affect the turn
+            logger.warning("Langfuse child span failed", exc_info=True)
+            return nullcontext(None)
+
+    @contextmanager
+    def supervising(self) -> Iterator[None]:
+        """Open the ``supervisor`` span that every routing hand-off and worker run nests under.
+
+        The Week-2 graph routes procedurally, so without an explicit span the router, its hand-offs
+        and the workers would all sit flat under ``chat-turn`` — indistinguishable from Week 1's
+        single-agent shape. Wrapping the routing loop gives the trace a supervisor subtree whose
+        duration is the orchestration cost, and makes each worker a descendant of the supervisor
+        that dispatched it (PRD Week 2: "each worker invocation must be a child span of the
+        supervisor span").
+        """
+        with self._child_span("supervisor"):
+            yield
+
+    @contextmanager
+    def routing(self, route: str, reason: str) -> Iterator["WorkerSpan"]:
+        """Open one hand-off span, held open for the duration of the work it dispatches.
+
+        Nesting the dispatched worker inside this span is what makes the hand-off chain
+        reconstructable from the trace alone (JOS-56): the span's children *are* the worker run and
+        its tool calls, and its wall-clock duration is what that hand-off actually cost — where a
+        closed marker span would report zero.
+
+        Because this span already wraps exactly one worker's run, it is also where that worker's own
+        cost belongs (JOS-64) — hence the yielded :class:`WorkerSpan`. Attributing cost here rather
+        than to a second span of our own keeps one span per hand-off instead of two competing
+        hierarchies.
 
         Args:
             route: The chosen route (e.g. ``"extract_intake"``).
             reason: The supervisor's one-line justification for the hand-off.
+
+        Yields:
+            A :class:`WorkerSpan` for recording the dispatched worker's usage and cost.
         """
-        if self._span is None:
-            return
-        try:
-            with get_client().start_as_current_observation(
-                name=f"route:{route}", as_type="span"
-            ) as span:
-                span.update(input={"route": route, "reason": reason}, metadata={"route": route})
-        except Exception:  # noqa: BLE001 - a tracing failure must not affect routing
-            logger.warning("Langfuse route span failed", exc_info=True)
+        with self._child_span(f"route:{route}") as span:
+            if span is not None:
+                try:
+                    span.update(
+                        input={"route": route, "reason": reason}, metadata={"route": route}
+                    )
+                except Exception:  # noqa: BLE001 - a tracing failure must not affect routing
+                    logger.warning("Langfuse route span update failed", exc_info=True)
+            yield WorkerSpan(span)
+
+    @contextmanager
+    def worker(self, name: str) -> Iterator["WorkerSpan"]:
+        """Wrap an UN-ROUTED agent run in its own span carrying its latency and cost.
+
+        Routed workers do not use this — their hand-off span (:meth:`routing`) already wraps the run
+        and takes its cost. This is for the answerer, which the supervisor composes directly rather
+        than dispatching, so it has no hand-off span of its own to nest under.
+
+        Args:
+            name: The agent's name (e.g. ``"answerer"``).
+
+        Yields:
+            A :class:`WorkerSpan` to record the run's usage and cost on.
+        """
+        with self._child_span(f"worker:{name}") as span:
+            if span is not None:
+                try:
+                    span.update(metadata={"worker": name})
+                except Exception:  # noqa: BLE001 - a tracing failure must not affect the worker
+                    logger.warning("Langfuse worker span update failed", exc_info=True)
+            yield WorkerSpan(span)
 
     def _apply(self, op: Callable[[Any], None]) -> None:
         """Run a span operation, demoting any failure to a warning (tracing never breaks a turn)."""
@@ -261,6 +328,50 @@ class TurnTrace:
             op(self._span)
         except Exception:  # noqa: BLE001 - a tracing failure must not affect the response
             logger.warning("Langfuse span update failed", exc_info=True)
+
+
+@dataclass
+class WorkerSpan:
+    """Handle to one worker's span; records what that worker alone spent. No-ops when untraced."""
+
+    _span: Any | None
+
+    def spent(self, *, usd: float, tokens: int, tool_calls: int) -> None:
+        """Record this worker's own cost and token usage on its span.
+
+        Args:
+            usd: Cost of this worker's run, priced from its usage delta.
+            tokens: Total tokens this worker's run consumed.
+            tool_calls: Tool calls this worker's run made.
+        """
+        if self._span is None:
+            return
+        try:
+            self._span.update(
+                metadata={"cost_usd": usd, "total_tokens": tokens, "tool_calls": tool_calls}
+            )
+        except Exception:  # noqa: BLE001 - a tracing failure must not affect the response
+            logger.warning("Langfuse worker span update failed", exc_info=True)
+
+
+def score_current_turn(name: str, value: float) -> None:
+    """Attach a numeric score to whatever turn is active, from code that holds no ``TurnTrace``.
+
+    Worker tools run inside the ``chat-turn`` span but are handed ``GraphDeps``, not the trace
+    handle, so they cannot call :class:`TurnTrace`. Langfuse resolves the active trace from the
+    OTel context, which the tool is already executing within — so the score lands on the same turn.
+    Used for ``extraction_error`` (A6): a failed OCR is caught inside the tool and degrades to "no
+    facts", which looks identical to an empty document unless it is scored. See
+    ``context/planning/alerting.md`` (A6).
+
+    Args:
+        name: The numeric score name to emit.
+        value: The score value.
+    """
+    try:
+        get_client().score_current_trace(name=name, value=value)
+    except Exception:  # noqa: BLE001 - a tracing failure must not affect the turn
+        logger.warning("Langfuse score failed", extra={"score": name}, exc_info=True)
 
 
 @contextmanager

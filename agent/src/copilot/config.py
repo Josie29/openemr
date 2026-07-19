@@ -281,6 +281,14 @@ class Settings(BaseSettings):
         ),
     )
 
+    # PHI must never reach the observability backend (PRD-week-2, HIPAA-minded development).
+    # On by default so a missing env var fails closed; turn it off only to debug locally against
+    # synthetic data, never where real records are in play.
+    phi_masking_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("COPILOT_PHI_MASKING_ENABLED", "PHI_MASKING_ENABLED"),
+    )
+
     @property
     def langfuse_enabled(self) -> bool:
         """Whether Langfuse credentials are present and tracing should be wired up."""

@@ -5,13 +5,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from langfuse import get_client, propagate_attributes
+from langfuse import Langfuse, get_client, propagate_attributes
 from langfuse.api import NotFoundError
 from langfuse.model import TextPromptClient
 from pydantic_ai import Agent
 
 from copilot import __version__
 from copilot.config import Settings
+from copilot.masking import mask_otel_spans, mask_payload
 
 logger = logging.getLogger("copilot.observability")
 
@@ -44,6 +45,12 @@ def configure_observability(settings: Settings) -> bool:
     os.environ.setdefault("LANGFUSE_TRACING_ENVIRONMENT", settings.tracing_environment)
 
     try:
+        # Construct explicitly rather than get_client() so the PHI masks are installed at client
+        # init — they cannot be attached to an already-built client. Both hooks are required:
+        # `mask` covers payloads this service sets, `mask_otel_spans` covers Pydantic AI's
+        # auto-instrumented prompts/completions/tool results, which is where the PHI actually is.
+        if settings.phi_masking_enabled:
+            Langfuse(mask=mask_payload, mask_otel_spans=mask_otel_spans)
         client = get_client()
         # auth_check() raises on a 401 rather than returning False, so guard it — invalid
         # keys/host must disable tracing, not crash startup.

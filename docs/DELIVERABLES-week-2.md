@@ -62,7 +62,8 @@ page — it is a submission artifact, not a repo one.)
 
 **Known limits to state out loud:** the gate fires on `→ main` PRs only, not on
 `feature → qa/integration`; and `no_phi_in_logs` inspects the answer prose for
-SSN/MRN patterns as a *proxy* for trace-level scrubbing, not the traces themselves.
+SSN/MRN patterns, so it is a check on the *answer*, not on the traces — trace-level
+scrubbing is enforced separately by the export masks (§3.8).
 
 ---
 
@@ -143,11 +144,18 @@ flagged in the section itself:** Railway backup schedules are opt-in and none is
 daily schedule (Service → Settings → Backups; kept 6 days) and update the table. 🟡
 
 ### 3.8 Privacy audit of the observability data
-`W2_ARCHITECTURE.md` §9 treats PHI-free traces as the disqualifier, and the
-`no_phi_in_logs` rubric checks answers in CI. **Open:** there is no Langfuse mask
-function — no trace-level scrubbing exists, so the "document the scrubbing approach
-and verify it in CI" requirement is only half met. Either ship the mask or document
-honestly that the control is prompt-level plus eval-level. 🟡
+Three layers, described in `W2_ARCHITECTURE.md` §9:
+**(1) trace-level scrubbing** — [`agent/src/copilot/masking.py`](../agent/src/copilot/masking.py),
+installed at Langfuse client init. Both SDK hooks are wired: `mask` for payloads the
+service sets, and `mask_otel_spans` for Pydantic AI's auto-instrumented spans, which is
+where the PHI actually lives (`gen_ai.tool.call.result` is raw FHIR records). Installing
+only the first would report scrubbing while still exporting every chart read.
+**(2) prompt-level** — guideline queries constrained to de-identified terms.
+**(3) eval-level** — the `no_phi_in_logs` rubric, PR-blocking in CI.
+Verify: `pytest agent/tests/test_masking.py` — 7 cases including a fail-closed case and a
+guard that breaks the build if Pydantic AI renames a masked attribute. ✅
+*Residual risk, named in §9: `logfire.msg` is retained for span readability and is not
+proven free of argument values; the masks are an exact-key denylist.*
 
 ### 3.9 Baseline CPU / memory / latency / throughput for W2 flows
 [`context/planning/loadtest-results.md`](../context/planning/loadtest-results.md) +
@@ -218,7 +226,7 @@ These need no artifact of their own; `W2_ARCHITECTURE.md` is where they are expl
 | Requirement | Implementation | Described in |
 |---|---|---|
 | Correlation ID across boundaries | [`correlation.py`](../agent/src/copilot/correlation.py) | §9 |
-| Structured, PHI-free logging | [`observability.py`](../agent/src/copilot/observability.py) `TurnTrace` | §9 |
+| Structured, PHI-free logging | [`observability.py`](../agent/src/copilot/observability.py) `TurnTrace` + [`masking.py`](../agent/src/copilot/masking.py) export masks | §9 |
 | Distributed tracing, worker spans as children | `turn.routed(...)`, pydantic-ai OTel | §9 |
 | `/health` + `/ready` with meaningful, degradable probes | [`health.py`](../agent/src/copilot/health.py) — 6 probes incl. document storage, vector index, reranker | §10 |
 | Schema is the source of truth, not VLM output | flat `_*Probe` models → validated Pydantic; geometry placed separately | §3 |
@@ -270,7 +278,6 @@ Ordered by grading risk:
    p95 turn cost $0.311 vs $0.20; grounding 0.811 vs the 0.85 floor). They were set against
    Week-1 behaviour, so they now fire constantly and carry no signal. Highest-value item here.
 2. **W2 alerts + dashboard tiles** (§3.6) — 🟡 named explicitly in the PRD.
-3. **PHI scrubbing: ship the mask or state the real control** (§3.8) — 🟡.
-4. **Enable a daily Railway backup schedule** (§3.7) — 🟡 currently none; RPO on documents + DB is ∞.
-5. **Optional, quoted not assumed:** a confirming load run for measured (vs derived) throughput
+3. **Enable a daily Railway backup schedule** (§3.7) — 🟡 currently none; RPO on documents + DB is ∞.
+4. **Optional, quoted not assumed:** a confirming load run for measured (vs derived) throughput
    (~$12 live spend), and re-measuring per-hand-off latency once the nested-span fix promotes (§3.9).

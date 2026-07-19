@@ -1090,6 +1090,28 @@ convention is introduced; the Week-1 log schema gains new event types.
   rubric (§7) plus a CI PHI-detection check (§8) verify it mechanically — logging PHI to a SaaS
   observability tool is the named disqualifying failure.
 
+  **Enforced at export, not by convention** ([`masking.py`](agent/src/copilot/masking.py), wired
+  in `configure_observability`). Langfuse exposes **two** masking hooks covering different
+  surfaces, and only installing both actually scrubs anything:
+
+  | Hook | Covers | Why it is required |
+  |---|---|---|
+  | `mask` | payloads this service sets — the `route:*` span, the turn output | Keeps `route` (the routing-decisions tile reads it), redacts `reason`, which is model-generated prose that can quote the chart. Default-deny against an allow-list, so a new field is redacted until explicitly permitted |
+  | `mask_otel_spans` | Pydantic AI's auto-instrumented spans, at export | **This is where the PHI actually is.** Deletes `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`, `pydantic_ai.all_messages`, `tool_arguments`, `tool_response`. Tool results are raw FHIR records — names, DOBs, clinical values |
+
+  Installing only `mask` would have produced a system that *reports* scrubbing while shipping
+  every chart read verbatim — the failure this section exists to prevent. Latency, token counts,
+  cost, model, tool and route names all survive, so §9's dashboards and A1–A7 are unaffected.
+  **Fails closed twice:** masking is on by default (`COPILOT_PHI_MASKING_ENABLED` disables it only
+  for local debugging against synthetic data), and a hook that raises mid-batch patches every span
+  in that batch rather than exporting it untouched.
+
+  **Residual risk, stated rather than glossed:** `logfire.msg` is retained for span readability.
+  For tool spans it is normally just the tool name, but it has not been proven never to embed an
+  argument value. The masks are also a *denylist of exact attribute keys*, so an upstream rename
+  in Pydantic AI would silently un-mask that field — `tests/test_masking.py` pins the two most
+  important keys and fails the build if they disappear.
+
 ---
 
 ## 10. Deployment topology

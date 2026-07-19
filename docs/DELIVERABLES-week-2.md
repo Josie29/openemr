@@ -30,7 +30,7 @@ page — it is a submission artifact, not a repo one.)
 | 3 | Schemas for `lab_pdf` + `intake_form`, with citation fields and validation tests | [`agent/src/copilot/ingestion/schemas.py`](../agent/src/copilot/ingestion/schemas.py) | `pytest agent/tests/test_schemas.py test_probe_schemas.py test_citation.py` | ✅ three doc types shipped (`medication_list` is the stretch third) |
 | 4 | 50-case eval dataset, boolean rubrics, judge config, results | [`agent/src/copilot/evals/`](../agent/src/copilot/evals/) — `cases.py` (53 cases), `rubrics.py`, `judges.py` | See §2 below | ✅ |
 | 5 | CI evidence — eval suite that blocks regressions | [`.github/workflows/evals.yml`](../.github/workflows/evals.yml) | Read the bot's eval comment on any `qa/integration → main` PR | ✅ |
-| 6 | Cost + latency report | [`context/planning/cost-analysis.md`](../context/planning/cost-analysis.md), [`context/planning/loadtest-results.md`](../context/planning/loadtest-results.md) | Read both | 🟡 both measure the Week-1 single-agent `/chat` turn; needs a re-run against the graph |
+| 6 | Cost + latency report | [`context/planning/cost-analysis.md`](../context/planning/cost-analysis.md) (dev spend, unit economics, 100→100K projections), [`context/planning/loadtest-results.md`](../context/planning/loadtest-results.md) (p50/p95 + bottleneck) | Read both; every figure carries its Langfuse query and the 2026-07-14+ window | ✅ Week-2 measured (n=40); Week-1 kept as labelled baseline |
 | 7 | Deployed application with the W2 flow working | Railway `copilot-agent` (agent) + `openemr` (module), both from `main` | `curl <agent>/ready \| jq` — six probes incl. vector index + reranker | ✅ |
 
 ---
@@ -121,18 +121,17 @@ via `turn.routed(...)` in [`supervisor.py`](../agent/src/copilot/graph/superviso
 [`context/planning/alerting.md`](../context/planning/alerting.md) — **eight** alerts A1–A8 (§2),
 each with threshold basis, meaning, and on-call response; wiring in §5b; dashboard in §5a.
 The three the PRD names for Week 2:
-**A6 extraction failure** (`extraction_error` score, count > 2/h — new score emitted by
+**A6 extraction failure** (`extraction_error` score, count > 1/h — new score emitted by
 `attach_and_extract`), **A7 RAG retrieval latency** (p95 of the `search_guidelines` span > 5 s,
 no code needed), **A8 eval regression** (CI-side in `evals.yml`, not Langfuse — the >5%
 between-run comparison is not expressible as a rolling-window monitor; §2 explains why).
-Four W2 dashboard tiles specified in §5a.
+**Six W2 dashboard tiles built** on "Clinical Co-pilot Ops" (§5a, each linked): ingestion count,
+extraction failures, retrieval latency, routing decisions, extraction field pass rate, retrieval hit
+rate. **SLOs measured, not guessed** (§5d): document ingestion p95 4.22 s → SLO < 8 s; evidence
+retrieval p95 3.05 s → SLO < 5 s, both from live production spans.
 
-**Open — two things, both named rather than papered over:**
-(a) §5d records an as-built audit showing **three live monitors are misconfigured** (A3 filters a
-score name that is never emitted; A5 has no score-name filter and sits permanently in ALERT; A1
-filters `traceName` instead of `name`). UI fixes, no write API.
-(b) Retrieval **hit rate** and per-worker cost are not emitted, so those two tiles are deferred to
-JOS-64 instead of faked. 🟡
+
+**All seven Langfuse monitors are live and filter-verified** (A1–A7; A8 is CI-side).
 
 ### 3.7 Backup and recovery
 `W2_ARCHITECTURE.md` §11.1 — a per-artifact RPO/RTO table and a 5-step manual recovery
@@ -152,10 +151,13 @@ honestly that the control is prompt-level plus eval-level. 🟡
 
 ### 3.9 Baseline CPU / memory / latency / throughput for W2 flows
 [`context/planning/loadtest-results.md`](../context/planning/loadtest-results.md) +
-harness at [`agent/loadtest/`](../agent/loadtest/README.md). Covers `POST /chat` at 10
-and 50 users. **Open:** the numbers predate the supervisor graph, and ingestion,
-extraction, and `/evidence` are unmeasured — so there is no W1-vs-W2 comparison on
-shared paths. 🟡
+harness at [`agent/loadtest/`](../agent/loadtest/README.md). **Latency is measured for W2**
+from 40 real production turns (p50 35.0s / p95 101.8s / p99 127.4s / mean 46.7s) with a
+per-component breakdown covering extraction, retrieval, and FHIR reads, plus an explicit
+W1-vs-W2 comparison. **CPU/memory measured** for all four prod services over the same
+window (agent 419 MB avg / 985 MB peak — ~2.6× Week-1, from in-process FastEmbed models).
+**Throughput derived** — 0.18 req/s @10 users, 0.84 @50, via Little's Law on the measured
+mean latency, calibrated against the Week-1 load test's realised 84%/78% efficiency. ✅
 
 ### 3.10 CI: build, lint/typecheck, tests, coverage, dependency audit, security scan
 Lint/typecheck/tests: [`agent-tests.yml`](../.github/workflows/agent-tests.yml) —
@@ -263,7 +265,12 @@ stricter than the stretch requirement, and cheaper.
 
 Ordered by grading risk:
 
-1. **W2 alerts + dashboard tiles** (§3.6) — 🟡 named explicitly in the PRD.
-2. **Re-measure cost + latency against the graph** (§1.6, §3.9) — 🟡 current numbers are Week-1's.
+1. **Re-baseline the A1/A4/A5 alert thresholds** (§3.6) — 🟡 the cost/latency refresh measured
+   **all three breached** by the Week-2 graph (p95 latency 101.8s vs the 60s page threshold;
+   p95 turn cost $0.311 vs $0.20; grounding 0.811 vs the 0.85 floor). They were set against
+   Week-1 behaviour, so they now fire constantly and carry no signal. Highest-value item here.
+2. **W2 alerts + dashboard tiles** (§3.6) — 🟡 named explicitly in the PRD.
 3. **PHI scrubbing: ship the mask or state the real control** (§3.8) — 🟡.
 4. **Enable a daily Railway backup schedule** (§3.7) — 🟡 currently none; RPO on documents + DB is ∞.
+5. **Optional, quoted not assumed:** a confirming load run for measured (vs derived) throughput
+   (~$12 live spend), and re-measuring per-hand-off latency once the nested-span fix promotes (§3.9).

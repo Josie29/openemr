@@ -386,8 +386,20 @@ class DocumentCitationBase(CitationBase):
 
     Absent ``bounding_box`` means the value could not be located on the page — the sidebar shows the
     citation without a rectangle, never a fabricated box (W2_ARCHITECTURE.md §3.3).
+
+    ``unverified`` is always ``True`` on this base: an uploaded document is what the PATIENT
+    supplied, not chart truth a clinician has confirmed or reconciled (AF-VULN-0001). It is the
+    machine-readable trust-boundary tag the sidebar binds a "unverified — from uploaded document"
+    badge to, and it is absent on :class:`FhirCitation`/:class:`GuidelineCitation` (a reader treats
+    its absence as verified). Do not let a fact carrying this drive a drug-interaction or safety
+    warning as though it were reconciled — see the citation rules in ``graph/workers.py``.
     """
 
+    unverified: Literal[True] = Field(
+        default=True,
+        description="Always true: this fact came from an unreconciled uploaded document, not the "
+        "chart. Surfaced with provenance; must not drive a safety/interaction warning as verified.",
+    )
     page: int | None = Field(
         default=None, description="1-based source page the value was read from."
     )

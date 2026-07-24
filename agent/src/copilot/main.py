@@ -43,6 +43,7 @@ from copilot.observability import (
 )
 from copilot.pricing import turn_cost_usd
 from copilot.rag.retriever import FixtureEvidenceRetriever, RetrievalError, build_retriever
+from copilot.rate_limit import RateLimitMiddleware
 from copilot.retrieval import ChunkRegistry
 from copilot.schemas import (
     ChatRequest,
@@ -441,7 +442,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if isinstance(client, HttpFhirClient):
             await client.aclose()
 
-    app = FastAPI(title="AgentForge Clinical Co-Pilot", version="0.1.0", lifespan=lifespan)
+    # The schema + interactive docs are served only when explicitly enabled (AF-VULN-0003). In prod
+    # `expose_api_docs` is False, so openapi_url/docs_url/redoc_url are None and FastAPI serves no
+    # route for them — an anonymous GET /openapi.json or /docs 404s. `build_openapi_spec` still
+    # works (it calls `.openapi()`, which does not need the route) and forces the flag on anyway.
+    expose_docs = settings.expose_api_docs
+    app = FastAPI(
+        title="AgentForge Clinical Co-Pilot",
+        version="0.1.0",
+        lifespan=lifespan,
+        openapi_url="/openapi.json" if expose_docs else None,
+        docs_url="/docs" if expose_docs else None,
+        redoc_url="/redoc" if expose_docs else None,
+    )
+    # Per-principal rate limiting (AF-VULN-0002). Added FIRST so it sits innermost, inside both the
+    # correlation and CORS layers below: a 429 it emits still passes back out through them, so the
+    # rejection carries an x-correlation-id and the browser's CORS headers. Correlation runs before
+    # it, so `current_correlation_id()` is populated when it builds the 429 body.
+    app.add_middleware(RateLimitMiddleware, settings=settings)
     app.add_middleware(CorrelationIdMiddleware)
     # Added last, so it wraps outermost and answers the browser's preflight before anything else.
     # The chat call originates in the physician's browser on the OpenEMR origin (ARCHITECTURE.md

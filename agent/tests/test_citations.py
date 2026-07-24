@@ -86,6 +86,37 @@ def test_fhir_ref_projects_to_a_fhir_citation() -> None:
     assert citation.quote_or_value == "1958-03-12"
 
 
+def test_document_ref_projects_with_the_unverified_trust_tag() -> None:
+    # AF-VULN-0001: a fact read off an uploaded medication_list is patient-reported, unreconciled.
+    # Its wire citation must carry unverified=True so the sidebar can badge it and no downstream
+    # step treats it as chart truth. Breaks if the trust tag is dropped from a document citation.
+    ref = SourceRef(
+        resource_type="MedicationRequest",
+        resource_id="d1#0",
+        field="value",
+        value="Warfarin 5 mg",
+        doc_type=DocType.MEDICATION_LIST,  # gate-stamped: this is a document fact
+        document_id="doc-meds",
+        page=1,
+    )
+    citation = ref.to_citation()
+
+    assert citation.source_type is CitationSourceType.MEDICATION_LIST
+    assert citation.unverified is True
+
+
+def test_chart_refs_carry_no_unverified_tag() -> None:
+    # The trust tag is exclusive to document-sourced claims: a verified FHIR record and a guideline
+    # chunk must NOT advertise it (its absence is what a reader treats as "verified").
+    fhir = SourceRef(resource_type="Patient", resource_id="1", field="birth_date", value="x")
+    guideline = SourceRef(
+        resource_type=GUIDELINE_RESOURCE_TYPE, resource_id="c", quote="q", value="q"
+    )
+
+    assert not hasattr(fhir.to_citation(), "unverified")
+    assert not hasattr(guideline.to_citation(), "unverified")
+
+
 def test_fhir_ref_without_a_field_uses_the_required_fallback() -> None:
     # Guards the contract's required-string invariant: a note claim (quote mode, no field) must
     # still produce a valid FhirCitation — field_or_chunk_id falls back rather than being empty.

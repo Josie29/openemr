@@ -285,6 +285,42 @@ class Settings(BaseSettings):
         description="Comma-separated browser origins, e.g. http://localhost:8301",
     )
 
+    # Per-principal request rate limiting (AF-VULN-0002). Every /chat turn drives a multi-agent LLM
+    # pipeline plus external OCR, so unbounded request volume is a cost-amplification / economic-DoS
+    # lever on a clinical system. Enabled by default (fail-closed); a caller is keyed by its SMART
+    # bearer token (hashed) or, tokenless, its client IP. Limits are per rolling window and split by
+    # route class so a /chat flood cannot exhaust the read budget. In-process + single-instance (see
+    # rate_limit.py) — the same assumption ConversationStore already makes.
+    rate_limit_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("COPILOT_RATE_LIMIT_ENABLED", "RATE_LIMIT_ENABLED"),
+    )
+    rate_limit_window_seconds: float = Field(
+        default=60.0, gt=0, description="Rolling window the per-route limits are counted over."
+    )
+    rate_limit_chat_per_window: int = Field(
+        default=20, gt=0, description="Max POST /chat turns one principal may make per window."
+    )
+    rate_limit_read_per_window: int = Field(
+        default=60,
+        gt=0,
+        description="Max read/other requests one principal may make per window (looser than chat).",
+    )
+    rate_limit_max_principals: int = Field(
+        default=10_000,
+        gt=0,
+        description="Cap on tracked principals; the oldest is evicted past it (bounds memory).",
+    )
+
+    # Whether to serve the OpenAPI schema (/openapi.json) and interactive docs (/docs, /redoc).
+    # Off by default so prod is closed without any Railway change (AF-VULN-0003): publishing the
+    # full route/parameter map to anonymous callers on a PHI system is a recon aid. Local dev opts
+    # in via COPILOT_EXPOSE_API_DOCS=true (.env.example); spec generation forces it on (openapi.py).
+    expose_api_docs: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("COPILOT_EXPOSE_API_DOCS", "EXPOSE_API_DOCS"),
+    )
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:

@@ -217,6 +217,23 @@ forbids. A policy gate in code (`BreakglassChecker`) is the correct shape, and i
 agents. Enforcement stays at the OpenEMR boundary that already owns the role/permission
 model, rather than being re-implemented (and drifting) inside the agent.
 
+**Perimeter hardening on the agent's public surface** (pentest findings AF-VULN-0002/0003, both in
+`agent/`). Two application-level controls sit on the FastAPI service in front of the authorization
+model above:
+
+- **Per-principal rate limiting** (`agent/src/copilot/rate_limit.py`). Every `/chat` turn drives a
+  multi-agent LLM pipeline plus external OCR, so request volume converts directly into compute and
+  spend — an economic denial-of-service lever on a clinical system. A pure-ASGI middleware (added
+  inside CORS + correlation, so a rejection still carries those headers) bounds each principal —
+  keyed by SMART-token hash, falling back to client IP — to a rolling-window request budget, split
+  so a `/chat` flood cannot exhaust the read budget. It advertises the standard `RateLimit-*`
+  headers and returns `429` + `Retry-After` when exceeded; liveness/readiness probes are exempt.
+  In-process and single-instance (the same assumption `ConversationStore` makes); a shared backend
+  is the multi-instance follow-up.
+- **Schema/docs gated in prod** (`expose_api_docs`, default off). `/openapi.json`, `/docs`, and
+  `/redoc` are served only when explicitly enabled (local dev); in prod an anonymous request 404s,
+  so the full route/parameter map is not published to unauthenticated callers on a PHI system.
+
 ---
 
 ## 6. The agent

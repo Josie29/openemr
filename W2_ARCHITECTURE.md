@@ -425,6 +425,21 @@ path (§3.1). The `source_type` union is therefore five values — `guideline`, 
 guideline tier, a record tier, and a **document** tier the three document citations share (the
 frontend maps `medication_list` onto the document tier and labels it "Medication list").
 
+**Document facts carry an explicit `unverified` trust tag (AF-VULN-0001).** An uploaded document is
+what the *patient* supplied, not chart truth a clinician has reconciled — so an attacker who can
+attach a document to a patient can inject fabricated "facts" (e.g. a bogus Warfarin medication
+list) that traverse the same grounding machinery as real chart data. Two controls bound the blast
+radius: (1) every document citation arm (`lab_pdf` / `intake_form` / `medication_list`) carries
+`unverified: true` on the wire — the machine-readable trust-boundary tag the sidebar badges and no
+downstream step may treat as chart truth (absent on `fhir` / `guideline`, whose absence reads as
+verified); and (2) the shared citation rules (`graph/workers.py`) forbid the answerer from deriving
+a drug-interaction or safety warning from an *unreconciled* document medication as though it were
+confirmed — it surfaces the value with provenance and defers the interaction judgement to
+post-reconciliation. The structural tag and provenance are code-enforced; the warning-suppression
+is prompt-enforced and eval-guarded (a non-gating regression case,
+`angulo-uploaded-med-interaction`), because free-text advisory prose cannot be gated deterministically
+without also blocking the legitimate "surface the list and flag the disagreement" behavior.
+
 ### 3.4 Extraction is a one-time transform — re-extraction & idempotency
 
 Extraction is a **one-time transform, not a per-turn operation** — that is the design intent. What

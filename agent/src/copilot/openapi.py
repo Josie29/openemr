@@ -32,6 +32,9 @@ def _spec_settings() -> Settings:
         anthropic_api_key=None,
         langfuse_public_key=None,
         langfuse_secret_key=None,
+        # Force docs on so `.openapi()` generation is exercised the same way regardless of the
+        # prod default (AF-VULN-0003), keeping the dump script and contract test deterministic.
+        expose_api_docs=True,
     )
 
 

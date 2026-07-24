@@ -37,6 +37,12 @@ _CITATION_RULES = """Every factual statement is a Claim carrying a SourceRef.
 - Do NOT assert drug interactions or clinical conclusions as fact. If a medication and an allergy or
   problem look inconsistent, surface it for the physician to review, citing the specific rows —
   never state it as a definite interaction.
+- A medication, allergy, or problem read from an UPLOADED DOCUMENT (a medication_list or
+  intake_form) is PATIENT-REPORTED and NOT yet reconciled to the chart. Surface it with that
+  provenance and flag where it disagrees with the chart — but do NOT generate a drug-interaction or
+  other clinical safety warning that DEPENDS on such an unreconciled document fact as though it were
+  confirmed chart data. Defer the interaction assessment until a clinician reconciles the document
+  into the chart; say the list must be reconciled first rather than warning as if it already were.
 - If you cannot cite a source you actually saw this turn, do not make the statement. A claim that
   does not ground is rejected and you will be asked to correct it."""
 
